@@ -20,7 +20,7 @@ KEDA `ScaledObject`, the same pattern as Kubernetes Deployment + HPA.
 Cluster matching uses standard Kubernetes labels. Pool matching uses
 open-ended capabilities with CEL expressions. `InferenceClass` captures
 hardware topology as a reusable named bundle, following the StorageClass
-pattern. Composition fields (parallelism, engine config) stay structured so
+pattern. Composition fields (topology, engine config) stay structured so
 the placement function can compose KServe LLMInferenceService correctly.
 
 ## Resource model
@@ -55,7 +55,7 @@ metadata:
 spec:
   description: "8x NVIDIA H200 SXM, NVLink Switch, InfiniBand 400Gbps"
 
-  # Open-ended key-value map. ModelDeployment.spec.poolSelector.cel
+  # Open-ended key-value map. ModelDeployment.spec.nodeSelector.cel
   # evaluates against these. Plain YAML scalars and lists for the common
   # case; {type: ..., value: ...} for versions or anything YAML can't
   # express natively.
@@ -73,8 +73,9 @@ spec:
     # implies a different class (h200-nvl-8x-ib vs h200-nvl-8x).
     network.interNode: infiniband
     network.interNodeBandwidthGbps: 400
-    # Decorated value — version semantics, not bare string comparison.
-    driver.version: {type: version, value: "535.129.03"}
+    # Decorated value — version semantics for correct comparison
+    # (e.g., 12.10.0 > 12.9.0 semantically but not lexicographically).
+    cuda.toolkit: {type: version, value: "12.4.0"}
 ```
 
 ```yaml
@@ -126,18 +127,15 @@ spec:
   nodePools:
   # Each pool references an InferenceClass for its hardware capabilities.
   # maxNodes is the pool's capacity ceiling — used by the scheduler to
-  # check whether a replica fits.
+  # check whether a replica fits. DRA handles device-to-node binding at
+  # pod admission time, so no nodeSelector is needed here.
   - name: frontier
     class: h200-nvl-8x-ib
     maxNodes: 4
-    nodeSelector:
-      modelplane.ai/pool: frontier
 
   - name: general
     class: h100-nvl-8x
     maxNodes: 8
-    nodeSelector:
-      modelplane.ai/pool: general
 ```
 
 ## ModelDeployment — Mixtral 8x7B
@@ -167,20 +165,23 @@ spec:
     matchLabels:
       modelplane.ai/tier: production
 
-  # Number of complete serving instances. Each replica is a separate
-  # ModelReplica targeting one InferenceCluster. For this deployment each
-  # replica is one pod with 2 GPUs. KEDA writes this field via the scale
+  # Number of complete serving instances. Each replica is one pod with
+  # 2 GPUs for this deployment. KEDA writes this field via the scale
   # subresource when a ScaledObject is present.
   replicas: 2
 
-  # Pool-level filter. count/perNode declare the physical shape; cel is
-  # the capability predicate. Together they ask the scheduler for a pool
-  # with at least 2 GPUs of >= 80GiB each, all on one node.
-  poolSelector:
-    count: 2
-    perNode: 2
+  # Node-level capability filter. CEL predicate over the pool's
+  # InferenceClass capabilities — scheduler only considers pools where
+  # this is true. DRA handles actual device binding at pod admission.
+  nodeSelector:
     cel: |
       capabilities["gpu.vramGiB"] >= 80
+
+  # Topology describes the compute shape of one ModelReplica. strategy is
+  # always required. Tensor: single-node TP. 2 GPUs → 1 node, 2 GPUs.
+  topology:
+    strategy: Tensor
+    tensor: 2
 
   engine:
     name: vLLM
@@ -246,22 +247,20 @@ spec:
 
   replicas: 1
 
-  # Multi-node shape: 16 total GPUs, 8 per node = 2 nodes per replica.
-  # The CEL predicate filters pools by capability — H200-class memory,
-  # FP8 support, and InfiniBand at 400Gbps for inter-node parallelism.
-  poolSelector:
-    count: 16
-    perNode: 8
+  # Node-level capability filter.
+  nodeSelector:
     cel: |
       capabilities["gpu.vramGiB"] >= 141 &&
       "fp8" in capabilities["gpu.features"] &&
       capabilities["network.interNode"] == "infiniband" &&
       capabilities["network.interNodeBandwidthGbps"] >= 400
 
-  # Structured parallelism — placement function maps these to KServe's
-  # LLMInferenceService.spec.parallelism. pipeline: 2 drives the
-  # LeaderWorkerSet group size; tensor: 8 informs the engine.
-  parallelism:
+  # Topology: TensorPipeline — TP within nodes, PP across nodes. The
+  # scheduler derives the physical shape: pipeline=2 → 2 nodes, tensor=8
+  # → 8 GPUs per node, 16 total. The placement function maps these to
+  # KServe's parallelism spec and LeaderWorkerSet group size.
+  topology:
+    strategy: TensorPipeline
     tensor: 8
     pipeline: 2
 
@@ -303,15 +302,14 @@ spec:
 
   replicas: 1
 
-  poolSelector:
-    count: 16
-    perNode: 8
+  nodeSelector:
     cel: |
       capabilities["gpu.architecture"] == "Hopper" &&
       "fp8" in capabilities["gpu.features"] &&
       capabilities["network.interNode"] == "infiniband"
 
-  parallelism:
+  topology:
+    strategy: TensorPipeline
     tensor: 8
     pipeline: 2
 
@@ -327,12 +325,17 @@ spec:
 
 ## Disaggregated prefill/decode
 
-A `ModelDeployment` is a discriminated union: either unified (root-level
-`poolSelector`, `parallelism`, `engine` — as shown in the examples above) or
-disaggregated (explicit `decode` and `prefill` blocks instead). Disagg blocks
-are self-contained — each carries its own `poolSelector`, `parallelism`, and
-`engine`. No inheritance from root, because explicit repetition is easier to
-reason about than implicit merge.
+The top-level `nodeSelector`, `topology`, and `engine` fields on a
+`ModelDeployment` are always the decode (or unified) settings. Adding a
+`prefill` block makes the deployment disaggregated. The `prefill` block is
+self-contained — it repeats all settings it needs rather than inheriting from
+the root, because explicit repetition is easier to reason about than implicit
+merge.
+
+Converting a unified deployment to disagg is purely additive — add a
+`prefill` block (and `topology.instances` on the decode side), and the
+existing top-level config becomes the decode config without any
+restructuring.
 
 ```yaml
 apiVersion: modelplane.ai/v1alpha1
@@ -351,41 +354,39 @@ spec:
 
   replicas: 1
 
-  # Disagg deployments use explicit decode/prefill blocks instead of
-  # root-level poolSelector/parallelism/engine.
+  # Top-level = decode settings. Same fields as a unified deployment.
+  # The presence of the prefill block below is what makes this disagg.
+  # topology.instances specifies how many independent decode units exist
+  # within one ModelReplica — the "3" in "5P3D".
+  nodeSelector:
+    cel: |
+      capabilities["gpu.vramGiB"] >= 141 &&
+      capabilities["network.interNode"] == "infiniband"
+  topology:
+    strategy: TensorPipeline
+    tensor: 8
+    pipeline: 2
+    instances: 3
+  engine:
+    name: vLLM
+    image: vllm/vllm-openai:v0.9.1
+    args:
+    - "--max-model-len=131072"
+    - "--gpu-memory-utilization=0.90"
+    - '--kv-transfer-config={"kv_role":"kv_consumer"}'
 
-  # Decode: memory-bandwidth-bound. Big GPUs, fewer pods, more parallelism.
-  decode:
-    pods: 3
-    poolSelector:
-      count: 24
-      perNode: 8
-      cel: |
-        capabilities["gpu.vramGiB"] >= 141 &&
-        capabilities["network.interNode"] == "infiniband"
-    parallelism:
-      tensor: 8
-      pipeline: 2
-    engine:
-      name: vLLM
-      image: vllm/vllm-openai:v0.9.1
-      args:
-      - "--max-model-len=131072"
-      - "--gpu-memory-utilization=0.90"
-      - '--kv-transfer-config={"kv_role":"kv_consumer"}'
-
-  # Prefill: compute-bound. More, smaller pods. Cheaper GPUs are fine.
-  # Different KV transfer role.
+  # Prefill: compute-bound, more instances, smaller GPUs, different KV
+  # transfer role. Self-contained — repeats everything it needs.
+  # topology.instances is the "5" in "5P3D".
   prefill:
-    pods: 5
-    poolSelector:
-      count: 5
-      perNode: 1
+    nodeSelector:
       cel: |
         capabilities["gpu.vramGiB"] >= 80 &&
         capabilities["network.interNode"] == "infiniband"
-    parallelism:
+    topology:
+      strategy: Tensor
       tensor: 1
+      instances: 5
     engine:
       name: vLLM
       image: vllm/vllm-openai:v0.9.1
@@ -395,13 +396,16 @@ spec:
 ```
 
 Each `ModelReplica` for this deployment composes one KServe
-`LLMInferenceService` containing all decode and prefill pods. Decode and
-prefill must land on the same `InferenceCluster` (KV cache transfer requires
-co-location), but can target different pools within that cluster. The
-scheduler verifies the cluster has capacity for both roles.
+`LLMInferenceService` with both decode and prefill workloads. The
+`topology.instances` on each role maps to `LLMInferenceService.spec.replicas`
+(decode) and `LLMInferenceService.spec.prefill.replicas` (prefill). Decode
+and prefill must land on the same `InferenceCluster` (KV cache transfer
+requires co-location), but can target different pools within that cluster.
+The scheduler verifies the cluster has capacity for both roles.
 
-Scaling `replicas` from 1 to 2 creates a second complete instance — another
-3 decode + 5 prefill pod set, scheduled independently.
+Scaling `spec.replicas` from 1 to 2 creates a second complete 5P3D instance
+— another full decode + prefill set, scheduled independently. The P:D ratio
+is a topology parameter (fixed per deployment), not a scaling knob.
 
 ## ModelEndpoint
 
@@ -565,7 +569,7 @@ can also be created to route to external services, using the same schema.
 - **Two-level matching, two mechanisms.** Cluster-level matching uses
   `spec.clusterSelector.matchLabels` against standard Kubernetes labels on
   `InferenceCluster` (organizational metadata: tier, region, provider).
-  Pool-level matching uses `spec.poolSelector.cel` against the typed
+  Node-level matching uses `spec.nodeSelector.cel` against the typed
   `capabilities` bundled by `InferenceClass` (hardware and networking
   facts).
 - **`InferenceClass` is the complete hardware context.** GPU topology and
@@ -587,25 +591,46 @@ can also be created to route to external services, using the same schema.
   weight checkpoints (different HuggingFace repos) — they're genuinely
   different deployments. If preferential scheduling is needed later, it
   would be a coordination mechanism between MDs, not inline profiles.
-- **Structured parallelism.** `parallelism: {tensor, pipeline, expert}` maps
-  directly to KServe's `LLMInferenceService.spec.parallelism`. Engine args
-  remain opaque and pass through to the engine container.
-- **Disagg as a discriminated union.** A ModelDeployment is either unified
-  (root `poolSelector`, `parallelism`, `engine`) or disaggregated (explicit
-  `decode` and `prefill` blocks). The disagg blocks are self-contained — no
-  inheritance from the root — because explicit repetition is easier to
-  reason about than implicit merge. Decode and prefill must land on the
-  same `InferenceCluster` (KV cache transfer needs co-location) but can
-  target different pools.
+- **Topology as a discriminated union.** `topology.strategy` is always
+  required: `Tensor` (single-node TP), `TensorPipeline` (TP within nodes,
+  PP across nodes), or `DataExpert` (DP+EP across nodes). Each strategy
+  determines which sibling fields are required and how the scheduler
+  derives the physical shape. `nodeSelector` carries only the CEL
+  capability predicate. `topology.instances` (default 1) specifies
+  per-role replication for disaggregated serving.
+
+  | Strategy | Required fields | Nodes per instance | GPUs per node | Total GPUs per instance |
+  |---|---|---|---|---|
+  | `Tensor` | `tensor` | 1 | `tensor` | `tensor` |
+  | `TensorPipeline` | `tensor`, `pipeline` | `pipeline` | `tensor` | `tensor * pipeline` |
+  | `DataExpert` | `tensor`, `data`, `dataLocal` | `data / dataLocal` | `dataLocal * tensor` | `data * tensor` |
+
+  Multiply by `instances` for the total per-role footprint within one
+  ModelReplica. The scheduler checks: does the matched pool's
+  `InferenceClass` have `gpu.count` >= GPUs-per-node, and does the pool
+  have enough available nodes for all instances across all roles?
+- **DRA required on all InferenceClusters.** No device-plugin fallback.
+  Modelplane always emits DRA `ResourceClaim`s for device binding. This
+  simplifies pool declarations (no `nodeSelector` labels needed) and the
+  composition function (one code path). Requires K8s 1.31+ with a DRA
+  driver on every cluster.
+- **Disagg is additive.** Top-level `nodeSelector`, `topology`, and
+  `engine` are always the decode (or unified) settings. Adding a `prefill`
+  block makes the deployment disaggregated — no restructuring needed. The
+  `prefill` block is self-contained (repeats all settings it needs, no
+  inheritance). The P:D ratio is expressed via `topology.instances` on
+  each role — it's a topology parameter (fixed per deployment), not a
+  scaling knob. Decode and prefill must land on the same
+  `InferenceCluster` (KV cache transfer needs co-location) but can target
+  different pools.
 - **Anti-affinity for replica spread.** When multiple replicas land on the
   same cluster, the scheduler spreads them across different node groups
   where capacity allows, to limit blast radius from node failures.
 - **Fleet scheduling, opinionated about Kubernetes features.** Modelplane
   picks `(InferenceCluster, pool)` per replica based on declared
-  capabilities and capacity. DRA is detected at runtime where available
-  and used for device binding; device-plugin is the fallback. The deployer
-  never configures this — it's an implementation detail of how Modelplane
-  composes pods.
+  capabilities and capacity. DRA is the device binding mechanism on every
+  cluster — the composition function emits `ResourceClaim`s derived from
+  the matched pool's `InferenceClass` capabilities.
 - **Kubernetes-native resource hierarchy.** `ModelDeployment` →
   `ModelReplica` → `ModelService` → `ModelEndpoint` mirrors `Deployment` →
   `Pod` → `Service` → `Endpoint`.
