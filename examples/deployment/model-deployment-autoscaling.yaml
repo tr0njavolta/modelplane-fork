@@ -1,5 +1,5 @@
 # A ModelDeployment with concurrency-based autoscaling, spread across two
-# environments for availability.
+# clusters for availability.
 #
 # Scaling uses KEDA to watch active concurrent requests per replica via
 # Prometheus. When the average concurrency exceeds the target (adjusted by
@@ -14,7 +14,7 @@ spec:
   modelRef:
     name: qwen-2-5-0-5b
 
-  environments: 2
+  clusters: 2
 
   scaling:
     signal: Concurrency

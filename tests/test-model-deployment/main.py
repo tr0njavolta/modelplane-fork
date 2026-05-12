@@ -1,9 +1,9 @@
 from .lib import resource as libresource
 from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
-from .model.ai.modelplane.inferenceenvironment import v1alpha1 as iev1alpha1
+from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from .model.ai.modelplane.inferencegateway import v1alpha1 as igwv1alpha1
 from .model.ai.modelplane.modeldeployment import v1alpha1 as mdv1alpha1
-from .model.ai.modelplane.modelplacement import v1alpha1 as mpv1alpha1
+from .model.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
 from .model.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 from .model.io.upbound.dev.meta.compositiontest import v1alpha1 as compositiontest
 
@@ -21,22 +21,22 @@ test = compositiontest.CompositionTest(
         # These are resources the function reads but doesn't own, resolved
         # by Crossplane at runtime via response.require_resources().
         extraResources=[
-            # A ready InferenceEnvironment with KServe backend and one L4 pool.
+            # A ready InferenceCluster with KServe backend and one L4 pool.
             libresource.model_to_fixture(
-                iev1alpha1.InferenceEnvironment(
+                icv1alpha1.InferenceCluster(
                     metadata=metav1.ObjectMeta(
                         name="demo-us-central",
-                        labels={"modelplane.ai/environment": "true"},
+                        labels={"modelplane.ai/cluster": "true"},
                     ),
-                    spec=iev1alpha1.Spec(cluster=iev1alpha1.Cluster(source="Existing")),
-                    status=iev1alpha1.Status(
-                        providerConfigRef=iev1alpha1.ProviderConfigRef(
+                    spec=icv1alpha1.Spec(cluster=icv1alpha1.Cluster(source="Existing")),
+                    status=icv1alpha1.Status(
+                        providerConfigRef=icv1alpha1.ProviderConfigRef(
                             name="demo-us-central-cluster",
                         ),
-                        gateway=iev1alpha1.Gateway(address="34.55.100.10"),
-                        capacity=iev1alpha1.Capacity(
+                        gateway=icv1alpha1.Gateway(address="34.55.100.10"),
+                        capacity=icv1alpha1.Capacity(
                             gpuPools=[
-                                iev1alpha1.GpuPool(
+                                icv1alpha1.GpuPool(
                                     acceleratorType="nvidia-l4",
                                     countPerNode=1,
                                     nodes=2,
@@ -84,7 +84,7 @@ test = compositiontest.CompositionTest(
             ),
         ],
         assertResources=[
-            # Assert the XR has status populated with model name and placement
+            # Assert the XR has status populated with model name and replica
             # count, plus the unified endpoint URL from the inference gateway.
             libresource.model_to_dict(
                 mdv1alpha1.ModelDeployment(
@@ -96,13 +96,13 @@ test = compositiontest.CompositionTest(
                         modelRef=mdv1alpha1.ModelRef(
                             name="qwen-0.5b",
                         ),
-                        environments=1,
+                        clusters=1,
                     ),
                     status=mdv1alpha1.Status(
                         model=mdv1alpha1.Model(
                             name="Qwen/Qwen2.5-0.5B-Instruct",
                         ),
-                        placements=mdv1alpha1.Placements(
+                        replicas=mdv1alpha1.Replicas(
                             total=1,
                             ready=0,
                         ),
@@ -112,26 +112,26 @@ test = compositiontest.CompositionTest(
                     ),
                 )
             ),
-            # Assert a ModelPlacement is composed for the matched environment.
+            # Assert a ModelReplica is composed for the matched cluster.
             libresource.model_to_dict(
-                mpv1alpha1.ModelPlacement(
+                mrv1alpha1.ModelReplica(
                     metadata=metav1.ObjectMeta(
                         annotations={
-                            "crossplane.io/composition-resource-name": "placement-demo-us-central",
+                            "crossplane.io/composition-resource-name": "replica-demo-us-central",
                         },
                         name="qwen-demo-demo-us-central",
                         namespace="ml-team",
                         labels={
-                            "modelplane.ai/placement": "true",
+                            "modelplane.ai/replica": "true",
                             "modelplane.ai/deployment": "qwen-demo",
                         },
                     ),
-                    spec=mpv1alpha1.Spec(
-                        modelRef=mpv1alpha1.ModelRef(
+                    spec=mrv1alpha1.Spec(
+                        modelRef=mrv1alpha1.ModelRef(
                             kind="ClusterModel",
                             name="qwen-0.5b",
                         ),
-                        inferenceEnvironmentRef=mpv1alpha1.InferenceEnvironmentRef(
+                        inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
                             name="demo-us-central",
                         ),
                     ),

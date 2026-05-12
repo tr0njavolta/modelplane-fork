@@ -6,4 +6,4 @@ metadata:
 spec:
   modelRef:
     name: llama-405b
-  environments: 1
+  clusters: 1

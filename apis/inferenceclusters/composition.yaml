@@ -1,13 +1,13 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: inferenceenvironments.modelplane.ai
+  name: inferenceclusters.modelplane.ai
 spec:
   compositeTypeRef:
     apiVersion: modelplane.ai/v1alpha1
-    kind: InferenceEnvironment
+    kind: InferenceCluster
   mode: Pipeline
   pipeline:
   - functionRef:
-      name: modelplane-modelplanecompose-inference-env
-    step: compose-inference-env
+      name: modelplane-modelplanecompose-inference-cluster
+    step: compose-inference-cluster

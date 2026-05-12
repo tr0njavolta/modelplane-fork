@@ -1,6 +1,6 @@
 # The InferenceGateway creates a unified, OpenAI-compatible endpoint on the
 # control plane cluster. It installs Envoy Gateway and creates a Gateway that
-# routes traffic to model placements on remote inference environments.
+# routes traffic to model replicas on remote inference clusters.
 #
 # Create one InferenceGateway per control plane. It must be named "default".
 #

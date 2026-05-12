@@ -12,8 +12,8 @@ This page explains the key resources and how they relate.
 graph TD
     subgraph "Platform team"
         IG[InferenceGateway]
-        IE1[InferenceEnvironment<br><i>gke-us-central</i>]
-        IE2[InferenceEnvironment<br><i>byo-us-east</i>]
+        IC1[InferenceCluster<br><i>gke-us-central</i>]
+        IC2[InferenceCluster<br><i>byo-us-east</i>]
         CM[ClusterModel<br><i>qwen-2-5-0-5b</i>]
     end
 
@@ -22,19 +22,19 @@ graph TD
     end
 
     subgraph "Created by Modelplane"
-        MP1[ModelPlacement<br><i>qwen-demo-gke-us-central</i>]
-        MP2[ModelPlacement<br><i>qwen-demo-byo-us-east</i>]
+        MR1[ModelReplica<br><i>qwen-demo-gke-us-central</i>]
+        MR2[ModelReplica<br><i>qwen-demo-byo-us-east</i>]
     end
 
     MD -- "references" --> CM
-    MD -- "scheduler selects" --> IE1
-    MD -- "scheduler selects" --> IE2
-    MD -. "creates" .-> MP1
-    MD -. "creates" .-> MP2
-    MP1 -- "deploys to" --> IE1
-    MP2 -- "deploys to" --> IE2
-    IG -- "routes traffic to" --> MP1
-    IG -- "routes traffic to" --> MP2
+    MD -- "scheduler selects" --> IC1
+    MD -- "scheduler selects" --> IC2
+    MD -. "creates" .-> MR1
+    MD -. "creates" .-> MR2
+    MR1 -- "deploys to" --> IC1
+    MR2 -- "deploys to" --> IC2
+    IG -- "routes traffic to" --> MR1
+    IG -- "routes traffic to" --> MR2
 ```
 
 ## InferenceGateway
@@ -42,7 +42,7 @@ graph TD
 The InferenceGateway creates a unified, OpenAI-compatible endpoint on the
 control plane cluster. It installs [Envoy
 Gateway](https://gateway.envoyproxy.io) and creates a Gateway that routes
-requests to model placements on remote inference environments.
+requests to model replicas on remote inference clusters.
 
 Create one InferenceGateway per control plane. It must be named `default`. When
 running the control plane in kind, set `loadBalancer: MetalLB` to get a
@@ -55,12 +55,12 @@ status:
 kubectl get ig default
 ```
 
-## InferenceEnvironment
+## InferenceCluster
 
-An InferenceEnvironment represents a Kubernetes cluster configured for model
+An InferenceCluster represents a Kubernetes cluster configured for model
 serving. Platform teams create these to provide GPU capacity.
 
-Each environment has:
+Each cluster has:
 
 - A **cluster source**: `GKE` (Modelplane provisions the full cluster) or
   `Existing` (bring a cluster you manage yourself).
@@ -69,12 +69,12 @@ Each environment has:
 Modelplane installs the inference stack (including cert-manager, Envoy Gateway,
 Prometheus, and KEDA) on the cluster automatically.
 
-The environment's GPU capacity is used by the scheduler when placing models. For
+The cluster's GPU capacity is used by the scheduler when placing models. For
 `GKE` clusters, the capacity is computed from the node pool configuration. For
 `Existing` clusters, you describe the node pools so the scheduler knows what's
 available.
 
-Environments must have the label `modelplane.ai/environment: "true"` to be
+InferenceClusters must have the label `modelplane.ai/cluster: "true"` to be
 discoverable by the scheduler.
 
 ## ClusterModel and Model
@@ -88,7 +88,7 @@ platform catalog. It describes:
   and a container image.
 
 Serving profiles are listed in priority order. When the scheduler places a model
-on an environment, it picks the first applicable profile.
+on a cluster, it picks the first applicable profile.
 
 ML teams don't need to know about serving profiles. They reference a catalog
 model by name and the platform decides how to serve it.
@@ -96,19 +96,18 @@ model by name and the platform decides how to serve it.
 ## ModelDeployment
 
 A ModelDeployment is the ML team's interface. It says "deploy this model to N
-environments" and produces a working endpoint.
+clusters" and produces a working endpoint.
 
 When a ModelDeployment is created, the scheduler:
 
-1. Discovers all InferenceEnvironments with the `modelplane.ai/environment`
-   label.
-2. Applies any `environmentSelector` label filter from the deployment.
+1. Discovers all InferenceClusters with the `modelplane.ai/cluster` label.
+2. Applies any `clusterSelector` label filter from the deployment.
 3. Selects a serving profile from the model's catalog entry.
 4. Checks GPU capacity (model VRAM vs available pool VRAM, minus other
-   placements).
-5. Creates a ModelPlacement for each selected environment.
+   replicas).
+5. Creates a ModelReplica for each selected cluster.
 6. Creates an HTTPRoute on the control plane gateway to route traffic to the
-   placements.
+   replicas.
 
 The deployment's endpoint URL follows this pattern:
 
@@ -119,20 +118,20 @@ The deployment's endpoint URL follows this pattern:
 
 ModelDeployments support two scaling modes:
 
-- **Fixed**: a static number of replicas per placement.
+- **Fixed**: a static number of replicas per ModelReplica.
 - **Concurrency**: autoscaling based on active concurrent requests per replica,
   using KEDA and Prometheus. Supports scale-to-zero when `minReplicas` is 0.
 
 The default is fixed scaling with 1 replica.
 
-## ModelPlacement
+## ModelReplica
 
-A ModelPlacement is created by the ModelDeployment's composition function. Users
+A ModelReplica is created by the ModelDeployment's composition function. Users
 don't create these directly.
 
-Each placement represents a model deployed to a specific environment. It
-resolves the serving profile, computes how many GPUs the model needs, and
-creates the inference resources (an `LLMInferenceService`) on the remote cluster.
+Each replica represents a model deployed to a specific cluster. It resolves the
+serving profile, computes how many GPUs the model needs, and creates the
+inference resources (an `LLMInferenceService`) on the remote cluster.
 
-The placement also creates an Envoy Gateway `Backend` on the control plane to
+The replica also creates an Envoy Gateway `Backend` on the control plane to
 route traffic from the gateway to the remote cluster's inference endpoint.

@@ -21,9 +21,9 @@ spec:
     - name: MODEL
       type: string
       jsonPath: .spec.modelRef.name
-    - name: ENVS
+    - name: CLUSTERS
       type: string
-      jsonPath: .status.placements.ready
+      jsonPath: .status.replicas.ready
     - name: ENDPOINT
       type: string
       jsonPath: .status.endpoint.url
@@ -37,7 +37,7 @@ spec:
         properties:
           spec:
             type: object
-            required: [modelRef, environments]
+            required: [modelRef, clusters]
             properties:
               modelRef:
                 type: object
@@ -52,17 +52,17 @@ spec:
                     default: ClusterModel
                   name:
                     type: string
-              environments:
+              clusters:
                 type: integer
                 minimum: 1
                 maximum: 10
                 description: >-
-                  How many InferenceEnvironments to deploy to.
-              environmentSelector:
+                  How many InferenceClusters to deploy to.
+              clusterSelector:
                 type: object
                 description: >-
-                  Optional label selector to filter environments.
-                  If omitted, all ready environments are candidates.
+                  Optional label selector to filter clusters.
+                  If omitted, all ready clusters are candidates.
                 properties:
                   matchLabels:
                     type: object
@@ -156,8 +156,8 @@ spec:
                     type: string
                     description: >-
                       Unified OpenAI-compatible endpoint URL. Routes
-                      across all healthy placements.
-              placements:
+                      across all healthy replicas.
+              replicas:
                 type: object
                 properties:
                   total:

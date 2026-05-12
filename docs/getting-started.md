@@ -210,7 +210,7 @@ EOF
 ## Create the InferenceGateway
 
 The InferenceGateway installs Envoy Gateway and MetalLB on the control plane
-cluster and creates a Gateway that routes traffic to model placements.
+cluster and creates a Gateway that routes traffic to model replicas.
 
 ```bash
 kubectl apply -f examples/platform/inference-gateway.yaml
@@ -230,21 +230,21 @@ Register Qwen 2.5 0.5B in the catalog:
 kubectl apply -f examples/platform/cluster-model.yaml
 ```
 
-## Create an InferenceEnvironment
+## Create an InferenceCluster
 
 Edit the example to set your GCP project ID, then apply it:
 
 ```bash
-# Edit examples/platform/inference-environment-gke.yaml and set
+# Edit examples/platform/inference-cluster-gke.yaml and set
 # spec.cluster.gke.project to your GCP project ID.
-kubectl apply -f examples/platform/inference-environment-gke.yaml
+kubectl apply -f examples/platform/inference-cluster-gke.yaml
 ```
 
 This provisions a GKE cluster with an L4 GPU and installs the inference stack.
 It's the longest step, taking roughly 20-30 minutes.
 
 ```bash
-kubectl get ie --watch
+kubectl get ic --watch
 # Wait until READY shows True, then Ctrl-C.
 ```
 
@@ -257,9 +257,8 @@ kubectl create namespace ml-team
 kubectl apply -f examples/deployment/model-deployment.yaml
 ```
 
-The scheduler matches the model's serving profile to the environment, checks GPU
-capacity, and creates a ModelPlacement. Wait for the placement to
-become ready:
+The scheduler matches the model's serving profile to the cluster, checks GPU
+capacity, and creates a ModelReplica. Wait for the replica to become ready:
 
 ```bash
 kubectl get md -n ml-team --watch
@@ -292,9 +291,9 @@ kubectl get md qwen-demo -n ml-team -o jsonpath='{.status.endpoint.url}'
 
 ## Clean up
 
-Delete the ModelDeployment before the InferenceEnvironment. If you delete the
-environment first, the deployment will be stuck trying to reconcile against an
-environment that's being torn down.
+Delete the ModelDeployment before the InferenceCluster. If you delete the
+cluster first, the deployment will be stuck trying to reconcile against a
+cluster that's being torn down.
 
 Wait for the GKE cluster to be fully deprovisioned before deleting the kind
 cluster. If you delete the kind cluster while Crossplane is still cleaning up,
@@ -302,10 +301,10 @@ the GKE resources will be orphaned.
 
 ```bash
 kubectl delete md --all -n ml-team
-kubectl delete ie --all
+kubectl delete ic --all
 
-# Wait for the InferenceEnvironment to be fully deleted.
-kubectl get ie --watch
+# Wait for the InferenceCluster to be fully deleted.
+kubectl get ic --watch
 # Wait until no resources remain, then Ctrl-C.
 
 kind delete cluster --name modelplane

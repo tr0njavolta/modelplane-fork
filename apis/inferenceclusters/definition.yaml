@@ -1,14 +1,14 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: inferenceenvironments.modelplane.ai
+  name: inferenceclusters.modelplane.ai
 spec:
   group: modelplane.ai
   names:
     categories: [crossplane, modelplane]
-    kind: InferenceEnvironment
-    plural: inferenceenvironments
-    shortNames: [ie]
+    kind: InferenceCluster
+    plural: inferenceclusters
+    shortNames: [ic]
   scope: Cluster
   versions:
   - name: v1alpha1
@@ -99,10 +99,9 @@ spec:
                         description: >-
                           Declared GPU capacity of the existing cluster.
                           Used by the scheduler to match models to
-                          compatible environments. If omitted, the
-                          environment reports no GPU capacity and only
-                          models with no GPU requirements can be
-                          scheduled.
+                          compatible clusters. If omitted, the cluster
+                          reports no GPU capacity and only models with
+                          no GPU requirements can be scheduled.
                         maxItems: 8
                         x-kubernetes-list-type: map
                         x-kubernetes-list-map-keys: [name]
@@ -242,7 +241,7 @@ spec:
                     type: string
                     description: >-
                       Name of the ProviderConfig targeting the remote cluster.
-                      Used by ModelPlacement to create resources on the cluster.
+                      Used by ModelReplica to create resources on the cluster.
               gateway:
                 type: object
                 properties:

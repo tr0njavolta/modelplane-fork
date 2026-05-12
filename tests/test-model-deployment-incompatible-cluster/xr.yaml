@@ -6,4 +6,4 @@ metadata:
 spec:
   modelRef:
     name: qwen-0.5b
-  environments: 1
+  clusters: 1

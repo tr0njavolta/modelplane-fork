@@ -1,18 +1,18 @@
-# An InferenceEnvironment backed by a GKE cluster.
+# An InferenceCluster backed by a GKE cluster.
 #
 # Modelplane provisions the full GKE cluster (VPC, subnet, node pools, service
 # account, IAM bindings) and installs the inference stack (cert-manager,
 # Envoy Gateway, Prometheus, KEDA, LeaderWorkerSet).
 #
-# The modelplane.ai/environment label is required for the ModelDeployment
-# scheduler to discover this environment. Add additional labels to control
-# placement via environmentSelector.
+# The modelplane.ai/cluster label is required for the ModelDeployment
+# scheduler to discover this cluster. Add additional labels to control
+# placement via clusterSelector.
 apiVersion: modelplane.ai/v1alpha1
-kind: InferenceEnvironment
+kind: InferenceCluster
 metadata:
   name: gke-us-central
   labels:
-    modelplane.ai/environment: "true"
+    modelplane.ai/cluster: "true"
     modelplane.ai/region: us-central
 spec:
   cluster:

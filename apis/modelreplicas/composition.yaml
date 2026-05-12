@@ -1,13 +1,13 @@
 apiVersion: apiextensions.crossplane.io/v1
 kind: Composition
 metadata:
-  name: modelplacements.modelplane.ai
+  name: modelreplicas.modelplane.ai
 spec:
   compositeTypeRef:
     apiVersion: modelplane.ai/v1alpha1
-    kind: ModelPlacement
+    kind: ModelReplica
   mode: Pipeline
   pipeline:
   - functionRef:
-      name: modelplane-modelplanecompose-model-placement
-    step: compose-model-placement
+      name: modelplane-modelplanecompose-model-replica
+    step: compose-model-replica

@@ -1,5 +1,5 @@
 from .lib import resource as libresource
-from .model.ai.modelplane.inferenceenvironment import v1alpha1 as iev1alpha1
+from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from .model.ai.modelplane.infrastructure.gkecluster import v1alpha1 as gkev1alpha1
 from .model.ai.modelplane.infrastructure.kservebackend import v1alpha1 as kssv1alpha1
 from .model.io.crossplane.m.kubernetes.clusterproviderconfig import (
@@ -10,12 +10,12 @@ from .model.io.upbound.dev.meta.compositiontest import v1alpha1 as compositionte
 
 test = compositiontest.CompositionTest(
     metadata=metav1.ObjectMeta(
-        name="inference-env-basic",
+        name="inference-cluster-basic",
     ),
     spec=compositiontest.Spec(
-        compositionPath="apis/inferenceenvironments/composition.yaml",
-        xrPath="tests/test-inference-env/xr.yaml",
-        xrdPath="apis/inferenceenvironments/definition.yaml",
+        compositionPath="apis/inferenceclusters/composition.yaml",
+        xrPath="tests/test-inference-cluster/xr.yaml",
+        xrdPath="apis/inferenceclusters/definition.yaml",
         timeoutSeconds=120,
         validate=False,
         # Simulate a second reconcile where the GKECluster is observed and
@@ -71,27 +71,27 @@ test = compositiontest.CompositionTest(
             # Assert the XR has status populated with providerConfigRef,
             # namespace, and GPU capacity.
             libresource.model_to_dict(
-                iev1alpha1.InferenceEnvironment(
+                icv1alpha1.InferenceCluster(
                     metadata=metav1.ObjectMeta(
                         name="demo-us-central",
                     ),
-                    spec=iev1alpha1.Spec(
-                        cluster=iev1alpha1.Cluster(
+                    spec=icv1alpha1.Spec(
+                        cluster=icv1alpha1.Cluster(
                             source="GKE",
-                            gke=iev1alpha1.Gke(
+                            gke=icv1alpha1.Gke(
                                 project="my-gcp-project",
                                 region="us-central1",
                                 nodePools=[
-                                    iev1alpha1.NodePoolModel(
+                                    icv1alpha1.NodePoolModel(
                                         name="system",
                                         role="System",
                                         machineType="e2-standard-4",
                                     ),
-                                    iev1alpha1.NodePoolModel(
+                                    icv1alpha1.NodePoolModel(
                                         name="gpu-l4",
                                         role="GPU",
                                         machineType="g2-standard-8",
-                                        gpu=iev1alpha1.GpuModel(
+                                        gpu=icv1alpha1.GpuModel(
                                             acceleratorType="nvidia-l4",
                                             acceleratorCount=1,
                                             memory="24Gi",
@@ -103,14 +103,14 @@ test = compositiontest.CompositionTest(
                             ),
                         ),
                     ),
-                    status=iev1alpha1.Status(
-                        providerConfigRef=iev1alpha1.ProviderConfigRef(
+                    status=icv1alpha1.Status(
+                        providerConfigRef=icv1alpha1.ProviderConfigRef(
                             name="demo-us-central-cluster-kubeconfig",
                         ),
                         namespace="modelplane-system",
-                        capacity=iev1alpha1.Capacity(
+                        capacity=icv1alpha1.Capacity(
                             gpuPools=[
-                                iev1alpha1.GpuPool(
+                                icv1alpha1.GpuPool(
                                     acceleratorType="nvidia-l4",
                                     memory="24Gi",
                                     nodes=2,
@@ -165,7 +165,7 @@ test = compositiontest.CompositionTest(
                 )
             ),
             # Assert ClusterProviderConfig is composed for cross-namespace
-            # Object creation by ModelPlacements.
+            # Object creation by ModelReplicas.
             libresource.model_to_dict(
                 k8scpcv1alpha1.ClusterProviderConfig(
                     metadata=metav1.ObjectMeta(

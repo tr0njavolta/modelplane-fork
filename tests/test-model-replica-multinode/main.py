@@ -1,4 +1,4 @@
-"""Test multi-node KServe placement.
+"""Test multi-node KServe replica.
 
 A 405B model at FP16 needs ~810GiB of VRAM. An 8xH100 node has 640GiB
 (8 * 80GiB). compute_gpus() should return total=11 GPUs, per_node=8,
@@ -12,20 +12,20 @@ The LLMInferenceService should have:
 
 from .lib import resource as libresource
 from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
-from .model.ai.modelplane.inferenceenvironment import v1alpha1 as iev1alpha1
-from .model.ai.modelplane.modelplacement import v1alpha1 as mpv1alpha1
+from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
+from .model.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
 from .model.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 from .model.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 from .model.io.upbound.dev.meta.compositiontest import v1alpha1 as compositiontest
 
 test = compositiontest.CompositionTest(
     metadata=metav1.ObjectMeta(
-        name="model-placement-kserve-multinode",
+        name="model-replica-kserve-multinode",
     ),
     spec=compositiontest.Spec(
-        compositionPath="apis/modelplacements/composition.yaml",
-        xrPath="tests/test-model-placement-multinode/xr.yaml",
-        xrdPath="apis/modelplacements/definition.yaml",
+        compositionPath="apis/modelreplicas/composition.yaml",
+        xrPath="tests/test-model-replica-multinode/xr.yaml",
+        xrdPath="apis/modelreplicas/definition.yaml",
         timeoutSeconds=120,
         validate=False,
         extraResources=[
@@ -58,20 +58,20 @@ test = compositiontest.CompositionTest(
             ),
             # 3-node H100 cluster: 8 GPUs per node = 24 total.
             libresource.model_to_fixture(
-                iev1alpha1.InferenceEnvironment(
+                icv1alpha1.InferenceCluster(
                     metadata=metav1.ObjectMeta(
                         name="h100-cluster",
-                        labels={"modelplane.ai/environment": "true"},
+                        labels={"modelplane.ai/cluster": "true"},
                     ),
-                    spec=iev1alpha1.Spec(cluster=iev1alpha1.Cluster(source="Existing")),
-                    status=iev1alpha1.Status(
-                        providerConfigRef=iev1alpha1.ProviderConfigRef(
+                    spec=icv1alpha1.Spec(cluster=icv1alpha1.Cluster(source="Existing")),
+                    status=icv1alpha1.Status(
+                        providerConfigRef=icv1alpha1.ProviderConfigRef(
                             name="h100-cluster-kubeconfig",
                         ),
-                        gateway=iev1alpha1.Gateway(address="10.0.0.1"),
-                        capacity=iev1alpha1.Capacity(
+                        gateway=icv1alpha1.Gateway(address="10.0.0.1"),
+                        capacity=icv1alpha1.Capacity(
                             gpuPools=[
-                                iev1alpha1.GpuPool(
+                                icv1alpha1.GpuPool(
                                     acceleratorType="nvidia-h100-80gb",
                                     nodes=3,
                                     countPerNode=8,
@@ -86,25 +86,25 @@ test = compositiontest.CompositionTest(
         assertResources=[
             # Assert status shows 11 total GPUs.
             libresource.model_to_dict(
-                mpv1alpha1.ModelPlacement(
+                mrv1alpha1.ModelReplica(
                     metadata=metav1.ObjectMeta(
                         name="llama405b-h100-cluster",
                         namespace="ml-team",
                     ),
-                    spec=mpv1alpha1.Spec(
-                        modelRef=mpv1alpha1.ModelRef(name="llama-405b"),
-                        inferenceEnvironmentRef=mpv1alpha1.InferenceEnvironmentRef(
+                    spec=mrv1alpha1.Spec(
+                        modelRef=mrv1alpha1.ModelRef(name="llama-405b"),
+                        inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
                             name="h100-cluster",
                         ),
                     ),
-                    status=mpv1alpha1.Status(
-                        model=mpv1alpha1.Model(
+                    status=mrv1alpha1.Status(
+                        model=mrv1alpha1.Model(
                             name="meta-llama/Llama-3.1-405B",
                         ),
-                        resources=mpv1alpha1.Resources(
-                            gpu=mpv1alpha1.Gpu(count=11),
+                        resources=mrv1alpha1.Resources(
+                            gpu=mrv1alpha1.Gpu(count=11),
                         ),
-                        endpoint=mpv1alpha1.Endpoint(
+                        endpoint=mrv1alpha1.Endpoint(
                             url="http://10.0.0.1/default/model-llama-405b/v1",
                         ),
                     ),

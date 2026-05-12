@@ -1,18 +1,18 @@
 from .lib import resource as libresource
 from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
-from .model.ai.modelplane.inferenceenvironment import v1alpha1 as iev1alpha1
+from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from .model.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 from .model.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 from .model.io.upbound.dev.meta.compositiontest import v1alpha1 as compositiontest
 
 test = compositiontest.CompositionTest(
     metadata=metav1.ObjectMeta(
-        name="model-placement-kserve-autoscaling",
+        name="model-replica-kserve-autoscaling",
     ),
     spec=compositiontest.Spec(
-        compositionPath="apis/modelplacements/composition.yaml",
-        xrPath="tests/test-model-placement-autoscaling/xr.yaml",
-        xrdPath="apis/modelplacements/definition.yaml",
+        compositionPath="apis/modelreplicas/composition.yaml",
+        xrPath="tests/test-model-replica-autoscaling/xr.yaml",
+        xrdPath="apis/modelreplicas/definition.yaml",
         timeoutSeconds=120,
         validate=False,
         extraResources=[
@@ -43,20 +43,20 @@ test = compositiontest.CompositionTest(
                 )
             ),
             libresource.model_to_fixture(
-                iev1alpha1.InferenceEnvironment(
+                icv1alpha1.InferenceCluster(
                     metadata=metav1.ObjectMeta(
                         name="kserve-us-east",
-                        labels={"modelplane.ai/environment": "true"},
+                        labels={"modelplane.ai/cluster": "true"},
                     ),
-                    spec=iev1alpha1.Spec(cluster=iev1alpha1.Cluster(source="Existing")),
-                    status=iev1alpha1.Status(
-                        providerConfigRef=iev1alpha1.ProviderConfigRef(
+                    spec=icv1alpha1.Spec(cluster=icv1alpha1.Cluster(source="Existing")),
+                    status=icv1alpha1.Status(
+                        providerConfigRef=icv1alpha1.ProviderConfigRef(
                             name="kserve-us-east-cluster",
                         ),
-                        gateway=iev1alpha1.Gateway(address="34.55.100.10"),
-                        capacity=iev1alpha1.Capacity(
+                        gateway=icv1alpha1.Gateway(address="34.55.100.10"),
+                        capacity=icv1alpha1.Capacity(
                             gpuPools=[
-                                iev1alpha1.GpuPool(
+                                icv1alpha1.GpuPool(
                                     acceleratorType="nvidia-l4",
                                     countPerNode=1,
                                     nodes=8,

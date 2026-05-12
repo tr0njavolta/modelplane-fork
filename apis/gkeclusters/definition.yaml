@@ -177,7 +177,7 @@ spec:
                           type: string
                           description: >-
                             Per-GPU VRAM (e.g. "80Gi"). Reported on the
-                            consuming InferenceEnvironment's status and
+                            consuming InferenceCluster's status and
                             used by the scheduler.
                           minLength: 1
                           maxLength: 16

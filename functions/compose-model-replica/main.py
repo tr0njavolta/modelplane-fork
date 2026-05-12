@@ -1,7 +1,7 @@
-"""Deploy a model on a single InferenceEnvironment.
+"""Deploy a model on a single InferenceCluster.
 
 This function reads the referenced ClusterModel (or Model) and
-InferenceEnvironment via required resources, resolves the matching serving
+InferenceCluster via required resources, resolves the matching serving
 profile, computes GPU count from model VRAM vs pool VRAM, and composes
 resources on the remote cluster.
 
@@ -18,20 +18,19 @@ from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 from .lib import conditions, defaults, metadata, naming, prometheus, quantities, serving
 from .lib import resource as libresource
 from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
-from .model.ai.modelplane.inferenceenvironment import v1alpha1 as iev1alpha1
+from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from .model.ai.modelplane.model import v1alpha1 as mv1alpha1
-from .model.ai.modelplane.modelplacement import v1alpha1
+from .model.ai.modelplane.modelreplica import v1alpha1
 from .model.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 
-# Condition types and reasons for the ModelPlacement XR.
+# Condition types and reasons for the ModelReplica XR.
 CONDITION_TYPE_MODEL_ACCEPTED = "ModelAccepted"
 CONDITION_TYPE_MODEL_READY = "ModelReady"
 CONDITION_TYPE_PROFILE_MATCHED = "ProfileMatched"
 
 CONDITION_REASON_WAITING_FOR_REFERENCES = "WaitingForReferences"
-CONDITION_REASON_WAITING_FOR_ENVIRONMENT = "WaitingForEnvironment"
-CONDITION_REASON_WAITING_FOR_MODEL = "WaitingForModel"
 CONDITION_REASON_WAITING_FOR_CLUSTER = "WaitingForCluster"
+CONDITION_REASON_WAITING_FOR_MODEL = "WaitingForModel"
 CONDITION_REASON_WAITING_FOR_GATEWAY = "WaitingForGateway"
 CONDITION_REASON_NO_MATCHING_PROFILE = "NoMatchingProfile"
 CONDITION_REASON_DEPLOYING = "Deploying"
@@ -63,11 +62,11 @@ class Composer:
     def __init__(self, req, rsp):
         self.req = req
         self.rsp = rsp
-        self.xr = v1alpha1.ModelPlacement(**resource.struct_to_dict(req.observed.composite.resource))
+        self.xr = v1alpha1.ModelReplica(**resource.struct_to_dict(req.observed.composite.resource))
 
         # Required resources and resolved profile — set by resolve_inputs.
         self.model = None
-        self.ie = None
+        self.ic = None
         self.profile = None
 
     def compose(self):
@@ -92,15 +91,15 @@ class Composer:
         )
         response.require_resources(
             self.rsp,
-            name="environment",
+            name="cluster",
             api_version="modelplane.ai/v1alpha1",
-            kind="InferenceEnvironment",
-            match_name=self.xr.spec.inferenceEnvironmentRef.name,
+            kind="InferenceCluster",
+            match_name=self.xr.spec.inferenceClusterRef.name,
         )
 
         model_dict = request.get_required_resource(self.req, "model")
-        ie_dict = request.get_required_resource(self.req, "environment")
-        if model_dict is None or ie_dict is None:
+        ic_dict = request.get_required_resource(self.req, "cluster")
+        if model_dict is None or ic_dict is None:
             conditions.set_condition(
                 self.rsp, CONDITION_TYPE_MODEL_ACCEPTED, False, CONDITION_REASON_WAITING_FOR_REFERENCES
             )
@@ -108,20 +107,20 @@ class Composer:
             conditions.set_condition(
                 self.rsp, conditions.CONDITION_TYPE_ROUTING_READY, False, CONDITION_REASON_WAITING_FOR_MODEL
             )
-            response.normal(self.rsp, "Waiting for model and environment to be resolved")
+            response.normal(self.rsp, "Waiting for model and cluster to be resolved")
             return False
 
-        self.ie = defaults.inference_environment(iev1alpha1.InferenceEnvironment.model_validate(ie_dict))
+        self.ic = defaults.inference_cluster(icv1alpha1.InferenceCluster.model_validate(ic_dict))
 
-        if not self.ie.status.providerConfigRef.name:
+        if not self.ic.status.providerConfigRef.name:
             conditions.set_condition(
-                self.rsp, CONDITION_TYPE_MODEL_ACCEPTED, False, CONDITION_REASON_WAITING_FOR_ENVIRONMENT
+                self.rsp, CONDITION_TYPE_MODEL_ACCEPTED, False, CONDITION_REASON_WAITING_FOR_CLUSTER
             )
             conditions.set_condition(self.rsp, CONDITION_TYPE_MODEL_READY, False, CONDITION_REASON_WAITING_FOR_MODEL)
             conditions.set_condition(
                 self.rsp, conditions.CONDITION_TYPE_ROUTING_READY, False, CONDITION_REASON_WAITING_FOR_MODEL
             )
-            response.normal(self.rsp, "Waiting for environment providerConfigRef")
+            response.normal(self.rsp, "Waiting for cluster providerConfigRef")
             return False
 
         if self.xr.spec.modelRef.kind == "Model":
@@ -130,14 +129,14 @@ class Composer:
             self.model = defaults.cluster_model(cmv1alpha1.ClusterModel.model_validate(model_dict))
 
         # Resolve the serving profile by walking the model's serving[] array.
-        self.profile = serving.match_profile(self.model, self.ie)
+        self.profile = serving.match_profile(self.model, self.ic)
         if not self.profile:
             conditions.set_condition(
                 self.rsp, CONDITION_TYPE_PROFILE_MATCHED, False, CONDITION_REASON_NO_MATCHING_PROFILE
             )
             response.warning(
                 self.rsp,
-                f"No serving profile matches environment {self.xr.spec.inferenceEnvironmentRef.name}",
+                f"No serving profile matches cluster {self.xr.spec.inferenceClusterRef.name}",
             )
             return False
 
@@ -150,7 +149,7 @@ class Composer:
         Returns a GpuAllocation with total GPUs needed, per-node GPU count
         from the pool, and the number of nodes required.
         """
-        for pool in self.ie.status.capacity.gpuPools:
+        for pool in self.ic.status.capacity.gpuPools:
             pool_memory = quantities.parse_quantity(pool.memory or "0Gi")
             if pool_memory > 0:
                 total = max(
@@ -228,7 +227,7 @@ class Composer:
                 spec=k8sobjv1alpha1.Spec(
                     providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
                         kind="ClusterProviderConfig",
-                        name=self.ie.status.providerConfigRef.name,
+                        name=self.ic.status.providerConfigRef.name,
                     ),
                     readiness=k8sobjv1alpha1.Readiness(
                         policy="DeriveFromObject",
@@ -319,7 +318,7 @@ class Composer:
                 spec=k8sobjv1alpha1.Spec(
                     providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
                         kind="ClusterProviderConfig",
-                        name=self.ie.status.providerConfigRef.name,
+                        name=self.ic.status.providerConfigRef.name,
                     ),
                     readiness=k8sobjv1alpha1.Readiness(
                         policy="DeriveFromObject",
@@ -332,7 +331,7 @@ class Composer:
         )
 
     def has_autoscaling(self):
-        """Check if the placement has autoscaling (not fixed) configured."""
+        """Check if the replica has autoscaling (not fixed) configured."""
         return self.xr.spec.scaling.signal != "Fixed"
 
     def worker_replicas(self):
@@ -350,7 +349,7 @@ class Composer:
     def compose_backend(self):
         """Compose a Backend on the control plane pointing to the remote
         cluster's gateway. ModelDeployment aggregates these into an HTTPRoute."""
-        if not self.ie.status.gateway.address:
+        if not self.ic.status.gateway.address:
             return
 
         resource.update(
@@ -360,7 +359,7 @@ class Composer:
                 "kind": "Backend",
                 "metadata": {"namespace": self.xr.metadata.namespace},
                 "spec": {
-                    "endpoints": [{"ip": {"address": self.ie.status.gateway.address, "port": 80}}],
+                    "endpoints": [{"ip": {"address": self.ic.status.gateway.address, "port": 80}}],
                 },
             },
         )
@@ -380,9 +379,9 @@ class Composer:
                 ),
             ),
         )
-        if self.ie.status.gateway.address:
+        if self.ic.status.gateway.address:
             status.endpoint = v1alpha1.Endpoint(
-                url=f"http://{self.ie.status.gateway.address}/{metadata.NAMESPACE_REMOTE}/{model_name}/v1",
+                url=f"http://{self.ic.status.gateway.address}/{metadata.NAMESPACE_REMOTE}/{model_name}/v1",
             )
 
         # Read the Backend's Crossplane-generated name from observed state so
@@ -400,7 +399,7 @@ class Composer:
             response.normal(
                 self.rsp,
                 f"Composing deployment for {self.model.spec.model.name}"
-                f" on {self.xr.spec.inferenceEnvironmentRef.name}"
+                f" on {self.xr.spec.inferenceClusterRef.name}"
                 f" (profile: {self.profile.name}, engine: {self.profile.engine.name}, GPUs: {gpus})",
             )
 
@@ -419,7 +418,7 @@ class Composer:
         serving_ready = conditions.has_condition(self.req, MODEL_RESOURCE_KEY, "Ready")
         backend_exists = "backend" in self.req.observed.resources
 
-        # ProfileMatched: a serving profile was resolved for this environment.
+        # ProfileMatched: a serving profile was resolved for this cluster.
         conditions.set_condition(self.rsp, CONDITION_TYPE_PROFILE_MATCHED, True, CONDITION_REASON_PROFILE_RESOLVED)
 
         # ModelAccepted: the remote resource was created on the cluster.

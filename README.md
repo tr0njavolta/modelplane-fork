@@ -8,8 +8,8 @@
 
 Modelplane extends [Crossplane] to manage AI model inference as declarative
 infrastructure. Platform teams provision GPU clusters, configure inference
-environments, and curate a model catalog. ML teams deploy from that catalog and get
-back a working endpoint. The control plane handles placement, scaling, and
+clusters, and curate a model catalog. ML teams deploy from that catalog and get
+back a working endpoint. The control plane handles scheduling, scaling, and
 reconciliation continuously.
 
 ## Deploy a model
@@ -23,10 +23,10 @@ metadata:
 spec:
   modelRef:
     name: qwen-2-5-0-5b
-  environments: 2
+  clusters: 2
 ```
 
-This deploys Qwen 2.5 0.5B to two inference environments and produces a unified,
+This deploys Qwen 2.5 0.5B to two inference clusters and produces a unified,
 OpenAI-compatible endpoint. The platform decides where to place the model based
 on GPU capacity.
 
@@ -34,15 +34,15 @@ on GPU capacity.
 
 Modelplane draws a clear boundary between two teams.
 
-**Platform teams** create `InferenceEnvironments`, which are Kubernetes clusters
+**Platform teams** create `InferenceClusters`, which are Kubernetes clusters
 configured for model serving. They also register approved models as `Models` in
 a catalog. Each model specifies its source, VRAM requirements, and one or more
 serving profiles that configure vLLM.
 
 **ML teams** create a `ModelDeployment` referencing a catalog model and specify
-how many environments to deploy across. Modelplane matches serving profiles to
-available environments, checks GPU capacity, and creates a `ModelPlacement` per
-environment. Traffic routes through a unified [Envoy Gateway] endpoint on the
+how many clusters to deploy across. Modelplane matches serving profiles to
+available clusters, checks GPU capacity, and creates a `ModelReplica` per
+cluster. Traffic routes through a unified [Envoy Gateway] endpoint on the
 control plane.
 
 Modelplane is the control plane layer above the inference engine. It doesn't

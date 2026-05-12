@@ -1,14 +1,14 @@
 apiVersion: apiextensions.crossplane.io/v2
 kind: CompositeResourceDefinition
 metadata:
-  name: modelplacements.modelplane.ai
+  name: modelreplicas.modelplane.ai
 spec:
   group: modelplane.ai
   names:
     categories: [crossplane, modelplane]
-    kind: ModelPlacement
-    plural: modelplacements
-    shortNames: [mp]
+    kind: ModelReplica
+    plural: modelreplicas
+    shortNames: [mr]
   scope: Namespaced
   versions:
   - name: v1alpha1
@@ -21,9 +21,9 @@ spec:
     - name: MODEL
       type: string
       jsonPath: .spec.modelRef.name
-    - name: ENVIRONMENT
+    - name: CLUSTER
       type: string
-      jsonPath: .spec.inferenceEnvironmentRef.name
+      jsonPath: .spec.inferenceClusterRef.name
     - name: ENDPOINT
       type: string
       jsonPath: .status.endpoint.url
@@ -37,7 +37,7 @@ spec:
         properties:
           spec:
             type: object
-            required: [modelRef, inferenceEnvironmentRef]
+            required: [modelRef, inferenceClusterRef]
             properties:
               modelRef:
                 type: object
@@ -52,10 +52,10 @@ spec:
                     default: ClusterModel
                   name:
                     type: string
-              inferenceEnvironmentRef:
+              inferenceClusterRef:
                 type: object
                 required: [name]
-                description: Reference to an InferenceEnvironment.
+                description: Reference to an InferenceCluster.
                 properties:
                   name:
                     type: string
@@ -133,9 +133,9 @@ spec:
               servingProfile:
                 type: object
                 description: >-
-                  The serving profile resolved by the placement function.
+                  The serving profile resolved by the replica function.
                   Shows which (engine, image) was selected for this
-                  placement.
+                  replica.
                 properties:
                   name:
                     type: string
@@ -152,7 +152,7 @@ spec:
                   url:
                     type: string
                     description: >-
-                      Per-placement endpoint URL on the remote cluster's
+                      Per-replica endpoint URL on the remote cluster's
                       gateway. Format:
                       http://<gateway-ip>/<namespace>/<model-name>/v1
               model:
@@ -164,9 +164,9 @@ spec:
               resources:
                 type: object
                 description: >-
-                  Resources consumed by this placement. Copied from the
-                  model spec at placement time. Used by the deploy function
-                  to compute available capacity per environment.
+                  Resources consumed by this replica. Copied from the
+                  model spec at replica time. Used by the deploy function
+                  to compute available capacity per cluster.
                 properties:
                   gpu:
                     type: object
@@ -176,11 +176,11 @@ spec:
               routing:
                 type: object
                 description: >-
-                  Routing endpoint for this placement. Used by
+                  Routing endpoint for this replica. Used by
                   ModelDeployment to build the aggregated HTTPRoute.
                 properties:
                   backendName:
                     type: string
                     description: >-
                       Crossplane-generated name of the Backend resource
-                      composed by this placement.
+                      composed by this replica.

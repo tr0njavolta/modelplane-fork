@@ -1,17 +1,17 @@
-# An InferenceEnvironment using an existing cluster you manage yourself.
+# An InferenceCluster using an existing cluster you manage yourself.
 #
 # Provide a kubeconfig Secret so Modelplane can install the inference stack
 # and deploy models. You also need to describe the GPU node pools so the
 # scheduler knows what capacity is available.
 #
 # The kubeconfig Secret must exist in the control plane cluster before creating
-# this InferenceEnvironment.
+# this InferenceCluster.
 apiVersion: modelplane.ai/v1alpha1
-kind: InferenceEnvironment
+kind: InferenceCluster
 metadata:
   name: byo-us-east
   labels:
-    modelplane.ai/environment: "true"
+    modelplane.ai/cluster: "true"
     modelplane.ai/region: us-east
 spec:
   cluster:
@@ -30,7 +30,7 @@ spec:
 
       # Describe the GPU node pools in the cluster. Modelplane doesn't manage
       # these nodes, but needs to know what's available for scheduling.
-      # memory is the per-GPU VRAM, used to match models to environments.
+      # memory is the per-GPU VRAM, used to match models to clusters.
       nodePools:
         - name: gpu-h100
           nodeCount: 2

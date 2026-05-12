@@ -1,9 +1,9 @@
 apiVersion: modelplane.ai/v1alpha1
-kind: InferenceEnvironment
+kind: InferenceCluster
 metadata:
   name: demo-us-central
   labels:
-    modelplane.ai/environment: "true"
+    modelplane.ai/cluster: "true"
     modelplane.ai/region: us-central
 spec:
   cluster:

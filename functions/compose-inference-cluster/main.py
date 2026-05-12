@@ -1,7 +1,7 @@
-"""Compose an InferenceEnvironment.
+"""Compose an InferenceCluster.
 
 This function orchestrates the internal XRs that make up an inference
-environment. It dispatches on the cluster source (GKE, Existing) to determine
+cluster. It dispatches on the cluster source (GKE, Existing) to determine
 how the cluster is obtained, then composes a KServeBackend on it.
 
 For provisioned clusters (source: GKE), it composes a GKECluster and threads
@@ -15,7 +15,7 @@ from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 
 from .lib import conditions, metadata, secrets
 from .lib import resource as libresource
-from .model.ai.modelplane.inferenceenvironment import v1alpha1
+from .model.ai.modelplane.inferencecluster import v1alpha1
 from .model.ai.modelplane.infrastructure.gkecluster import v1alpha1 as gkev1alpha1
 from .model.ai.modelplane.infrastructure.kservebackend import v1alpha1 as kssv1alpha1
 from .model.io.crossplane.m.kubernetes.clusterproviderconfig import (
@@ -32,7 +32,7 @@ KSERVE_VERSION = "v0.16.0"
 CLUSTER_SOURCE_GKE = "GKE"
 CLUSTER_SOURCE_EXISTING = "Existing"
 
-# Condition types and reasons for the InferenceEnvironment XR.
+# Condition types and reasons for the InferenceCluster XR.
 CONDITION_TYPE_CLUSTER_READY = "ClusterReady"
 CONDITION_TYPE_BACKEND_READY = "BackendReady"
 
@@ -50,7 +50,7 @@ class Composer:
     def __init__(self, req, rsp):
         self.req = req
         self.rsp = rsp
-        self.xr = v1alpha1.InferenceEnvironment(**resource.struct_to_dict(req.observed.composite.resource))
+        self.xr = v1alpha1.InferenceCluster(**resource.struct_to_dict(req.observed.composite.resource))
 
     def compose(self):
         cluster = self.xr.spec.cluster
@@ -67,7 +67,7 @@ class Composer:
             response.warning(self.rsp, f"unsupported cluster source: {source}")
 
     def compose_gke(self, gke):
-        """Compose an InferenceEnvironment backed by a Modelplane-provisioned
+        """Compose an InferenceCluster backed by a Modelplane-provisioned
         GKE cluster. Composes the GKECluster XR, waits for it to be ready,
         then wires its secrets into the backend."""
         if not gke:
@@ -104,7 +104,7 @@ class Composer:
         self.derive_conditions(cluster_ready=gke_ready)
 
     def compose_existing(self, existing):
-        """Compose an InferenceEnvironment backed by a user-supplied cluster.
+        """Compose an InferenceCluster backed by a user-supplied cluster.
         No gating needed — the kubeconfig secret is provided by the user.
 
         If identitySecretRef is provided, the identity is passed to the
@@ -150,7 +150,7 @@ class Composer:
 
     def compose_cluster_provider_config(self, kubeconfig_name, kubeconfig_key, sa_key=None):
         """Compose a ClusterProviderConfig for provider-kubernetes so that
-        ModelPlacements can create Objects on the remote cluster."""
+        ModelReplicas can create Objects on the remote cluster."""
         cpc = k8scpcv1alpha1.ClusterProviderConfig(
             metadata=metav1.ObjectMeta(name=f"{self.xr.metadata.name}-cluster-kubeconfig"),
             spec=k8scpcv1alpha1.Spec(
@@ -181,7 +181,7 @@ class Composer:
         self.rsp.desired.resources["cluster-provider-config-kubernetes"].ready = fnv1.READY_TRUE
 
     def write_status(self, gpu_pools):
-        """Write the InferenceEnvironment status."""
+        """Write the InferenceCluster status."""
         status = v1alpha1.Status(
             providerConfigRef=v1alpha1.ProviderConfigRef(
                 name=f"{self.xr.metadata.name}-cluster-kubeconfig",
@@ -348,5 +348,5 @@ class Composer:
 
 
 def compose(req: fnv1.RunFunctionRequest, rsp: fnv1.RunFunctionResponse):
-    """Compose an InferenceEnvironment from its cluster source and backend."""
+    """Compose an InferenceCluster from its cluster source and backend."""
     Composer(req, rsp).compose()

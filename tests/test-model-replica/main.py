@@ -1,19 +1,19 @@
 from .lib import resource as libresource
 from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
-from .model.ai.modelplane.inferenceenvironment import v1alpha1 as iev1alpha1
-from .model.ai.modelplane.modelplacement import v1alpha1 as mpv1alpha1
+from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
+from .model.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
 from .model.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 from .model.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 from .model.io.upbound.dev.meta.compositiontest import v1alpha1 as compositiontest
 
 test = compositiontest.CompositionTest(
     metadata=metav1.ObjectMeta(
-        name="model-placement-basic",
+        name="model-replica-basic",
     ),
     spec=compositiontest.Spec(
-        compositionPath="apis/modelplacements/composition.yaml",
-        xrPath="tests/test-model-placement/xr.yaml",
-        xrdPath="apis/modelplacements/definition.yaml",
+        compositionPath="apis/modelreplicas/composition.yaml",
+        xrPath="tests/test-model-replica/xr.yaml",
+        xrdPath="apis/modelreplicas/definition.yaml",
         timeoutSeconds=120,
         validate=False,
         # extraResources is the up CLI's name for required resources.
@@ -48,23 +48,23 @@ test = compositiontest.CompositionTest(
                     ),
                 )
             ),
-            # The InferenceEnvironment referenced by spec.inferenceEnvironmentRef.
-            # Status fields are populated as if the environment is fully ready.
+            # The InferenceCluster referenced by spec.inferenceClusterRef.
+            # Status fields are populated as if the cluster is fully ready.
             libresource.model_to_fixture(
-                iev1alpha1.InferenceEnvironment(
+                icv1alpha1.InferenceCluster(
                     metadata=metav1.ObjectMeta(
                         name="demo-us-central",
-                        labels={"modelplane.ai/environment": "true"},
+                        labels={"modelplane.ai/cluster": "true"},
                     ),
-                    spec=iev1alpha1.Spec(cluster=iev1alpha1.Cluster(source="Existing")),
-                    status=iev1alpha1.Status(
-                        providerConfigRef=iev1alpha1.ProviderConfigRef(
+                    spec=icv1alpha1.Spec(cluster=icv1alpha1.Cluster(source="Existing")),
+                    status=icv1alpha1.Status(
+                        providerConfigRef=icv1alpha1.ProviderConfigRef(
                             name="demo-us-central-cluster",
                         ),
-                        gateway=iev1alpha1.Gateway(address="34.55.100.10"),
-                        capacity=iev1alpha1.Capacity(
+                        gateway=icv1alpha1.Gateway(address="34.55.100.10"),
+                        capacity=icv1alpha1.Capacity(
                             gpuPools=[
-                                iev1alpha1.GpuPool(
+                                icv1alpha1.GpuPool(
                                     acceleratorType="nvidia-l4",
                                     countPerNode=1,
                                     nodes=2,
@@ -77,29 +77,29 @@ test = compositiontest.CompositionTest(
             ),
         ],
         assertResources=[
-            # Assert the XR has status populated from the model and env.
+            # Assert the XR has status populated from the model and cluster.
             libresource.model_to_dict(
-                mpv1alpha1.ModelPlacement(
+                mrv1alpha1.ModelReplica(
                     metadata=metav1.ObjectMeta(
                         name="qwen-demo-us-central",
                         namespace="ml-team",
                     ),
-                    spec=mpv1alpha1.Spec(
-                        modelRef=mpv1alpha1.ModelRef(
+                    spec=mrv1alpha1.Spec(
+                        modelRef=mrv1alpha1.ModelRef(
                             name="qwen-0.5b",
                         ),
-                        inferenceEnvironmentRef=mpv1alpha1.InferenceEnvironmentRef(
+                        inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
                             name="demo-us-central",
                         ),
                     ),
-                    status=mpv1alpha1.Status(
-                        model=mpv1alpha1.Model(
+                    status=mrv1alpha1.Status(
+                        model=mrv1alpha1.Model(
                             name="Qwen/Qwen2.5-0.5B-Instruct",
                         ),
-                        resources=mpv1alpha1.Resources(
-                            gpu=mpv1alpha1.Gpu(count=1),
+                        resources=mrv1alpha1.Resources(
+                            gpu=mrv1alpha1.Gpu(count=1),
                         ),
-                        endpoint=mpv1alpha1.Endpoint(
+                        endpoint=mrv1alpha1.Endpoint(
                             url="http://34.55.100.10/default/model-qwen-0-5b/v1",
                         ),
                     ),

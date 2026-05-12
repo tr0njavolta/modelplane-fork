@@ -1,8 +1,8 @@
 from .lib import resource as libresource
 from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
-from .model.ai.modelplane.inferenceenvironment import v1alpha1 as iev1alpha1
+from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from .model.ai.modelplane.inferencegateway import v1alpha1 as igwv1alpha1
-from .model.ai.modelplane.modelplacement import v1alpha1 as mpv1alpha1
+from .model.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
 from .model.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 from .model.io.upbound.dev.meta.compositiontest import v1alpha1 as compositiontest
 
@@ -20,24 +20,24 @@ test = compositiontest.CompositionTest(
         # These are resources the function reads but doesn't own, resolved
         # by Crossplane at runtime via response.require_resources().
         extraResources=[
-            # env-a: a new environment that just came online. Sorts first
+            # cluster-a: a new cluster that just came online. Sorts first
             # lexicographically, so without the stability sort it would
-            # displace env-b's existing placement.
+            # displace cluster-b's existing replica.
             libresource.model_to_fixture(
-                iev1alpha1.InferenceEnvironment(
+                icv1alpha1.InferenceCluster(
                     metadata=metav1.ObjectMeta(
-                        name="env-a",
-                        labels={"modelplane.ai/environment": "true"},
+                        name="cluster-a",
+                        labels={"modelplane.ai/cluster": "true"},
                     ),
-                    spec=iev1alpha1.Spec(cluster=iev1alpha1.Cluster(source="Existing")),
-                    status=iev1alpha1.Status(
-                        providerConfigRef=iev1alpha1.ProviderConfigRef(
-                            name="env-a-cluster",
+                    spec=icv1alpha1.Spec(cluster=icv1alpha1.Cluster(source="Existing")),
+                    status=icv1alpha1.Status(
+                        providerConfigRef=icv1alpha1.ProviderConfigRef(
+                            name="cluster-a-cluster",
                         ),
-                        gateway=iev1alpha1.Gateway(address="10.0.0.1"),
-                        capacity=iev1alpha1.Capacity(
+                        gateway=icv1alpha1.Gateway(address="10.0.0.1"),
+                        capacity=icv1alpha1.Capacity(
                             gpuPools=[
-                                iev1alpha1.GpuPool(
+                                icv1alpha1.GpuPool(
                                     acceleratorType="nvidia-l4",
                                     countPerNode=1,
                                     nodes=2,
@@ -48,25 +48,25 @@ test = compositiontest.CompositionTest(
                     ),
                 )
             ),
-            # env-b: already has a placement (simulated via observedResources).
-            # Both are compatible, but with environments=1 the scheduler
-            # should prefer env-b because it already has an observed
-            # placement — even though env-a sorts first lexicographically.
+            # cluster-b: already has a replica (simulated via observedResources).
+            # Both are compatible, but with clusters=1 the scheduler should
+            # prefer cluster-b because it already has an observed replica —
+            # even though cluster-a sorts first lexicographically.
             libresource.model_to_fixture(
-                iev1alpha1.InferenceEnvironment(
+                icv1alpha1.InferenceCluster(
                     metadata=metav1.ObjectMeta(
-                        name="env-b",
-                        labels={"modelplane.ai/environment": "true"},
+                        name="cluster-b",
+                        labels={"modelplane.ai/cluster": "true"},
                     ),
-                    spec=iev1alpha1.Spec(cluster=iev1alpha1.Cluster(source="Existing")),
-                    status=iev1alpha1.Status(
-                        providerConfigRef=iev1alpha1.ProviderConfigRef(
-                            name="env-b-cluster",
+                    spec=icv1alpha1.Spec(cluster=icv1alpha1.Cluster(source="Existing")),
+                    status=icv1alpha1.Status(
+                        providerConfigRef=icv1alpha1.ProviderConfigRef(
+                            name="cluster-b-cluster",
                         ),
-                        gateway=iev1alpha1.Gateway(address="10.0.0.2"),
-                        capacity=iev1alpha1.Capacity(
+                        gateway=icv1alpha1.Gateway(address="10.0.0.2"),
+                        capacity=icv1alpha1.Capacity(
                             gpuPools=[
-                                iev1alpha1.GpuPool(
+                                icv1alpha1.GpuPool(
                                     acceleratorType="nvidia-l4",
                                     countPerNode=1,
                                     nodes=2,
@@ -108,80 +108,80 @@ test = compositiontest.CompositionTest(
                     status=igwv1alpha1.Status(address="10.0.0.100"),
                 )
             ),
-            # The existing placement on env-b, also visible as a required
-            # resource so the scheduler knows env-b already has a placement.
+            # The existing replica on cluster-b, also visible as a required
+            # resource so the scheduler knows cluster-b already has a replica.
             libresource.model_to_fixture(
-                mpv1alpha1.ModelPlacement(
+                mrv1alpha1.ModelReplica(
                     metadata=metav1.ObjectMeta(
-                        name="qwen-demo-env-b",
+                        name="qwen-demo-cluster-b",
                         namespace="ml-team",
                         labels={
-                            "modelplane.ai/placement": "true",
+                            "modelplane.ai/replica": "true",
                             "modelplane.ai/deployment": "qwen-demo",
                         },
                     ),
-                    spec=mpv1alpha1.Spec(
-                        modelRef=mpv1alpha1.ModelRef(
+                    spec=mrv1alpha1.Spec(
+                        modelRef=mrv1alpha1.ModelRef(
                             kind="ClusterModel",
                             name="qwen-0.5b",
                         ),
-                        inferenceEnvironmentRef=mpv1alpha1.InferenceEnvironmentRef(
-                            name="env-b",
+                        inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
+                            name="cluster-b",
                         ),
                     ),
                 )
             ),
         ],
-        # Simulate a second reconcile where placement-env-b already exists.
-        # The scheduler should keep env-b, not reschedule to env-a.
+        # Simulate a second reconcile where replica-cluster-b already exists.
+        # The scheduler should keep cluster-b, not reschedule to cluster-a.
         observedResources=[
             libresource.model_to_dict(
-                mpv1alpha1.ModelPlacement(
+                mrv1alpha1.ModelReplica(
                     metadata=metav1.ObjectMeta(
-                        name="qwen-demo-env-b",
+                        name="qwen-demo-cluster-b",
                         namespace="ml-team",
                         annotations={
-                            "crossplane.io/composition-resource-name": "placement-env-b",
+                            "crossplane.io/composition-resource-name": "replica-cluster-b",
                         },
                         labels={
-                            "modelplane.ai/placement": "true",
+                            "modelplane.ai/replica": "true",
                             "modelplane.ai/deployment": "qwen-demo",
                         },
                     ),
-                    spec=mpv1alpha1.Spec(
-                        modelRef=mpv1alpha1.ModelRef(
+                    spec=mrv1alpha1.Spec(
+                        modelRef=mrv1alpha1.ModelRef(
                             kind="ClusterModel",
                             name="qwen-0.5b",
                         ),
-                        inferenceEnvironmentRef=mpv1alpha1.InferenceEnvironmentRef(
-                            name="env-b",
+                        inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
+                            name="cluster-b",
                         ),
                     ),
                 )
             ),
         ],
         assertResources=[
-            # Assert the placement stays on env-b, not rescheduled to env-a.
+            # Assert the replica stays on cluster-b, not rescheduled to cluster-a.
             libresource.model_to_dict(
-                mpv1alpha1.ModelPlacement(
+                mrv1alpha1.ModelReplica(
                     metadata=metav1.ObjectMeta(
                         annotations={
-                            "crossplane.io/composition-resource-name": "placement-env-b",
+                            "crossplane.io/composition-resource-name": "replica-cluster-b",
                         },
-                        name="qwen-demo-env-b",
+                        name="qwen-demo-cluster-b",
                         namespace="ml-team",
                         labels={
-                            "modelplane.ai/placement": "true",
+                            "modelplane.ai/replica": "true",
                             "modelplane.ai/deployment": "qwen-demo",
                         },
                     ),
-                    spec=mpv1alpha1.Spec(
-                        modelRef=mpv1alpha1.ModelRef(
+                    spec=mrv1alpha1.Spec(
+                        modelRef=mrv1alpha1.ModelRef(
                             kind="ClusterModel",
                             name="qwen-0.5b",
                         ),
-                        inferenceEnvironmentRef=mpv1alpha1.InferenceEnvironmentRef(
-                            name="env-b",
+                        inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
+                            name="cluster-b",
                         ),
                     ),
                 )

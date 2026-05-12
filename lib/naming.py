@@ -19,10 +19,10 @@ def to_dns_label(s: str) -> str:
     return s[:DNS_LABEL_MAX]
 
 
-def placement_name(deployment_name: str, ie_name: str) -> str:
-    """Derive a deterministic ModelPlacement name.
+def replica_name(deployment_name: str, cluster_name: str) -> str:
+    """Derive a deterministic ModelReplica name.
 
     Deterministic names are needed so the deployment function knows the
     LLMInferenceService name on the remote cluster for URL rewriting.
     """
-    return f"{deployment_name}-{ie_name}"[:DNS_LABEL_MAX]
+    return f"{deployment_name}-{cluster_name}"[:DNS_LABEL_MAX]
