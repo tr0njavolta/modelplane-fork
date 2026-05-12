@@ -68,12 +68,7 @@ on a local kind cluster and serve a model on GKE. The
 [concepts page](docs/concepts.md) explains the key resources and how they relate.
 
 The [`examples/`](examples/) directory has annotated manifests covering the full
-workflow: gateway setup, environment provisioning, model catalog entries, and
-deployments.
-
-Modelplane also has a web UI for browsing the catalog, deploying models,
-monitoring placements, and chatting with deployed models. See
-[`ui/deploy/`](ui/deploy/) for installation manifests.
+workflow: gateway setup, cluster provisioning, and model deployments.
 
 ## Development
 

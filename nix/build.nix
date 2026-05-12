@@ -2,7 +2,7 @@
 #
 # All builders are functions that take an attrset of arguments and return a
 # derivation. The actual build definitions live in flake.nix.
-{ pkgs, self }:
+{ pkgs, ... }:
 let
   # The up CLI isn't in nixpkgs. Fetch the binary from Upbound's CDN.
   upVersion = "0.44.3";
@@ -86,82 +86,4 @@ in
       '';
     };
 
-  # The web UI frontend (Vite + React).
-  frontend =
-    { version }:
-    pkgs.buildNpmPackage {
-      pname = "modelplane-ui-frontend";
-      inherit version;
-      src = "${self}/ui/frontend";
-      npmDepsHash = "sha256-zIma/8cqbWJKZN55ASsvBghT1LJvX6x63Z92j8R5W+Y=";
-      installPhase = ''
-        runHook preInstall
-        cp -r dist $out
-        runHook postInstall
-      '';
-    };
-
-  # The web UI Go proxy binary. The frontend is copied into
-  # internal/web/static/ before building so embed.FS picks it up.
-  proxy =
-    { version, frontend }:
-    pkgs.buildGoModule {
-      pname = "modelplane-ui";
-      inherit version;
-      src = "${self}/ui";
-      vendorHash = "sha256-NYX6KEuOvfDUyPG3sUehXqMETIkJDDQhKlAAra3/hQA=";
-      subPackages = [ "cmd/proxy" ];
-      env.CGO_ENABLED = "0";
-
-      overrideModAttrs = _: {
-        postPatch = ''
-          mkdir -p internal/web/static
-        '';
-      };
-      postPatch = ''
-        rm -rf internal/web/static
-        cp -r ${frontend} internal/web/static
-      '';
-    };
-
-  # The web UI OCI container image.
-  image =
-    { proxy }:
-    let
-      passwd = pkgs.writeText "passwd" ''
-        root:x:0:0:root:/root:/sbin/nologin
-        nonroot:x:65532:65532:nonroot:/home/nonroot:/sbin/nologin
-      '';
-      group = pkgs.writeText "group" ''
-        root:x:0:
-        nonroot:x:65532:
-      '';
-    in
-    pkgs.dockerTools.buildLayeredImage {
-      name = "modelplane-ui";
-      tag = "latest";
-      contents = [
-        proxy
-        pkgs.cacert
-      ];
-      extraCommands = ''
-        mkdir -p tmp home/nonroot etc
-        chmod 1777 tmp
-        cp ${passwd} etc/passwd
-        cp ${group} etc/group
-      '';
-      config = {
-        Entrypoint = [ "${proxy}/bin/proxy" ];
-        ExposedPorts = {
-          "8080/tcp" = { };
-        };
-        User = "65532";
-        Env = [
-          "SSL_CERT_FILE=${pkgs.cacert}/etc/ssl/certs/ca-certificates.crt"
-        ];
-        Labels = {
-          "org.opencontainers.image.source" = "https://github.com/modelplaneai/modelplane";
-        };
-      };
-    };
 }

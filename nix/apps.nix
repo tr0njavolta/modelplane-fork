@@ -14,37 +14,18 @@
 # set to false. This ensures apps only use explicitly declared tools.
 { pkgs }:
 {
-  # Load the web UI image into Docker.
-  loadImage =
-    { image }:
-    {
-      type = "app";
-      meta.description = "Load the web UI container image into Docker";
-      program = pkgs.lib.getExe (
-        pkgs.writeShellApplication {
-          name = "modelplane-load-image";
-          runtimeInputs = [ pkgs.docker-client ];
-          inheritPath = false;
-          text = ''
-            docker load < ${image}
-            echo "Loaded modelplane-ui:latest"
-          '';
-        }
-      );
-    };
-
-  # Lint Go code.
+  # Lint Python code.
   lint = _: {
     type = "app";
-    meta.description = "Lint Go code";
+    meta.description = "Lint Python code";
     program = pkgs.lib.getExe (
       pkgs.writeShellApplication {
         name = "modelplane-lint";
-        runtimeInputs = [ pkgs.golangci-lint ];
+        runtimeInputs = [ pkgs.ruff ];
         inheritPath = false;
         text = ''
-          cd ui
-          golangci-lint run ./...
+          ruff format --check functions/ lib/ tests/
+          ruff check functions/ lib/ tests/
         '';
       }
     );
@@ -133,44 +114,4 @@
       );
     };
 
-  # Run the web UI Go proxy for development.
-  devProxy = _: {
-    type = "app";
-    meta.description = "Run the web UI proxy for development";
-    program = pkgs.lib.getExe (
-      pkgs.writeShellApplication {
-        name = "modelplane-dev-proxy";
-        runtimeInputs = [ pkgs.go ];
-        inheritPath = false;
-        text = ''
-          export CGO_ENABLED=0
-          cd ui
-          go run ./cmd/proxy "$@"
-        '';
-      }
-    );
-  };
-
-  # Run the web UI frontend Vite dev server. Node tooling (npm, vite) shells
-  # out to sh and uses common coreutils.
-  devFrontend = _: {
-    type = "app";
-    meta.description = "Run the web UI frontend Vite dev server";
-    program = pkgs.lib.getExe (
-      pkgs.writeShellApplication {
-        name = "modelplane-dev-frontend";
-        runtimeInputs = [
-          pkgs.nodejs
-          pkgs.bash
-          pkgs.coreutils
-        ];
-        inheritPath = false;
-        text = ''
-          cd ui/frontend
-          npm install --silent
-          npx vite
-        '';
-      }
-    );
-  };
 }

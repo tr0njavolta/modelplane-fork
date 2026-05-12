@@ -84,30 +84,6 @@ To add a test, create a new directory under `tests/`, write an `xr.yaml`, and
 write a `main.py` following the pattern in an existing test. Then run
 `nix run .#test-crossplane` to verify it passes.
 
-## Working on the web UI
-
-The web UI is a Go proxy that serves a React SPA, proxies Kubernetes API
-requests, and streams chat to deployed models. It lives in `ui/`.
-
-`nix flake check` covers Go tests, Go lint, frontend type checking, and frontend
-tests. For day-to-day development with hot reload, run the proxy and the Vite dev
-server:
-
-```bash
-# Run the Go proxy against a local cluster.
-nix run .#dev-proxy -- --kubeconfig ~/.kube/config
-
-# In another terminal, run the frontend dev server.
-nix run .#dev-frontend
-```
-
-To build the container image:
-
-```bash
-nix build                   # or: ./nix.sh build
-nix run .#load-image        # loads modelplane-ui:latest into Docker
-```
-
 ## Submitting changes
 
 Sign off your commits using `git commit -s`. This adds a `Signed-off-by` line
