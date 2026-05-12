@@ -290,6 +290,21 @@ spec:
     maxNodeCount: 4
 ```
 
+Modelplane assumes exclusive ownership of every InferenceCluster. GPU capacity
+on the cluster is managed solely by Modelplane; the fleet scheduler's capacity
+accounting (maxNodeCount minus nodes consumed by existing ModelReplicas) relies
+on this. Modelplane has opinions about how clusters are set up: Kubernetes
+version, installed components, cluster configuration, and required features
+like DRA. For provisioned clusters Modelplane handles all of this directly. For
+BYO clusters the platform team is responsible for meeting these requirements.
+
+Modelplane also installs a software stack onto every InferenceCluster it
+manages, including BYO clusters. This stack provides the cluster-level
+primitives Modelplane composes onto: support for multi-node serving workloads
+(for example LeaderWorkerSet), GPU binding via DRA, and whatever else
+Modelplane's composition functions depend on. The contract is that Modelplane
+controls what runs on the cluster.
+
 ### ModelDeployment
 
 A self-contained model deployment spec. The ML team creates one to deploy a
