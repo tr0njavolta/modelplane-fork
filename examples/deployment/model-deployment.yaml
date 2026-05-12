@@ -1,8 +1,8 @@
-# A ModelDeployment deploys a model from the catalog to one or more inference
-# clusters. The scheduler picks clusters based on GPU capacity and optional
-# label selectors.
+# A ModelDeployment deploys a model to one or more inference clusters.
+# The scheduler picks clusters based on the workers.topology shape and
+# optional label selectors. Each matched cluster gets one ModelReplica.
 #
-# Once placed, the control plane creates a unified OpenAI-compatible endpoint:
+# The control plane creates a unified OpenAI-compatible endpoint:
 #   http://<gateway-address>/<namespace>/<name>/v1/chat/completions
 apiVersion: modelplane.ai/v1alpha1
 kind: ModelDeployment
@@ -10,16 +10,28 @@ metadata:
   name: qwen-demo
   namespace: ml-team
 spec:
-  # Reference a ClusterModel by name. Use modelRef.kind: Model for namespaced
-  # models.
-  modelRef:
-    name: qwen-2-5-0-5b
+  # Number of ModelReplicas to fan out to. Each replica is a complete
+  # serving instance scheduled to one InferenceCluster.
+  replicas: 1
 
-  # Deploy to one cluster. The scheduler picks the best fit based on the
-  # model's serving profiles and available GPU capacity.
-  clusters: 1
-
-  # Optional: restrict placement to clusters with specific labels.
+  # Optional: restrict the scheduler to clusters with specific labels.
   # clusterSelector:
   #   matchLabels:
   #     modelplane.ai/region: us-central
+
+  # Compute topology for one worker. Tensor = single-node tensor
+  # parallelism. tensor=1 means one GPU per pod.
+  workers:
+    topology:
+      strategy: Tensor
+      tensor: 1
+    resources:
+      cpu: "4"
+      memory: "10Gi"
+
+  # Engine configuration. The image and args are passed through to the
+  # container; the engine handles weight fetching natively.
+  engine:
+    image: vllm/vllm-openai:v0.7.3
+    args:
+    - "--model=Qwen/Qwen2.5-0.5B-Instruct"

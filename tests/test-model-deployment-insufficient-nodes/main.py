@@ -1,13 +1,11 @@
 """Test that the scheduler rejects clusters with insufficient nodes.
 
-A 405B model (810GiB VRAM) needs ceil(810/80) = 11 H100 GPUs. The
-cluster has only 1 node with 8 GPUs (countPerNode=8, count=8).
-Multi-node would require 2 nodes but only 1 is available. The
-scheduler should produce 0 replicas.
+The deployment uses strategy TensorPipeline with pipeline=2, meaning
+each replica needs 2 nodes with 8 GPUs each. The cluster only has 1
+node. The scheduler should produce 0 replicas.
 """
 
 from .lib import resource as libresource
-from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
 from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from .model.ai.modelplane.inferencegateway import v1alpha1 as igwv1alpha1
 from .model.ai.modelplane.modeldeployment import v1alpha1 as mdv1alpha1
@@ -25,8 +23,9 @@ test = compositiontest.CompositionTest(
         timeoutSeconds=120,
         validate=False,
         extraResources=[
-            # 1-node H100 cluster: 8 GPUs total, 8 per node. Not enough
-            # nodes for a model that needs 11 GPUs (requires 2 nodes).
+            # 1-node H100 cluster: 8 GPUs per node. The replica's topology
+            # asks for pipeline=2, which requires 2 nodes. Only 1 is
+            # available, so no replica should be scheduled.
             libresource.model_to_fixture(
                 icv1alpha1.InferenceCluster(
                     metadata=metav1.ObjectMeta(
@@ -53,28 +52,6 @@ test = compositiontest.CompositionTest(
                 )
             ),
             libresource.model_to_fixture(
-                cmv1alpha1.ClusterModel(
-                    metadata=metav1.ObjectMeta(name="llama-405b"),
-                    spec=cmv1alpha1.Spec(
-                        model=cmv1alpha1.Model(name="meta-llama/Llama-3.1-405B"),
-                        source="HuggingFace",
-                        huggingFace=cmv1alpha1.HuggingFace(
-                            repo="meta-llama/Llama-3.1-405B",
-                        ),
-                        resources=cmv1alpha1.Resources(vram="810Gi"),
-                        serving=[
-                            cmv1alpha1.ServingItem(
-                                name="vllm-kserve",
-                                engine=cmv1alpha1.Engine(
-                                    name="vLLM",
-                                    image="vllm/vllm-openai:v0.7.3",
-                                ),
-                            ),
-                        ],
-                    ),
-                )
-            ),
-            libresource.model_to_fixture(
                 igwv1alpha1.InferenceGateway(
                     metadata=metav1.ObjectMeta(name="default"),
                     spec=igwv1alpha1.Spec(backend="EnvoyGateway"),
@@ -83,8 +60,7 @@ test = compositiontest.CompositionTest(
             ),
         ],
         assertResources=[
-            # Assert no replicas — the model needs 2 nodes but only 1
-            # is available.
+            # Assert no replicas - the topology doesn't fit.
             libresource.model_to_dict(
                 mdv1alpha1.ModelDeployment(
                     metadata=metav1.ObjectMeta(
@@ -92,11 +68,24 @@ test = compositiontest.CompositionTest(
                         namespace="ml-team",
                     ),
                     spec=mdv1alpha1.Spec(
-                        modelRef=mdv1alpha1.ModelRef(name="llama-405b"),
-                        clusters=1,
+                        replicas=1,
+                        workers=mdv1alpha1.Workers(
+                            topology=mdv1alpha1.Topology(
+                                strategy="TensorPipeline",
+                                tensor=8,
+                                pipeline=2,
+                            ),
+                            resources=mdv1alpha1.Resources(
+                                cpu="16",
+                                memory="256Gi",
+                            ),
+                        ),
+                        engine=mdv1alpha1.Engine(
+                            image="vllm/vllm-openai:v0.7.3",
+                            args=["--model=meta-llama/Llama-3.1-405B"],
+                        ),
                     ),
                     status=mdv1alpha1.Status(
-                        model=mdv1alpha1.Model(name="meta-llama/Llama-3.1-405B"),
                         replicas=mdv1alpha1.Replicas(total=0, ready=0),
                     ),
                 )

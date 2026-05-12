@@ -4,11 +4,17 @@ metadata:
   name: llama405b-h100-cluster
   namespace: ml-team
 spec:
-  modelRef:
-    name: llama-405b
   inferenceClusterRef:
     name: h100-cluster
-  scaling:
-    signal: Fixed
-    fixed:
-      replicas: 1
+  workers:
+    topology:
+      strategy: TensorPipeline
+      tensor: 8
+      pipeline: 2
+    resources:
+      cpu: "16"
+      memory: "256Gi"
+  engine:
+    image: vllm/vllm-openai:v0.7.3
+    args:
+    - "--model=meta-llama/Llama-3.1-405B"

@@ -18,9 +18,6 @@ spec:
     - name: READY
       type: string
       jsonPath: .status.conditions[?(@.type=='Ready')].status
-    - name: MODEL
-      type: string
-      jsonPath: .spec.modelRef.name
     - name: CLUSTER
       type: string
       jsonPath: .spec.inferenceClusterRef.name
@@ -37,115 +34,102 @@ spec:
         properties:
           spec:
             type: object
-            required: [modelRef, inferenceClusterRef]
+            required: [inferenceClusterRef, workers, engine]
             properties:
-              modelRef:
-                type: object
-                required: [name]
-                description: Reference to a ClusterModel or Model.
-                properties:
-                  kind:
-                    type: string
-                    description: >-
-                      Kind of model resource. Defaults to ClusterModel.
-                    enum: [ClusterModel, Model]
-                    default: ClusterModel
-                  name:
-                    type: string
               inferenceClusterRef:
                 type: object
                 required: [name]
-                description: Reference to an InferenceCluster.
+                description: >-
+                  Reference to the InferenceCluster this replica targets.
                 properties:
                   name:
                     type: string
-              scaling:
+              workers:
                 type: object
-                description: >-
-                  How the model scales. Copied from the parent
-                  ModelDeployment.
-                default: {"signal": "Fixed", "fixed": {"replicas": 1}}
-                required: [signal]
+                required: [topology, resources]
                 properties:
-                  signal:
+                  count:
+                    type: integer
+                    minimum: 1
+                    default: 1
+                  topology:
+                    type: object
+                    required: [strategy]
+                    properties:
+                      strategy:
+                        type: string
+                        enum: [Tensor, TensorPipeline]
+                      tensor:
+                        type: integer
+                        minimum: 1
+                      pipeline:
+                        type: integer
+                        minimum: 2
+                  resources:
+                    type: object
+                    required: [cpu, memory]
+                    properties:
+                      cpu:
+                        type: string
+                        minLength: 1
+                      memory:
+                        type: string
+                        minLength: 1
+              engine:
+                type: object
+                required: [image]
+                properties:
+                  image:
                     type: string
-                    description: >-
-                      Scaling signal type. Each signal has a
-                      corresponding config block that must be set.
-                    enum: [Fixed, Concurrency]
-                  fixed:
-                    type: object
-                    description: >-
-                      Run a fixed number of replicas with no
-                      autoscaling. Required when signal is Fixed.
-                    required: [replicas]
-                    properties:
-                      replicas:
-                        type: integer
-                        minimum: 1
-                        description: Number of replicas to run.
-                  concurrency:
-                    type: object
-                    description: >-
-                      Autoscale based on in-flight request concurrency.
-                      Required when signal is Concurrency.
-                    required: [maxReplicas, target]
-                    properties:
-                      minReplicas:
-                        type: integer
-                        minimum: 0
-                        default: 1
-                        description: >-
-                          Minimum number of replicas. Set to 0 to allow
-                          scale-to-zero when there is no traffic.
-                      maxReplicas:
-                        type: integer
-                        minimum: 1
-                        description: >-
-                          Maximum number of replicas. Must be >=
-                          minReplicas.
-                      target:
-                        type: integer
-                        minimum: 1
-                        description: >-
-                          Target number of concurrent in-flight requests
-                          per replica. Scaling triggers when average
-                          concurrency exceeds target * utilization / 100.
-                      utilization:
-                        type: integer
-                        minimum: 1
-                        maximum: 100
-                        default: 70
-                        description: >-
-                          Target utilization percentage. Provides
-                          headroom before the target is fully saturated.
-                          Defaults to 70.
-                      scaleDownDelay:
-                        type: integer
-                        minimum: 0
-                        default: 300
-                        description: >-
-                          Seconds to wait before removing replicas after
-                          load decreases. Defaults to 300 (5 minutes).
+                    minLength: 1
+                  args:
+                    type: array
+                    items:
+                      type: string
+                  env:
+                    type: array
+                    items:
+                      type: object
+                      required: [name]
+                      properties:
+                        name:
+                          type: string
+                        value:
+                          type: string
+                        valueFrom:
+                          type: object
+                          properties:
+                            secretKeyRef:
+                              type: object
+                              required: [name, key]
+                              properties:
+                                name:
+                                  type: string
+                                key:
+                                  type: string
+                                optional:
+                                  type: boolean
+                            configMapKeyRef:
+                              type: object
+                              required: [name, key]
+                              properties:
+                                name:
+                                  type: string
+                                key:
+                                  type: string
+                                optional:
+                                  type: boolean
+                  imagePullSecrets:
+                    type: array
+                    items:
+                      type: object
+                      required: [name]
+                      properties:
+                        name:
+                          type: string
           status:
             type: object
             properties:
-              servingProfile:
-                type: object
-                description: >-
-                  The serving profile resolved by the replica function.
-                  Shows which (engine, image) was selected for this
-                  replica.
-                properties:
-                  name:
-                    type: string
-                  engine:
-                    type: object
-                    properties:
-                      name:
-                        type: string
-                      image:
-                        type: string
               endpoint:
                 type: object
                 properties:
@@ -153,26 +137,7 @@ spec:
                     type: string
                     description: >-
                       Per-replica endpoint URL on the remote cluster's
-                      gateway. Format:
-                      http://<gateway-ip>/<namespace>/<model-name>/v1
-              model:
-                type: object
-                properties:
-                  name:
-                    type: string
-                    description: Resolved model name from ClusterModel.
-              resources:
-                type: object
-                description: >-
-                  Resources consumed by this replica. Copied from the
-                  model spec at replica time. Used by the deploy function
-                  to compute available capacity per cluster.
-                properties:
-                  gpu:
-                    type: object
-                    properties:
-                      count:
-                        type: integer
+                      gateway.
               routing:
                 type: object
                 description: >-

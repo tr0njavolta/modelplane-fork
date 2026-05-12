@@ -1,5 +1,4 @@
 from .lib import resource as libresource
-from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
 from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from .model.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
 from .model.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
@@ -20,34 +19,6 @@ test = compositiontest.CompositionTest(
         # These are resources the function reads but doesn't own, resolved
         # by Crossplane at runtime via response.require_resources().
         extraResources=[
-            # The ClusterModel referenced by the XR's spec.modelRef.
-            libresource.model_to_fixture(
-                cmv1alpha1.ClusterModel(
-                    metadata=metav1.ObjectMeta(name="qwen-0.5b"),
-                    spec=cmv1alpha1.Spec(
-                        model=cmv1alpha1.Model(name="Qwen/Qwen2.5-0.5B-Instruct"),
-                        source="HuggingFace",
-                        huggingFace=cmv1alpha1.HuggingFace(
-                            repo="Qwen/Qwen2.5-0.5B-Instruct",
-                        ),
-                        serving=[
-                            cmv1alpha1.ServingItem(
-                                name="vllm-kserve",
-                                engine=cmv1alpha1.Engine(
-                                    name="vLLM",
-                                    image="vllm/vllm-openai:v0.7.3",
-                                    args=["--served-model-name=Qwen/Qwen2.5-0.5B-Instruct"],
-                                ),
-                            ),
-                        ],
-                        resources=cmv1alpha1.Resources(
-                            vram="2Gi",
-                            cpu="3",
-                            memory="10Gi",
-                        ),
-                    ),
-                )
-            ),
             # The InferenceCluster referenced by spec.inferenceClusterRef.
             # Status fields are populated as if the cluster is fully ready.
             libresource.model_to_fixture(
@@ -77,30 +48,35 @@ test = compositiontest.CompositionTest(
             ),
         ],
         assertResources=[
-            # Assert the XR has status populated from the model and cluster.
+            # Assert the XR has status populated from the cluster.
             libresource.model_to_dict(
                 mrv1alpha1.ModelReplica(
                     metadata=metav1.ObjectMeta(
-                        name="qwen-demo-us-central",
+                        name="qwen-demo-demo-us-central",
                         namespace="ml-team",
                     ),
                     spec=mrv1alpha1.Spec(
-                        modelRef=mrv1alpha1.ModelRef(
-                            name="qwen-0.5b",
-                        ),
                         inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
                             name="demo-us-central",
                         ),
+                        workers=mrv1alpha1.Workers(
+                            topology=mrv1alpha1.Topology(
+                                strategy="Tensor",
+                                tensor=1,
+                            ),
+                            resources=mrv1alpha1.Resources(
+                                cpu="3",
+                                memory="10Gi",
+                            ),
+                        ),
+                        engine=mrv1alpha1.Engine(
+                            image="vllm/vllm-openai:v0.7.3",
+                            args=["--model=Qwen/Qwen2.5-0.5B-Instruct"],
+                        ),
                     ),
                     status=mrv1alpha1.Status(
-                        model=mrv1alpha1.Model(
-                            name="Qwen/Qwen2.5-0.5B-Instruct",
-                        ),
-                        resources=mrv1alpha1.Resources(
-                            gpu=mrv1alpha1.Gpu(count=1),
-                        ),
                         endpoint=mrv1alpha1.Endpoint(
-                            url="http://34.55.100.10/default/model-qwen-0-5b/v1",
+                            url="http://34.55.100.10/default/qwen-demo/v1",
                         ),
                     ),
                 )
@@ -127,14 +103,10 @@ test = compositiontest.CompositionTest(
                                 "apiVersion": "serving.kserve.io/v1alpha1",
                                 "kind": "LLMInferenceService",
                                 "metadata": {
-                                    "name": "model-qwen-0-5b",
+                                    "name": "qwen-demo",
                                     "namespace": "default",
                                 },
                                 "spec": {
-                                    "model": {
-                                        "uri": "hf://Qwen/Qwen2.5-0.5B-Instruct",
-                                        "name": "Qwen/Qwen2.5-0.5B-Instruct",
-                                    },
                                     "replicas": 1,
                                     "template": {
                                         "containers": [
@@ -142,7 +114,7 @@ test = compositiontest.CompositionTest(
                                                 "name": "main",
                                                 "image": "vllm/vllm-openai:v0.7.3",
                                                 "args": [
-                                                    "--served-model-name=Qwen/Qwen2.5-0.5B-Instruct",
+                                                    "--model=Qwen/Qwen2.5-0.5B-Instruct",
                                                 ],
                                                 "securityContext": {
                                                     "runAsUser": 0,

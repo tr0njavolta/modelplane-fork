@@ -1,22 +1,40 @@
 """Test multi-node KServe replica.
 
-A 405B model at FP16 needs ~810GiB of VRAM. An 8xH100 node has 640GiB
-(8 * 80GiB). compute_gpus() should return total=11 GPUs, per_node=8,
-node_count=2, multi_node=True.
+A TensorPipeline replica with tensor=8 pipeline=2 should compose an
+LLMInferenceService with:
 
-The LLMInferenceService should have:
-- parallelism.tensor: 11
-- worker.size: 1 (2 nodes - 1 leader)
-- 8 GPUs per pod (not 11)
+- 8 GPUs per pod (tensor)
+- parallelism.tensor = 16 (tensor * pipeline)
+- worker.size = 1 (pipeline - 1)
 """
 
 from .lib import resource as libresource
-from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
 from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
-from .model.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
 from .model.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 from .model.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 from .model.io.upbound.dev.meta.compositiontest import v1alpha1 as compositiontest
+
+# The container shape is the same for the leader and each worker.
+CONTAINER = {
+    "name": "main",
+    "image": "vllm/vllm-openai:v0.7.3",
+    "args": ["--model=meta-llama/Llama-3.1-405B"],
+    "securityContext": {
+        "runAsUser": 0,
+        "runAsNonRoot": False,
+    },
+    "resources": {
+        "limits": {
+            "nvidia.com/gpu": "8",
+            "cpu": "16",
+            "memory": "256Gi",
+        },
+        "requests": {
+            "cpu": "1",
+            "memory": "256Gi",
+        },
+    },
+}
 
 test = compositiontest.CompositionTest(
     metadata=metav1.ObjectMeta(
@@ -29,33 +47,6 @@ test = compositiontest.CompositionTest(
         timeoutSeconds=120,
         validate=False,
         extraResources=[
-            # Llama 405B: 810GiB VRAM, KServe serving profile.
-            libresource.model_to_fixture(
-                cmv1alpha1.ClusterModel(
-                    metadata=metav1.ObjectMeta(name="llama-405b"),
-                    spec=cmv1alpha1.Spec(
-                        model=cmv1alpha1.Model(name="meta-llama/Llama-3.1-405B"),
-                        source="HuggingFace",
-                        huggingFace=cmv1alpha1.HuggingFace(
-                            repo="meta-llama/Llama-3.1-405B",
-                        ),
-                        serving=[
-                            cmv1alpha1.ServingItem(
-                                name="vllm-kserve",
-                                engine=cmv1alpha1.Engine(
-                                    name="vLLM",
-                                    image="vllm/vllm-openai:v0.7.3",
-                                ),
-                            ),
-                        ],
-                        resources=cmv1alpha1.Resources(
-                            vram="810Gi",
-                            cpu="8",
-                            memory="128Gi",
-                        ),
-                    ),
-                )
-            ),
             # 3-node H100 cluster: 8 GPUs per node = 24 total.
             libresource.model_to_fixture(
                 icv1alpha1.InferenceCluster(
@@ -84,36 +75,10 @@ test = compositiontest.CompositionTest(
             ),
         ],
         assertResources=[
-            # Assert status shows 11 total GPUs.
-            libresource.model_to_dict(
-                mrv1alpha1.ModelReplica(
-                    metadata=metav1.ObjectMeta(
-                        name="llama405b-h100-cluster",
-                        namespace="ml-team",
-                    ),
-                    spec=mrv1alpha1.Spec(
-                        modelRef=mrv1alpha1.ModelRef(name="llama-405b"),
-                        inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
-                            name="h100-cluster",
-                        ),
-                    ),
-                    status=mrv1alpha1.Status(
-                        model=mrv1alpha1.Model(
-                            name="meta-llama/Llama-3.1-405B",
-                        ),
-                        resources=mrv1alpha1.Resources(
-                            gpu=mrv1alpha1.Gpu(count=11),
-                        ),
-                        endpoint=mrv1alpha1.Endpoint(
-                            url="http://10.0.0.1/default/model-llama-405b/v1",
-                        ),
-                    ),
-                )
-            ),
             # Assert LLMInferenceService has multi-node configuration:
-            # - parallelism.tensor = 11
-            # - worker.size = 1 (2 nodes - 1 leader)
-            # - 8 GPUs per pod (not 11)
+            # - 8 GPUs per pod (tensor)
+            # - parallelism.tensor = 16 (tensor * pipeline)
+            # - worker.size = 1 (pipeline - 1)
             libresource.model_to_dict(
                 k8sobjv1alpha1.Object(
                     metadata=metav1.ObjectMeta(
@@ -134,65 +99,19 @@ test = compositiontest.CompositionTest(
                                 "apiVersion": "serving.kserve.io/v1alpha1",
                                 "kind": "LLMInferenceService",
                                 "metadata": {
-                                    "name": "model-llama-405b",
+                                    "name": "llama405b",
                                     "namespace": "default",
                                 },
                                 "spec": {
-                                    "model": {
-                                        "uri": "hf://meta-llama/Llama-3.1-405B",
-                                        "name": "meta-llama/Llama-3.1-405B",
-                                    },
                                     "replicas": 1,
-                                    "parallelism": {"tensor": 11},
+                                    "parallelism": {"tensor": 16},
                                     "template": {
-                                        "containers": [
-                                            {
-                                                "name": "main",
-                                                "image": "vllm/vllm-openai:v0.7.3",
-                                                "args": [],
-                                                "securityContext": {
-                                                    "runAsUser": 0,
-                                                    "runAsNonRoot": False,
-                                                },
-                                                "resources": {
-                                                    "limits": {
-                                                        "nvidia.com/gpu": "8",
-                                                        "cpu": "8",
-                                                        "memory": "128Gi",
-                                                    },
-                                                    "requests": {
-                                                        "cpu": "1",
-                                                        "memory": "128Gi",
-                                                    },
-                                                },
-                                            }
-                                        ],
+                                        "containers": [CONTAINER],
                                     },
                                     "worker": {
                                         "size": 1,
                                         "template": {
-                                            "containers": [
-                                                {
-                                                    "name": "main",
-                                                    "image": "vllm/vllm-openai:v0.7.3",
-                                                    "args": [],
-                                                    "securityContext": {
-                                                        "runAsUser": 0,
-                                                        "runAsNonRoot": False,
-                                                    },
-                                                    "resources": {
-                                                        "limits": {
-                                                            "nvidia.com/gpu": "8",
-                                                            "cpu": "8",
-                                                            "memory": "128Gi",
-                                                        },
-                                                        "requests": {
-                                                            "cpu": "1",
-                                                            "memory": "128Gi",
-                                                        },
-                                                    },
-                                                }
-                                            ],
+                                            "containers": [CONTAINER],
                                         },
                                     },
                                     "router": {"gateway": {}, "route": {}},

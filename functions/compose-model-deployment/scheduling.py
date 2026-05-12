@@ -1,23 +1,21 @@
 """Schedule model replicas across inference clusters.
 
-Matches serving profiles against clusters by optional label selector,
-filters by GPU capacity, accounts for GPU usage by other deployments, and
-returns a stable list of candidates that prefers clusters with existing
-replicas.
+For each candidate cluster, checks whether the cluster's pools can host
+the workers.topology shape (GPUs per node, nodes per worker). Accounts
+for GPUs already consumed by other deployments' replicas. Returns a
+stable list of candidates that prefers clusters with existing replicas
+for this deployment.
 """
 
-import math
 from dataclasses import dataclass
 
-from .lib import metadata, quantities, serving
-from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
+from .lib import metadata
 from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from .model.ai.modelplane.modeldeployment import v1alpha1 as mdv1alpha1
 from .model.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
 
-# Supported scaling signals. All clusters use the same backend, so
-# scaling capabilities are uniform.
-SUPPORTED_SCALING_SIGNALS = {"Fixed", "Concurrency"}
+STRATEGY_TENSOR = "Tensor"
+STRATEGY_TENSOR_PIPELINE = "TensorPipeline"
 
 
 @dataclass
@@ -26,42 +24,59 @@ class Candidate:
 
     name: str
     gateway_address: str | None
-    profile_name: str
 
 
-def _pool_has_enough_nodes(pool, gpus_needed: int) -> bool:
-    """Check whether a pool has enough nodes for multi-node inference.
+@dataclass
+class Shape:
+    """Physical shape derived from workers.topology and workers.count."""
 
-    Returns True if the model fits on a single node or if there are enough
-    nodes for multi-node.
-    """
+    gpus_per_node: int  # GPUs per pod.
+    nodes_per_worker: int  # Pods per worker (1 for Tensor, pipeline for TP).
+    total_gpus: int  # Total GPUs consumed by all workers in one replica.
+
+
+def topology_shape(workers) -> Shape:
+    """Derive the physical shape of one ModelReplica from workers."""
+    topology = workers.topology
+    count = int(workers.count or 1)
+    gpus_per_node = int(topology.tensor)
+
+    nodes_per_worker = int(topology.pipeline) if topology.strategy == STRATEGY_TENSOR_PIPELINE else 1
+
+    total_gpus = gpus_per_node * nodes_per_worker * count
+    return Shape(
+        gpus_per_node=gpus_per_node,
+        nodes_per_worker=nodes_per_worker,
+        total_gpus=total_gpus,
+    )
+
+
+def _pool_fits_shape(pool, shape: Shape) -> bool:
+    """Check whether a pool can host one ModelReplica of this shape."""
     count_per_node = int(pool.countPerNode or 0)
-    if count_per_node <= 0 or gpus_needed <= count_per_node:
-        return True  # Single-node — fits on one node.
-    nodes_needed = math.ceil(gpus_needed / count_per_node)
-    return int(pool.nodes or 0) >= nodes_needed
+    nodes = int(pool.nodes or 0)
+
+    if count_per_node < shape.gpus_per_node:
+        return False
+    return nodes >= shape.nodes_per_worker
 
 
 def schedule(
     deployment: mdv1alpha1.ModelDeployment,
-    model: cmv1alpha1.ClusterModel,
     clusters: list[icv1alpha1.InferenceCluster],
     all_replicas: list[mrv1alpha1.ModelReplica],
 ) -> list[Candidate]:
     """Select clusters for model replicas.
 
-    All inputs should be passed through their respective defaults.*
-    functions before calling this — the function assumes Optional fields
-    are populated with zero values.
+    For each candidate cluster, checks that at least one pool can host
+    the workers.topology shape and that the cluster has enough free GPUs
+    after subtracting GPUs consumed by other deployments' replicas.
 
-    For each candidate cluster, walks the model's serving[] array to find
-    the first profile whose environmentSelector (if any) matches the
-    cluster's labels. Filters by VRAM capacity, subtracts GPUs used by
-    other deployments' replicas, sorts to prefer clusters that already
-    have replicas for this deployment (stability), and returns at most
-    deployment.spec.clusters candidates.
+    Sorts to prefer clusters that already have a replica for this
+    deployment (stability), then alphabetically (determinism). Returns
+    at most deployment.spec.replicas candidates.
     """
-    model_vram_bytes = quantities.parse_quantity(model.spec.resources.vram)
+    shape = topology_shape(deployment.spec.workers)
 
     # Clusters that already have a replica for this deployment.
     existing_clusters = {
@@ -72,55 +87,33 @@ def schedule(
 
     candidates = []
     for cluster in clusters:
-        # Find the first serving profile that matches this cluster.
-        profile = serving.match_profile(model, cluster)
-        if not profile:
-            continue
-
-        # Check scaling signal capability.
-        if deployment.spec.scaling.signal not in SUPPORTED_SCALING_SIGNALS:
-            continue
-
-        # Find the pool that needs the fewest GPUs for this model.
-        best_gpus_needed = None
+        # Find pools that can host the shape, accumulating total eligible
+        # GPU capacity.
         eligible_total = 0
+        fit = False
         for pool in cluster.status.capacity.gpuPools:
-            pool_mem = quantities.parse_quantity(pool.memory or "0Gi")
-            if pool_mem <= 0:
+            if not _pool_fits_shape(pool, shape):
                 continue
-            gpus_needed = max(1, math.ceil(model_vram_bytes / pool_mem))
-
-            if not _pool_has_enough_nodes(pool, gpus_needed):
-                continue
-
+            fit = True
             eligible_total += int(pool.countPerNode or 0) * int(pool.nodes or 0)
-            if best_gpus_needed is None or gpus_needed < best_gpus_needed:
-                best_gpus_needed = gpus_needed
 
-        if best_gpus_needed is None:
+        if not fit:
             continue
 
-        # Subtract GPUs used by other deployments' replicas on this cluster.
-        used_gpus = 0
-        for r in all_replicas:
-            if (r.metadata.labels or {}).get(metadata.LABEL_KEY_DEPLOYMENT) == deployment.metadata.name:
-                continue  # Don't count our own replicas against us.
-            if r.spec.inferenceClusterRef.name == cluster.metadata.name:
-                used_gpus += r.status.resources.gpu.count or 0
+        # Subtract GPUs consumed by other deployments' replicas on this cluster.
+        used_gpus = _used_gpus(deployment, cluster, all_replicas)
 
-        if eligible_total - used_gpus < best_gpus_needed:
+        if eligible_total - used_gpus < shape.total_gpus:
             continue
 
         candidates.append(
             Candidate(
                 name=cluster.metadata.name,
                 gateway_address=cluster.status.gateway.address,
-                profile_name=profile.name,
             )
         )
 
-    # Prefer clusters that already have replicas for this deployment.
-    # This prevents rescheduling when a new cluster comes online.
+    # Prefer clusters that already have a replica for this deployment.
     # Within each group (existing vs new), sort by name for determinism.
     candidates.sort(
         key=lambda c: (
@@ -128,4 +121,24 @@ def schedule(
             c.name,
         )
     )
-    return candidates[: int(deployment.spec.clusters)]
+    return candidates[: int(deployment.spec.replicas)]
+
+
+def _used_gpus(deployment, cluster, all_replicas) -> int:
+    """Sum GPUs consumed by other deployments' replicas on this cluster.
+
+    Other deployments' replicas are read from observed state. Each
+    replica reports its topology, from which we derive total GPUs.
+    Our own replicas are excluded - the scheduler treats this
+    deployment's own demand separately.
+    """
+    used = 0
+    for r in all_replicas:
+        if (r.metadata.labels or {}).get(metadata.LABEL_KEY_DEPLOYMENT) == deployment.metadata.name:
+            continue
+        if r.spec.inferenceClusterRef.name != cluster.metadata.name:
+            continue
+        if not r.spec.workers:
+            continue
+        used += topology_shape(r.spec.workers).total_gpus
+    return used

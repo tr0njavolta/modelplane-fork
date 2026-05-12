@@ -1,5 +1,4 @@
 from .lib import resource as libresource
-from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
 from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from .model.ai.modelplane.inferencegateway import v1alpha1 as igwv1alpha1
 from .model.ai.modelplane.modeldeployment import v1alpha1 as mdv1alpha1
@@ -47,33 +46,6 @@ test = compositiontest.CompositionTest(
                     ),
                 )
             ),
-            # The ClusterModel referenced by spec.modelRef.
-            libresource.model_to_fixture(
-                cmv1alpha1.ClusterModel(
-                    metadata=metav1.ObjectMeta(name="qwen-0.5b"),
-                    spec=cmv1alpha1.Spec(
-                        model=cmv1alpha1.Model(name="Qwen/Qwen2.5-0.5B-Instruct"),
-                        source="HuggingFace",
-                        huggingFace=cmv1alpha1.HuggingFace(
-                            repo="Qwen/Qwen2.5-0.5B-Instruct",
-                        ),
-                        serving=[
-                            cmv1alpha1.ServingItem(
-                                name="vllm-kserve",
-                                engine=cmv1alpha1.Engine(
-                                    name="vLLM",
-                                    image="vllm/vllm-openai:v0.7.3",
-                                ),
-                            ),
-                        ],
-                        resources=cmv1alpha1.Resources(
-                            vram="2Gi",
-                            cpu="3",
-                            memory="10Gi",
-                        ),
-                    ),
-                )
-            ),
             # The InferenceGateway for the control plane routing endpoint.
             libresource.model_to_fixture(
                 igwv1alpha1.InferenceGateway(
@@ -84,8 +56,8 @@ test = compositiontest.CompositionTest(
             ),
         ],
         assertResources=[
-            # Assert the XR has status populated with model name and replica
-            # count, plus the unified endpoint URL from the inference gateway.
+            # Assert the XR has status populated with replica count and
+            # the unified endpoint URL from the inference gateway.
             libresource.model_to_dict(
                 mdv1alpha1.ModelDeployment(
                     metadata=metav1.ObjectMeta(
@@ -93,15 +65,23 @@ test = compositiontest.CompositionTest(
                         namespace="ml-team",
                     ),
                     spec=mdv1alpha1.Spec(
-                        modelRef=mdv1alpha1.ModelRef(
-                            name="qwen-0.5b",
+                        replicas=1,
+                        workers=mdv1alpha1.Workers(
+                            topology=mdv1alpha1.Topology(
+                                strategy="Tensor",
+                                tensor=1,
+                            ),
+                            resources=mdv1alpha1.Resources(
+                                cpu="3",
+                                memory="10Gi",
+                            ),
                         ),
-                        clusters=1,
+                        engine=mdv1alpha1.Engine(
+                            image="vllm/vllm-openai:v0.7.3",
+                            args=["--model=Qwen/Qwen2.5-0.5B-Instruct"],
+                        ),
                     ),
                     status=mdv1alpha1.Status(
-                        model=mdv1alpha1.Model(
-                            name="Qwen/Qwen2.5-0.5B-Instruct",
-                        ),
                         replicas=mdv1alpha1.Replicas(
                             total=1,
                             ready=0,
@@ -127,12 +107,22 @@ test = compositiontest.CompositionTest(
                         },
                     ),
                     spec=mrv1alpha1.Spec(
-                        modelRef=mrv1alpha1.ModelRef(
-                            kind="ClusterModel",
-                            name="qwen-0.5b",
-                        ),
                         inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
                             name="demo-us-central",
+                        ),
+                        workers=mrv1alpha1.Workers(
+                            topology=mrv1alpha1.Topology(
+                                strategy="Tensor",
+                                tensor=1,
+                            ),
+                            resources=mrv1alpha1.Resources(
+                                cpu="3",
+                                memory="10Gi",
+                            ),
+                        ),
+                        engine=mrv1alpha1.Engine(
+                            image="vllm/vllm-openai:v0.7.3",
+                            args=["--model=Qwen/Qwen2.5-0.5B-Instruct"],
                         ),
                     ),
                 )
@@ -170,7 +160,7 @@ test = compositiontest.CompositionTest(
                                     "urlRewrite": {
                                         "path": {
                                             "type": "ReplacePrefixMatch",
-                                            "replacePrefixMatch": "/default/model-qwen-0-5b/",
+                                            "replacePrefixMatch": "/default/qwen-demo/",
                                         },
                                     },
                                 }

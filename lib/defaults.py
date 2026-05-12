@@ -6,7 +6,6 @@ all intermediate Optional fields populated with their zero values, so
 downstream code can access fields directly.
 """
 
-from ..model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
 from ..model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from ..model.ai.modelplane.inferencegateway import v1alpha1 as igwv1alpha1
 from ..model.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
@@ -25,24 +24,12 @@ def inference_cluster(
     return ic
 
 
-def cluster_model(
-    model: cmv1alpha1.ClusterModel,
-) -> cmv1alpha1.ClusterModel:
-    """Return a copy with optional spec fields defaulted."""
-    model = model.model_copy(deep=True)
-    model.spec.serving = model.spec.serving or []
-    return model
-
-
 def model_replica(
     r: mrv1alpha1.ModelReplica,
 ) -> mrv1alpha1.ModelReplica:
     """Return a copy with status fields defaulted."""
     r = r.model_copy(deep=True)
     r.metadata = r.metadata or mrv1alpha1.ModelReplica().metadata
-    r.status = r.status or mrv1alpha1.Status()
-    r.status.resources = r.status.resources or mrv1alpha1.Resources()
-    r.status.resources.gpu = r.status.resources.gpu or mrv1alpha1.Gpu()
     return r
 
 

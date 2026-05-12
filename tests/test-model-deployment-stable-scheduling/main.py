@@ -1,10 +1,36 @@
+"""Test that scheduling is stable.
+
+Two compatible clusters exist; cluster-b already has a replica from a
+previous reconcile. With replicas=1, the scheduler should keep cluster-b
+rather than rescheduling to cluster-a (which sorts first alphabetically).
+"""
+
 from .lib import resource as libresource
-from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
 from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from .model.ai.modelplane.inferencegateway import v1alpha1 as igwv1alpha1
 from .model.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
 from .model.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 from .model.io.upbound.dev.meta.compositiontest import v1alpha1 as compositiontest
+
+REPLICA_SPEC = mrv1alpha1.Spec(
+    inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
+        name="cluster-b",
+    ),
+    workers=mrv1alpha1.Workers(
+        topology=mrv1alpha1.Topology(
+            strategy="Tensor",
+            tensor=1,
+        ),
+        resources=mrv1alpha1.Resources(
+            cpu="3",
+            memory="10Gi",
+        ),
+    ),
+    engine=mrv1alpha1.Engine(
+        image="vllm/vllm-openai:v0.7.3",
+        args=["--model=Qwen/Qwen2.5-0.5B-Instruct"],
+    ),
+)
 
 test = compositiontest.CompositionTest(
     metadata=metav1.ObjectMeta(
@@ -16,9 +42,6 @@ test = compositiontest.CompositionTest(
         xrdPath="apis/modeldeployments/definition.yaml",
         timeoutSeconds=120,
         validate=False,
-        # extraResources is the up CLI's name for required resources.
-        # These are resources the function reads but doesn't own, resolved
-        # by Crossplane at runtime via response.require_resources().
         extraResources=[
             # cluster-a: a new cluster that just came online. Sorts first
             # lexicographically, so without the stability sort it would
@@ -49,9 +72,9 @@ test = compositiontest.CompositionTest(
                 )
             ),
             # cluster-b: already has a replica (simulated via observedResources).
-            # Both are compatible, but with clusters=1 the scheduler should
-            # prefer cluster-b because it already has an observed replica —
-            # even though cluster-a sorts first lexicographically.
+            # With replicas=1 the scheduler should prefer cluster-b because
+            # it already has an observed replica - even though cluster-a
+            # sorts first lexicographically.
             libresource.model_to_fixture(
                 icv1alpha1.InferenceCluster(
                     metadata=metav1.ObjectMeta(
@@ -77,29 +100,6 @@ test = compositiontest.CompositionTest(
                     ),
                 )
             ),
-            # The ClusterModel referenced by spec.modelRef.
-            libresource.model_to_fixture(
-                cmv1alpha1.ClusterModel(
-                    metadata=metav1.ObjectMeta(name="qwen-0.5b"),
-                    spec=cmv1alpha1.Spec(
-                        model=cmv1alpha1.Model(name="Qwen/Qwen2.5-0.5B-Instruct"),
-                        source="HuggingFace",
-                        huggingFace=cmv1alpha1.HuggingFace(
-                            repo="Qwen/Qwen2.5-0.5B-Instruct",
-                        ),
-                        resources=cmv1alpha1.Resources(vram="2Gi"),
-                        serving=[
-                            cmv1alpha1.ServingItem(
-                                name="vllm-kserve",
-                                engine=cmv1alpha1.Engine(
-                                    name="vLLM",
-                                    image="vllm/vllm-openai:v0.7.3",
-                                ),
-                            ),
-                        ],
-                    ),
-                )
-            ),
             # The InferenceGateway.
             libresource.model_to_fixture(
                 igwv1alpha1.InferenceGateway(
@@ -120,15 +120,7 @@ test = compositiontest.CompositionTest(
                             "modelplane.ai/deployment": "qwen-demo",
                         },
                     ),
-                    spec=mrv1alpha1.Spec(
-                        modelRef=mrv1alpha1.ModelRef(
-                            kind="ClusterModel",
-                            name="qwen-0.5b",
-                        ),
-                        inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
-                            name="cluster-b",
-                        ),
-                    ),
+                    spec=REPLICA_SPEC,
                 )
             ),
         ],
@@ -148,15 +140,7 @@ test = compositiontest.CompositionTest(
                             "modelplane.ai/deployment": "qwen-demo",
                         },
                     ),
-                    spec=mrv1alpha1.Spec(
-                        modelRef=mrv1alpha1.ModelRef(
-                            kind="ClusterModel",
-                            name="qwen-0.5b",
-                        ),
-                        inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
-                            name="cluster-b",
-                        ),
-                    ),
+                    spec=REPLICA_SPEC,
                 )
             ),
         ],
@@ -175,15 +159,7 @@ test = compositiontest.CompositionTest(
                             "modelplane.ai/deployment": "qwen-demo",
                         },
                     ),
-                    spec=mrv1alpha1.Spec(
-                        modelRef=mrv1alpha1.ModelRef(
-                            kind="ClusterModel",
-                            name="qwen-0.5b",
-                        ),
-                        inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
-                            name="cluster-b",
-                        ),
-                    ),
+                    spec=REPLICA_SPEC,
                 )
             ),
         ],

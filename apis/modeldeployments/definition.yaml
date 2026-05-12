@@ -18,10 +18,7 @@ spec:
     - name: READY
       type: string
       jsonPath: .status.conditions[?(@.type=='Ready')].status
-    - name: MODEL
-      type: string
-      jsonPath: .spec.modelRef.name
-    - name: CLUSTERS
+    - name: REPLICAS
       type: string
       jsonPath: .status.replicas.ready
     - name: ENDPOINT
@@ -37,115 +34,143 @@ spec:
         properties:
           spec:
             type: object
-            required: [modelRef, clusters]
+            required: [replicas, workers, engine]
             properties:
-              modelRef:
-                type: object
-                required: [name]
-                description: Reference to a ClusterModel or Model.
-                properties:
-                  kind:
-                    type: string
-                    description: >-
-                      Kind of model resource. Defaults to ClusterModel.
-                    enum: [ClusterModel, Model]
-                    default: ClusterModel
-                  name:
-                    type: string
-              clusters:
+              replicas:
                 type: integer
                 minimum: 1
                 maximum: 10
                 description: >-
-                  How many InferenceClusters to deploy to.
+                  How many ModelReplicas to fan out to. Each replica is a
+                  complete serving instance scheduled to one InferenceCluster.
               clusterSelector:
                 type: object
                 description: >-
-                  Optional label selector to filter clusters.
+                  Optional label selector to filter InferenceClusters.
                   If omitted, all ready clusters are candidates.
                 properties:
                   matchLabels:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
-              scaling:
+              workers:
                 type: object
+                required: [topology, resources]
                 description: >-
-                  How the model scales. Defaults to a single fixed
-                  replica if not specified.
-                default: {"signal": "Fixed", "fixed": {"replicas": 1}}
-                required: [signal]
+                  Compute shape of one worker. Modelplane composes one
+                  worker (or workers.count workers) per ModelReplica.
                 properties:
-                  signal:
+                  count:
+                    type: integer
+                    minimum: 1
+                    default: 1
+                    description: >-
+                      Number of workers per replica. Defaults to 1.
+                  topology:
+                    type: object
+                    required: [strategy]
+                    description: >-
+                      Compute topology for one worker. The strategy
+                      discriminator selects between single-node (Tensor)
+                      and multi-node (TensorPipeline) serving.
+                    properties:
+                      strategy:
+                        type: string
+                        enum: [Tensor, TensorPipeline]
+                        description: >-
+                          Tensor: single-node tensor parallelism. One pod
+                          with `tensor` GPUs. TensorPipeline: multi-node
+                          tensor+pipeline parallelism. `pipeline` pods
+                          each with `tensor` GPUs.
+                      tensor:
+                        type: integer
+                        minimum: 1
+                        description: >-
+                          GPUs per node. Required for both strategies.
+                      pipeline:
+                        type: integer
+                        minimum: 2
+                        description: >-
+                          Number of nodes per worker. Required when
+                          strategy is TensorPipeline.
+                  resources:
+                    type: object
+                    required: [cpu, memory]
+                    description: >-
+                      Non-GPU pod resources for one worker. GPU count is
+                      derived from topology.
+                    properties:
+                      cpu:
+                        type: string
+                        description: CPU request and limit (e.g. "4").
+                        minLength: 1
+                      memory:
+                        type: string
+                        description: Memory request and limit (e.g. "16Gi").
+                        minLength: 1
+              engine:
+                type: object
+                required: [image]
+                description: >-
+                  Serving engine configuration. Modelplane treats engine
+                  args opaquely - they pass through to the container.
+                properties:
+                  image:
                     type: string
+                    description: Container image.
+                    minLength: 1
+                  args:
+                    type: array
                     description: >-
-                      Scaling signal type. Each signal has a
-                      corresponding config block that must be set.
-                      Backends that don't support the requested signal
-                      are not scheduling candidates.
-                    enum: [Fixed, Concurrency]
-                  fixed:
-                    type: object
+                      Engine args. Opaque; passed through to the container.
+                      Includes the model identifier (e.g. --model=...).
+                    items:
+                      type: string
+                  env:
+                    type: array
                     description: >-
-                      Run a fixed number of replicas with no
-                      autoscaling. Required when signal is Fixed.
-                    required: [replicas]
-                    properties:
-                      replicas:
-                        type: integer
-                        minimum: 1
-                        description: Number of replicas to run.
-                  concurrency:
-                    type: object
+                      Environment variables. Standard PodSpec env shape;
+                      supports valueFrom.secretKeyRef for HF_TOKEN etc.
+                    items:
+                      type: object
+                      required: [name]
+                      properties:
+                        name:
+                          type: string
+                        value:
+                          type: string
+                        valueFrom:
+                          type: object
+                          properties:
+                            secretKeyRef:
+                              type: object
+                              required: [name, key]
+                              properties:
+                                name:
+                                  type: string
+                                key:
+                                  type: string
+                                optional:
+                                  type: boolean
+                            configMapKeyRef:
+                              type: object
+                              required: [name, key]
+                              properties:
+                                name:
+                                  type: string
+                                key:
+                                  type: string
+                                optional:
+                                  type: boolean
+                  imagePullSecrets:
+                    type: array
                     description: >-
-                      Autoscale based on in-flight request concurrency.
-                      Required when signal is Concurrency. Replicas
-                      scale between minReplicas and maxReplicas based
-                      on the number of concurrent requests each replica
-                      is handling.
-                    required: [maxReplicas, target]
-                    properties:
-                      minReplicas:
-                        type: integer
-                        minimum: 0
-                        default: 1
-                        description: >-
-                          Minimum number of replicas. Set to 0 to allow
-                          scale-to-zero when there is no traffic.
-                      maxReplicas:
-                        type: integer
-                        minimum: 1
-                        description: >-
-                          Maximum number of replicas. The autoscaler
-                          will not scale above this value. Must be >=
-                          minReplicas.
-                      target:
-                        type: integer
-                        minimum: 1
-                        description: >-
-                          Target number of concurrent in-flight requests
-                          per replica. The autoscaler scales up when the
-                          average concurrency per replica exceeds
-                          target * utilization / 100. For example, with
-                          target 32 and utilization 70, scaling triggers
-                          at ~22 concurrent requests per replica.
-                      utilization:
-                        type: integer
-                        minimum: 1
-                        maximum: 100
-                        default: 70
-                        description: >-
-                          Target utilization percentage. Provides
-                          headroom before the target is fully saturated.
-                          At 70 (the default), scaling triggers at 70%
-                          of the target concurrency.
-                      scaleDownDelay:
-                        type: integer
-                        minimum: 0
-                        default: 300
-                        description: >-
-                          Seconds to wait before removing replicas after
-                          load decreases. Prevents flapping when traffic
-                          is bursty. Defaults to 300 (5 minutes).
+                      Image pull secrets for private registries (NGC etc.).
+                    items:
+                      type: object
+                      required: [name]
+                      properties:
+                        name:
+                          type: string
           status:
             type: object
             properties:
@@ -164,8 +189,3 @@ spec:
                     type: integer
                   ready:
                     type: integer
-              model:
-                type: object
-                properties:
-                  name:
-                    type: string

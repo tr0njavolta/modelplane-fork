@@ -1,9 +1,9 @@
 """Fan out a ModelDeployment to ModelReplicas and configure routing.
 
-This function discovers InferenceClusters, matches model requirements
-against available capacity, creates a ModelReplica per matched cluster,
-and composes Envoy Gateway Backend + HTTPRoute resources on the control plane
-for unified endpoint routing.
+This function discovers InferenceClusters, matches the deployment's
+topology against available capacity, creates a ModelReplica per
+selected cluster, and composes an HTTPRoute on the control plane for
+unified endpoint routing.
 """
 
 from crossplane.function import request, resource, response
@@ -12,10 +12,8 @@ from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 from . import scheduling
 from .lib import conditions, defaults, metadata, naming
 from .lib import resource as libresource
-from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
 from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from .model.ai.modelplane.inferencegateway import v1alpha1 as igwv1alpha1
-from .model.ai.modelplane.model import v1alpha1 as mv1alpha1
 from .model.ai.modelplane.modeldeployment import v1alpha1
 from .model.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
 from .model.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
@@ -25,7 +23,6 @@ CONDITION_TYPE_REPLICAS_SCHEDULED = "ReplicasScheduled"
 CONDITION_TYPE_REPLICAS_READY = "ReplicasReady"
 
 CONDITION_REASON_NO_CLUSTERS = "NoClusters"
-CONDITION_REASON_MODEL_NOT_FOUND = "ModelNotFound"
 CONDITION_REASON_INSUFFICIENT_CAPACITY = "InsufficientCapacity"
 CONDITION_REASON_REPLICAS_CREATED = "ReplicasCreated"
 CONDITION_REASON_SCHEDULING = "Scheduling"
@@ -43,8 +40,7 @@ class Composer:
         self.rsp = rsp
         self.xr = v1alpha1.ModelDeployment(**resource.struct_to_dict(req.observed.composite.resource))
 
-        # Required resources — set by _resolve_inputs.
-        self.model = None
+        # Required resources — set by resolve_inputs.
         self.clusters = []
         self.gateway = None
         self.all_replicas = []
@@ -61,9 +57,6 @@ class Composer:
     def resolve_inputs(self):
         """Declare and fetch required resources. Returns False if critical
         inputs are missing."""
-        model_kind = self.xr.spec.modelRef.kind
-        model_name = self.xr.spec.modelRef.name
-
         # InferenceClusters are matched by the modelplane.ai/cluster=true
         # label — a workaround for the empty match_labels protobuf bug.
         cluster_match_labels: dict[str, str] = {
@@ -81,13 +74,6 @@ class Composer:
         )
         response.require_resources(
             self.rsp,
-            name="model",
-            api_version="modelplane.ai/v1alpha1",
-            kind=model_kind,
-            match_name=model_name,
-        )
-        response.require_resources(
-            self.rsp,
             name="inference-gateway",
             api_version="modelplane.ai/v1alpha1",
             kind="InferenceGateway",
@@ -102,7 +88,6 @@ class Composer:
         )
 
         cluster_dicts = request.get_required_resources(self.req, "clusters")
-        model_dict = request.get_required_resource(self.req, "model")
         gw_dict = request.get_required_resource(self.req, "inference-gateway")
         replica_dicts = request.get_required_resources(self.req, "all-replicas")
 
@@ -116,23 +101,9 @@ class Composer:
             response.warning(self.rsp, "No InferenceClusters found")
             return False
 
-        if model_dict is None:
-            conditions.set_condition(
-                self.rsp,
-                CONDITION_TYPE_REPLICAS_SCHEDULED,
-                False,
-                CONDITION_REASON_MODEL_NOT_FOUND,
-            )
-            response.warning(self.rsp, f"Model {model_name} not found")
-            return False
-
         self.clusters = [
             defaults.inference_cluster(icv1alpha1.InferenceCluster.model_validate(c)) for c in cluster_dicts
         ]
-        if model_kind == "Model":
-            self.model = defaults.cluster_model(mv1alpha1.ModelModel.model_validate(model_dict))
-        else:
-            self.model = defaults.cluster_model(cmv1alpha1.ClusterModel.model_validate(model_dict))
         self.gateway = (
             defaults.inference_gateway(igwv1alpha1.InferenceGateway.model_validate(gw_dict)) if gw_dict else None
         )
@@ -141,9 +112,8 @@ class Composer:
         return True
 
     def schedule(self):
-        """Match model requirements against available clusters. Returns the
-        list of matched candidates."""
-        matched = scheduling.schedule(self.xr, self.model, self.clusters, self.all_replicas)
+        """Match the deployment's topology against available clusters."""
+        matched = scheduling.schedule(self.xr, self.clusters, self.all_replicas)
 
         # Transition: emit which clusters were matched (first time only).
         if not matched:
@@ -156,7 +126,17 @@ class Composer:
         return matched
 
     def compose_replicas(self, matched):
-        """Compose a ModelReplica per matched cluster."""
+        """Compose a ModelReplica per matched cluster.
+
+        Each replica inherits the deployment's workers and engine blocks
+        verbatim and adds an inferenceClusterRef.
+        """
+        # Convert via model_dump because the MD and MR Workers/Engine
+        # types are different Pydantic classes (generated from different
+        # XRDs with the same schema).
+        workers = mrv1alpha1.Workers.model_validate(self.xr.spec.workers.model_dump(exclude_none=True))
+        engine = mrv1alpha1.Engine.model_validate(self.xr.spec.engine.model_dump(exclude_none=True))
+
         for cluster_info in matched:
             replica_key = f"replica-{cluster_info.name}"
 
@@ -172,17 +152,11 @@ class Composer:
                         },
                     ),
                     spec=mrv1alpha1.Spec(
-                        modelRef=mrv1alpha1.ModelRef(
-                            kind=self.xr.spec.modelRef.kind,
-                            name=self.xr.spec.modelRef.name,
-                        ),
                         inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
                             name=cluster_info.name,
                         ),
-                        # Convert via model_dump because the MD and MR
-                        # Scaling types are different Pydantic classes
-                        # (generated from different XRDs).
-                        scaling=mrv1alpha1.Scaling.model_validate(self.xr.spec.scaling.model_dump(exclude_none=True)),
+                        workers=workers,
+                        engine=engine,
                     ),
                 ),
             )
@@ -196,10 +170,11 @@ class Composer:
 
         backend_refs = self.backend_refs(matched)
 
-        # Rewrite /{ns}/{deployment}/ to /{remote-ns}/{model-name}/.
-        # The LLMIS name is the ClusterModel name on all remote clusters,
-        # so the rewrite is the same for every backend.
-        rewrite_prefix = f"/{metadata.NAMESPACE_REMOTE}/{naming.to_dns_label(self.xr.spec.modelRef.name)}/"
+        # Rewrite /{ns}/{deployment}/ to /{remote-ns}/{deployment}/.
+        # The LLMIS name on every remote cluster is the deployment name,
+        # so the rewrite is uniform across backends.
+        llmis = naming.llmis_name(self.xr.metadata.name)
+        rewrite_prefix = f"/{metadata.NAMESPACE_REMOTE}/{llmis}/"
 
         # Gateway parentRef — defaults for Envoy Gateway, could be read
         # from InferenceGateway status in future.
@@ -243,13 +218,12 @@ class Composer:
         )
 
     def write_status(self, matched):
-        """Write deployment status: model name, replica counts, endpoint."""
+        """Write deployment status: replica counts and endpoint."""
         gateway_ip = self.gateway.status.address if self.gateway else None
 
         replicas_ready = sum(1 for c in matched if conditions.has_condition(self.req, f"replica-{c.name}", "Ready"))
 
         status = v1alpha1.Status(
-            model=v1alpha1.Model(name=self.model.spec.model.name),
             replicas=v1alpha1.Replicas(total=len(matched), ready=replicas_ready),
         )
         if gateway_ip:
@@ -277,7 +251,7 @@ class Composer:
 
         if not matched:
             reason = CONDITION_REASON_INSUFFICIENT_CAPACITY
-            msg = f"0 of {int(self.xr.spec.clusters)} clusters matched (checked {len(self.clusters)})"
+            msg = f"0 of {int(self.xr.spec.replicas)} clusters matched (checked {len(self.clusters)})"
         elif scheduled:
             reason = CONDITION_REASON_REPLICAS_CREATED
             msg = f"Matched {len(matched)} clusters"
