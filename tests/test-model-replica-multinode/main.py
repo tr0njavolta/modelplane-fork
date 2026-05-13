@@ -18,7 +18,7 @@ from .model.io.upbound.dev.meta.compositiontest import v1alpha1 as compositionte
 CONTAINER = {
     "name": "main",
     "image": "vllm/vllm-openai:v0.7.3",
-    "args": ["--model=meta-llama/Llama-3.1-405B"],
+    "args": [],
     "securityContext": {
         "runAsUser": 0,
         "runAsNonRoot": False,
@@ -103,6 +103,7 @@ test = compositiontest.CompositionTest(
                                     "namespace": "default",
                                 },
                                 "spec": {
+                                    "model": {"uri": "hf://meta-llama/Llama-3.1-405B"},
                                     "replicas": 1,
                                     "parallelism": {"tensor": 16},
                                     "template": {

@@ -93,6 +93,19 @@ class Composer:
         gpu_per_pod = int(topology.tensor)
         multi_node = topology.strategy == STRATEGY_TENSOR_PIPELINE
 
+        # Extract the model name from engine args (e.g. --model=Qwen/...)
+        # to build the HuggingFace URI that KServe requires. Strip the
+        # --model= arg from the container args — KServe handles model
+        # fetching via model.uri and invokes the engine with the local
+        # model path.
+        model_name = ""
+        container_args = []
+        for arg in list(engine.args or []):
+            if arg.startswith("--model="):
+                model_name = arg.split("=", 1)[1]
+            else:
+                container_args.append(arg)
+
         # Build the container spec. Image and args come straight from
         # the engine block; env and imagePullSecrets pass through. The
         # GPU count is set via the device plugin; DRA support is a
@@ -100,7 +113,7 @@ class Composer:
         container: dict = {
             "name": "main",
             "image": engine.image,
-            "args": list(engine.args or []),
+            "args": container_args,
             "securityContext": {"runAsUser": 0, "runAsNonRoot": False},
             "resources": {
                 "limits": {
@@ -117,14 +130,6 @@ class Composer:
         pod_spec: dict = {"containers": [container]}
         if engine.imagePullSecrets:
             pod_spec["imagePullSecrets"] = [s.model_dump(exclude_none=True) for s in engine.imagePullSecrets]
-
-        # Extract the model name from engine args (e.g. --model=Qwen/...)
-        # to build the HuggingFace URI that KServe requires.
-        model_name = ""
-        for arg in list(engine.args or []):
-            if arg.startswith("--model="):
-                model_name = arg.split("=", 1)[1]
-                break
 
         llmis_spec: dict = {
             "model": {"uri": f"hf://{model_name}" if model_name else "hf://unknown"},

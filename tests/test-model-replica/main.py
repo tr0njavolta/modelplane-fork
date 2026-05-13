@@ -73,15 +73,14 @@ test = compositiontest.CompositionTest(
                                     "namespace": "default",
                                 },
                                 "spec": {
+                                    "model": {"uri": "hf://Qwen/Qwen2.5-0.5B-Instruct"},
                                     "replicas": 1,
                                     "template": {
                                         "containers": [
                                             {
                                                 "name": "main",
                                                 "image": "vllm/vllm-openai:v0.7.3",
-                                                "args": [
-                                                    "--model=Qwen/Qwen2.5-0.5B-Instruct",
-                                                ],
+                                                "args": [],
                                                 "securityContext": {
                                                     "runAsUser": 0,
                                                     "runAsNonRoot": False,
