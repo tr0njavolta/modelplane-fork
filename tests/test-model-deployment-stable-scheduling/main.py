@@ -118,6 +118,7 @@ test = compositiontest.CompositionTest(
                         labels={
                             "modelplane.ai/replica": "true",
                             "modelplane.ai/deployment": "qwen-demo",
+                            "modelplane.ai/cluster": "cluster-b",
                         },
                     ),
                     spec=REPLICA_SPEC,
@@ -138,6 +139,7 @@ test = compositiontest.CompositionTest(
                         labels={
                             "modelplane.ai/replica": "true",
                             "modelplane.ai/deployment": "qwen-demo",
+                            "modelplane.ai/cluster": "cluster-b",
                         },
                     ),
                     spec=REPLICA_SPEC,
@@ -157,6 +159,7 @@ test = compositiontest.CompositionTest(
                         labels={
                             "modelplane.ai/replica": "true",
                             "modelplane.ai/deployment": "qwen-demo",
+                            "modelplane.ai/cluster": "cluster-b",
                         },
                     ),
                     spec=REPLICA_SPEC,

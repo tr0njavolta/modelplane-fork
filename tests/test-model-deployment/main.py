@@ -101,6 +101,7 @@ test = compositiontest.CompositionTest(
                         labels={
                             "modelplane.ai/replica": "true",
                             "modelplane.ai/deployment": "qwen-demo",
+                            "modelplane.ai/cluster": "demo-us-central",
                         },
                     ),
                     spec=mrv1alpha1.Spec(
@@ -135,6 +136,7 @@ test = compositiontest.CompositionTest(
                         namespace="ml-team",
                         labels={
                             "modelplane.ai/deployment": "qwen-demo",
+                            "modelplane.ai/cluster": "demo-us-central",
                         },
                     ),
                     spec=mev1alpha1.Spec(

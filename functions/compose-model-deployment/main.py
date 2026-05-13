@@ -154,6 +154,7 @@ class Composer:
                         labels={
                             metadata.LABEL_KEY_REPLICA: metadata.LABEL_VALUE_REPLICA,
                             metadata.LABEL_KEY_DEPLOYMENT: self.xr.metadata.name,
+                            metadata.LABEL_KEY_CLUSTER: cluster_info.name,
                         },
                     ),
                     spec=mrv1alpha1.Spec(
@@ -194,6 +195,7 @@ class Composer:
                         namespace=self.xr.metadata.namespace,
                         labels={
                             metadata.LABEL_KEY_DEPLOYMENT: self.xr.metadata.name,
+                            metadata.LABEL_KEY_CLUSTER: cluster_info.name,
                         },
                     ),
                     spec=mev1alpha1.Spec(

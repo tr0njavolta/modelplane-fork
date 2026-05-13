@@ -78,6 +78,7 @@ test = compositiontest.CompositionTest(
                         labels={
                             "modelplane.ai/replica": "true",
                             "modelplane.ai/deployment": "qwen-demo",
+                            "modelplane.ai/cluster": "compatible-cluster",
                         },
                     ),
                     spec=mrv1alpha1.Spec(
