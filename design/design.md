@@ -32,13 +32,13 @@ spec:
       strategy: TensorPipeline
       tensor: 8
       pipeline: 2
-  engine:
-    name: vLLM
-    image: vllm/vllm-openai:v0.8.5
-    args:
-    - "--model=moonshotai/Kimi-K2-Instruct"
-    - "--trust-remote-code"
-    - "--max-model-len=65536"
+    template:
+      containers:
+      - image: vllm/vllm-openai:v0.8.5
+        args:
+        - "--model=moonshotai/Kimi-K2-Instruct"
+        - "--trust-remote-code"
+        - "--max-model-len=65536"
 ```
 
 Modelplane handles fleet scheduling, multi-cluster routing, and infrastructure
@@ -127,9 +127,9 @@ operational: can they provide inference capacity without becoming a bottleneck?
 
 The ML team needs to run inference against open-weight models as part of their
 product or research. They create a `ModelDeployment` specifying everything
-needed to run the model: engine image, engine args, hardware requirements, and
-the compute topology. They create a `ModelService` to get a unified endpoint,
-and optionally create manual `ModelEndpoint` resources to route to external SaaS
+needed to run the model: the worker template, hardware requirements, and the
+compute topology. They create a `ModelService` to get a unified endpoint, and
+optionally create manual `ModelEndpoint` resources to route to external SaaS
 providers (Together, BaseTen) alongside self-hosted replicas. Modelplane handles
 scheduling, composition, and routing. The ML team thinks about what model to
 deploy and how it should be configured, not where it runs.
@@ -310,8 +310,18 @@ controls what runs on the cluster.
 A self-contained model deployment spec. The ML team creates one to deploy a
 model to the fleet. Modelplane creates a `ModelReplica` for each replica and
 schedules it to an `InferenceCluster`. `ModelDeployment` carries everything
-about what to deploy and how: the engine image and args, hardware requirements
-via CEL, the compute topology, and the replica count.
+about what to deploy and how: the worker template, hardware requirements via
+CEL, the compute topology, and the replica count.
+
+`workers.template` is a curated subset of a Kubernetes `PodTemplateSpec` in the
+same structural shape, so that fields can be added without restructuring. v0.1
+exposes `containers` (carrying `image`, `args`, `env`, and `envFrom`) and
+`imagePullSecrets`. The composition function manages the first container as the
+inference engine; additional containers pass through as sidecars. The
+composition function maps the template to the appropriate workload resource on
+the target cluster. References to Secrets in `env` or `imagePullSecrets` are
+passed through; the referenced objects must exist on every InferenceCluster the
+deployment may target.
 
 ```yaml
 apiVersion: modelplane.ai/v1alpha1
@@ -331,14 +341,14 @@ spec:
     topology:
       strategy: Tensor
       tensor: 2
-  engine:
-    name: vLLM
-    image: vllm/vllm-openai:v0.8.5
-    args:
-    - "--model=mistralai/Mixtral-8x7B-Instruct-v0.1"
-    - "--tensor-parallel-size=2"
-    - "--max-model-len=32768"
-    - "--gpu-memory-utilization=0.9"
+    template:
+      containers:
+      - image: vllm/vllm-openai:v0.8.5
+        args:
+        - "--model=mistralai/Mixtral-8x7B-Instruct-v0.1"
+        - "--tensor-parallel-size=2"
+        - "--max-model-len=32768"
+        - "--gpu-memory-utilization=0.9"
 ```
 
 #### Two-level matching
@@ -377,9 +387,9 @@ available nodes?
 
 #### Disaggregated prefill/decode
 
-The top-level `nodeSelector`, `workers`, and `engine` are always the decode (or
-unified) settings. Adding a `prefill` block makes the deployment disaggregated.
-The `prefill` block is self-contained: it repeats all settings rather than
+The top-level `nodeSelector` and `workers` are always the decode (or unified)
+settings. Adding a `prefill` block makes the deployment disaggregated. The
+`prefill` block is self-contained: it repeats all settings rather than
 inheriting from the root, because explicit repetition is easier to reason about
 than implicit merge.
 
@@ -411,13 +421,13 @@ spec:
       strategy: TensorPipeline
       tensor: 8
       pipeline: 2
-  engine:
-    name: vLLM
-    image: vllm/vllm-openai:v0.9.1
-    args:
-    - "--model=meta-llama/Llama-3.1-405B-Instruct"
-    - "--max-model-len=131072"
-    - '--kv-transfer-config={"kv_role":"kv_consumer"}'
+    template:
+      containers:
+      - image: vllm/vllm-openai:v0.9.1
+        args:
+        - "--model=meta-llama/Llama-3.1-405B-Instruct"
+        - "--max-model-len=131072"
+        - '--kv-transfer-config={"kv_role":"kv_consumer"}'
 
   # Prefill: 5 workers, each single-GPU. Self-contained.
   prefill:
@@ -430,12 +440,12 @@ spec:
       topology:
         strategy: Tensor
         tensor: 1
-    engine:
-      name: vLLM
-      image: vllm/vllm-openai:v0.9.1
-      args:
-      - "--model=meta-llama/Llama-3.1-405B-Instruct"
-      - '--kv-transfer-config={"kv_role":"kv_producer"}'
+      template:
+        containers:
+        - image: vllm/vllm-openai:v0.9.1
+          args:
+          - "--model=meta-llama/Llama-3.1-405B-Instruct"
+          - '--kv-transfer-config={"kv_role":"kv_producer"}'
 ```
 
 ### ModelReplica
@@ -614,7 +624,7 @@ When an ML team creates a ModelDeployment:
    `(cluster, pool)` for each replica.
 2. It composes a ModelReplica targeting that cluster and a ModelEndpoint for
    routing.
-3. The replica function reads engine and topology config from the
+3. The replica function reads the worker template and topology from the
    ModelReplica and composes the serving workload on the target cluster.
 4. The service function reads the InferenceGateway and matched ModelEndpoints,
    and composes routing resources on the control plane.
