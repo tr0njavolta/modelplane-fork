@@ -25,7 +25,7 @@ spec:
   nodeSelector:
     cel: |
       capacity["gpu.nvidia.com/memory"].compareTo(quantity("141Gi")) >= 0 &&
-      attributes["gpu.nvidia.com/features"].includes("fp8") &&
+      attributes["gpu.nvidia.com/cudaComputeCapability"].isGreaterThan(version("9.0.0")) &&
       attributes["modelplane.ai/networkInterNode"].string == "infiniband"
   workers:
     topology:
@@ -163,12 +163,22 @@ A tested recipe for a GPU node pool. Each class bundles **attributes and
 capacity** (what this hardware has, used by the scheduler) and optionally
 **provisioning** (how to create it on a specific cloud).
 
-Attributes and capacity follow DRA's schema ([KEP-4381][]). Attributes are typed
-qualitative facts the scheduler matches on: architecture, feature flags,
-topology kind. Capacity is the quantitative side — a map of Kubernetes
-Quantities. Keys use DRA's vendor-namespaced convention: `gpu.nvidia.com/*` for
-what the NVIDIA DRA driver publishes, `modelplane.ai/*` for what Modelplane
-defines.
+Attributes and capacity follow DRA's schema ([KEP-4381][]) for structure:
+attributes are typed key-value pairs (`{string: "Hopper"}`, `{version:
+"9.0.0"}`), capacity is a map of Kubernetes Quantities. Keys use DRA's
+qualified-name convention (`domain/name`).
+
+The keys and values are a contract between the platform team (who authors
+InferenceClasses) and the ML team (who writes `nodeSelector.cel` on
+ModelDeployments). Modelplane doesn't enforce or validate specific keys or
+values. Keys that correspond to real DRA device attributes (e.g.
+`gpu.nvidia.com/architecture`, `gpu.nvidia.com/memory`) should match what the
+DRA driver publishes in ResourceSlices on the actual node pools. The composition
+function passes these through to DRA ResourceClaim selectors when binding GPUs
+to pods. Keys prefixed with `modelplane.ai/*` are fleet-scheduling attributes —
+pool-level properties like GPU count per node or inter-node networking that
+don't correspond to per-device DRA attributes. These are filtered out when
+forming ResourceClaims.
 
 [KEP-4381]: https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/4381-dra-structured-parameters
 [KEP-5075]: https://github.com/kubernetes/enhancements/tree/master/keps/sig-scheduling/5075-dra-consumable-capacity
@@ -195,23 +205,26 @@ spec:
       networking:
         gpuDirectTCPX: true
   attributes:
+    # These match what the NVIDIA DRA driver publishes per device.
     gpu.nvidia.com/architecture:
       string: Hopper
     gpu.nvidia.com/productName:
       string: "NVIDIA H200 141GB HBM3e"
     gpu.nvidia.com/cudaComputeCapability:
       version: "9.0.0"
-    gpu.nvidia.com/features:
-      strings: [fp8, bf16, transformer-engine, mig]
+    # These are fleet-scheduling attributes. They don't correspond to
+    # per-device DRA attributes and are filtered out of ResourceClaims.
     modelplane.ai/interconnectIntraNode:
       string: nvswitch
     modelplane.ai/networkInterNode:
       string: gpudirect-tcpx
   capacity:
-    gpu.nvidia.com/gpuCount:
-      value: "8"
+    # Matches what the NVIDIA DRA driver publishes per device.
     gpu.nvidia.com/memory:
       value: "141Gi"
+    # Fleet-scheduling capacity. Filtered out of ResourceClaims.
+    modelplane.ai/gpuCount:
+      value: "8"
     modelplane.ai/networkBandwidth:
       value: "200Gi"           # bits per second
 ```
@@ -359,11 +372,10 @@ region, provider, compliance posture. String equality is sufficient.
 
 Node-level matching uses `nodeSelector.cel`, a CEL expression evaluated against
 the pool's `InferenceClass` attributes and capacity. The attribute schema
-follows DRA's typed format (`{string: "Hopper"}`, `{int: 8}`, `{version:
-"9.0.0"}`) with vendor-namespaced keys (`gpu.nvidia.com/*`, `modelplane.ai/*`).
-Capacity uses Kubernetes Quantity values. This alignment means InferenceClass
-declarations are schema-validatable at admission time and directly translatable
-to DRA ResourceClaim selectors.
+follows DRA's typed format (`{string: "Hopper"}`, `{version: "9.0.0"}`) with
+qualified keys (`gpu.nvidia.com/*`, `modelplane.ai/*`). Capacity uses
+Kubernetes Quantity values. Keys matching real DRA device attributes pass
+through to ResourceClaim selectors; `modelplane.ai/*` keys are filtered out.
 
 #### Workers and topology
 
@@ -382,7 +394,7 @@ workers of that shape exist per ModelReplica.
 The scheduler derives the physical shape from the topology. No separate node
 count or GPU count fields; the topology fully determines the resource
 requirements. The scheduler checks: does the matched pool's InferenceClass have
-`gpu.nvidia.com/gpuCount` >= GPUs-per-node, and does the pool have enough
+`modelplane.ai/gpuCount` >= GPUs-per-node, and does the pool have enough
 available nodes?
 
 #### Disaggregated prefill/decode
@@ -646,9 +658,12 @@ The fleet scheduler picks `(InferenceCluster, pool)` for each ModelReplica:
 Modelplane will support affinity and anti-affinity in a future version.
 
 DRA is the device binding mechanism on every InferenceCluster. The composition
-function emits `ResourceClaim`s derived from the matched pool's InferenceClass
-attributes and capacity. Because the InferenceClass uses the same DRA schema
-and vendor-namespaced keys, the translation is direct. DRA handles actual
+function forms `ResourceClaim`s from the matched pool's InferenceClass. It
+references the driver's DeviceClass (e.g. `gpu.nvidia.com`) and adds CEL
+selectors derived from the InferenceClass's attributes and capacity, filtering
+out `modelplane.ai/*` keys. Because the remaining keys use the same qualified
+names the DRA driver publishes, the translation is a straightforward split of
+`domain/name` into `device.attributes["domain"].name`. DRA handles actual
 device-to-node binding at pod admission time.
 
 ## Autoscaling
