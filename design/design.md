@@ -652,7 +652,7 @@ The ModelDeployment XRD declares a Kubernetes scale subresource
 (`specReplicasPath: .spec.replicas`, `statusReplicasPath: .status.replicas`).
 Autoscaling is opt-in via a separate KEDA `ScaledObject`, the same pattern as
 Kubernetes Deployment + HPA. KEDA watches aggregate gateway metrics (concurrency
-across all replicas) and writes `spec.replicas`. The relavant composition
+across all replicas) and writes `spec.replicas`. The relevant composition
 function reconciles ModelReplicas to match.
 
 ## Alternatives considered
