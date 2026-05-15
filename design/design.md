@@ -201,8 +201,6 @@ spec:
       string: "NVIDIA H200 141GB HBM3e"
     gpu.nvidia.com/cudaComputeCapability:
       version: "9.0.0"
-    gpu.nvidia.com/gpuCount:
-      int: 8
     gpu.nvidia.com/features:
       strings: [fp8, bf16, transformer-engine, mig]
     modelplane.ai/interconnectIntraNode:
@@ -210,6 +208,8 @@ spec:
     modelplane.ai/networkInterNode:
       string: gpudirect-tcpx
   capacity:
+    gpu.nvidia.com/gpuCount:
+      value: "8"
     gpu.nvidia.com/memory:
       value: "141Gi"
     modelplane.ai/networkBandwidth:
@@ -372,7 +372,7 @@ workers of that shape exist per ModelReplica.
 The scheduler derives the physical shape from the topology. No separate node
 count or GPU count fields; the topology fully determines the resource
 requirements. The scheduler checks: does the matched pool's InferenceClass have
-`gpu.nvidia.com/gpucount` >= GPUs-per-node, and does the pool have enough
+`gpu.nvidia.com/gpuCount` >= GPUs-per-node, and does the pool have enough
 available nodes?
 
 #### Disaggregated prefill/decode
