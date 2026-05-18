@@ -69,8 +69,8 @@ test = compositiontest.CompositionTest(
                 )
             ),
             # Assert the HTTPRoute is composed with the matched endpoint's
-            # backend as a backendRef and the endpoint's rewritePath as
-            # the URLRewrite target.
+            # backend as a backendRef. The URLRewrite filter is per-backendRef
+            # so endpoints with different rewritePaths are rewritten correctly.
             {
                 "apiVersion": "gateway.networking.k8s.io/v1",
                 "kind": "HTTPRoute",
@@ -97,17 +97,6 @@ test = compositiontest.CompositionTest(
                                     },
                                 }
                             ],
-                            "filters": [
-                                {
-                                    "type": "URLRewrite",
-                                    "urlRewrite": {
-                                        "path": {
-                                            "type": "ReplacePrefixMatch",
-                                            "replacePrefixMatch": "/default/qwen-demo/",
-                                        },
-                                    },
-                                }
-                            ],
                             "backendRefs": [
                                 {
                                     "group": "gateway.envoyproxy.io",
@@ -115,6 +104,17 @@ test = compositiontest.CompositionTest(
                                     "name": "qwen-demo-demo-us-central-backend-x7k2",
                                     "port": 80,
                                     "weight": 1,
+                                    "filters": [
+                                        {
+                                            "type": "URLRewrite",
+                                            "urlRewrite": {
+                                                "path": {
+                                                    "type": "ReplacePrefixMatch",
+                                                    "replacePrefixMatch": "/default/qwen-demo/",
+                                                },
+                                            },
+                                        }
+                                    ],
                                 }
                             ],
                         }

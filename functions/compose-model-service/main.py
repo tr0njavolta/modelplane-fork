@@ -6,9 +6,10 @@ address and parentRef) and the matching ModelEndpoints (for their
 backend names and rewrite paths), then composes a single HTTPRoute on
 the control plane.
 
-The match prefix is `/<service-ns>/<service-name>/`. The URLRewrite
-target comes from the matched endpoints' spec.rewritePath - all
-endpoints from one deployment share the same rewritePath.
+The match prefix is `/<service-ns>/<service-name>/`. Each backendRef
+carries its own URLRewrite filter derived from the endpoint's
+spec.rewritePath, so endpoints from different deployments or external
+providers can coexist with different rewrite targets.
 """
 
 from crossplane.function import request, resource, response
@@ -90,33 +91,52 @@ class Composer:
             response.warning(self.rsp, "No ModelEndpoints matched the configured selectors")
             return False
 
+        ready = sum(1 for ep in self.endpoints if ep.status and ep.status.routing and ep.status.routing.backendName)
+        waiting = len(self.endpoints) - ready
+        msg = f"Matched {len(self.endpoints)} endpoint(s)"
+        if waiting > 0:
+            msg += f"; {waiting} waiting for Backend"
+
         conditions.set_condition(
             self.rsp,
             CONDITION_TYPE_ENDPOINTS_RESOLVED,
             True,
             CONDITION_REASON_RESOLVED,
-            f"Matched {len(self.endpoints)} endpoint(s)",
+            msg,
         )
         return True
 
     def compose_httproute(self):
-        """Compose an HTTPRoute that load-balances across matched endpoints."""
+        """Compose an HTTPRoute that load-balances across matched endpoints.
+
+        Each backendRef carries its own URLRewrite filter so endpoints
+        with different rewritePaths (e.g. composed replicas vs. external
+        SaaS providers) are rewritten correctly per-backend.
+        """
         backend_refs = []
-        rewrite_path = None
         for ep in self.endpoints:
             if not ep.status or not ep.status.routing or not ep.status.routing.backendName:
                 continue
-            backend_refs.append(
-                {
-                    "group": "gateway.envoyproxy.io",
-                    "kind": "Backend",
-                    "name": ep.status.routing.backendName,
-                    "port": 80,
-                    "weight": 1,
-                }
-            )
-            if rewrite_path is None and ep.spec.rewritePath:
-                rewrite_path = ep.spec.rewritePath
+            ref: dict = {
+                "group": "gateway.envoyproxy.io",
+                "kind": "Backend",
+                "name": ep.status.routing.backendName,
+                "port": 80,
+                "weight": 1,
+            }
+            if ep.spec.rewritePath:
+                ref["filters"] = [
+                    {
+                        "type": "URLRewrite",
+                        "urlRewrite": {
+                            "path": {
+                                "type": "ReplacePrefixMatch",
+                                "replacePrefixMatch": ep.spec.rewritePath,
+                            },
+                        },
+                    }
+                ]
+            backend_refs.append(ref)
 
         match_prefix = f"/{self.xr.metadata.namespace}/{self.xr.metadata.name}/"
 
@@ -130,18 +150,6 @@ class Composer:
                 }
             ],
         }
-        if rewrite_path:
-            rule["filters"] = [
-                {
-                    "type": "URLRewrite",
-                    "urlRewrite": {
-                        "path": {
-                            "type": "ReplacePrefixMatch",
-                            "replacePrefixMatch": rewrite_path,
-                        },
-                    },
-                }
-            ]
         if backend_refs:
             rule["backendRefs"] = backend_refs
 
