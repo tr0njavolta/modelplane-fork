@@ -17,7 +17,6 @@ from . import scheduling
 from .lib import conditions, defaults, metadata, naming
 from .lib import resource as libresource
 from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
-from .model.ai.modelplane.inferencegateway import v1alpha1 as igwv1alpha1
 from .model.ai.modelplane.modeldeployment import v1alpha1
 from .model.ai.modelplane.modelendpoint import v1alpha1 as mev1alpha1
 from .model.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
@@ -44,7 +43,6 @@ class Composer:
 
         # Required resources — set by resolve_inputs.
         self.clusters = []
-        self.gateway = None
         self.all_replicas = []
         # InferenceClusters keyed by name; populated from self.clusters.
         self.clusters_by_name: dict[str, icv1alpha1.InferenceCluster] = {}
@@ -78,13 +76,6 @@ class Composer:
         )
         response.require_resources(
             self.rsp,
-            name="inference-gateway",
-            api_version="modelplane.ai/v1alpha1",
-            kind="InferenceGateway",
-            match_name="default",
-        )
-        response.require_resources(
-            self.rsp,
             name="all-replicas",
             api_version="modelplane.ai/v1alpha1",
             kind="ModelReplica",
@@ -92,7 +83,6 @@ class Composer:
         )
 
         cluster_dicts = request.get_required_resources(self.req, "clusters")
-        gw_dict = request.get_required_resource(self.req, "inference-gateway")
         replica_dicts = request.get_required_resources(self.req, "all-replicas")
 
         if not cluster_dicts:
@@ -109,9 +99,6 @@ class Composer:
             defaults.inference_cluster(icv1alpha1.InferenceCluster.model_validate(c)) for c in cluster_dicts
         ]
         self.clusters_by_name = {c.metadata.name: c for c in self.clusters}
-        self.gateway = (
-            defaults.inference_gateway(igwv1alpha1.InferenceGateway.model_validate(gw_dict)) if gw_dict else None
-        )
         self.all_replicas = [defaults.model_replica(mrv1alpha1.ModelReplica.model_validate(r)) for r in replica_dicts]
 
         return True
