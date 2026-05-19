@@ -26,8 +26,8 @@ You also need:
 
 ## Create a kind cluster
 
-The control plane runs in a local kind cluster. No special configuration is
-needed.
+The control plane runs in a local kind cluster. It needs no special
+configuration.
 
 ```bash
 kind create cluster --name modelplane
@@ -126,7 +126,7 @@ spec:
       name: provider-helm-modelplane
 ---
 # Pull secret for Modelplane packages. The package registry requires
-# authentication. The pull secret is applied in the next step.
+# authentication. The next step applies the pull secret.
 apiVersion: pkg.crossplane.io/v1beta1
 kind: ImageConfig
 metadata:
@@ -294,12 +294,12 @@ kubectl get ms qwen -n ml-team -o jsonpath='{.status.address}'
 ## Clean up
 
 Delete the ModelDeployment before the InferenceCluster. If you delete the
-cluster first, the deployment will be stuck trying to reconcile against a
-cluster that's being torn down.
+cluster first, the deployment gets stuck reconciling against a cluster
+Crossplane is tearing down.
 
 Wait for the GKE cluster to be fully deprovisioned before deleting the kind
 cluster. If you delete the kind cluster while Crossplane is still cleaning up,
-the GKE resources will be orphaned.
+Crossplane orphans the GKE resources.
 
 ```bash
 kubectl delete md --all -n ml-team

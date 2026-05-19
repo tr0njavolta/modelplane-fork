@@ -53,8 +53,7 @@ Create one InferenceGateway per control plane. It must be named `default`. When
 running the control plane in kind, set `loadBalancer: MetalLB` to get a
 LoadBalancer IP inside the Docker network.
 
-Once ready, the gateway's external address is available in the resource's
-status:
+Once ready, read the gateway's external address from the resource's status:
 
 ```bash
 kubectl get ig default
@@ -87,14 +86,9 @@ Each cluster has:
 - **Labels** for organizational metadata: tier, region, provider. These are the
   matching surface for `ModelDeployment.clusterSelector`.
 
-Modelplane installs an inference stack (including cert-manager, Envoy Gateway,
-KServe, Prometheus, and KEDA) on every cluster it manages. For provisioned
-clusters Modelplane handles this directly. For existing clusters the platform
-team is responsible for meeting the cluster prerequisites.
-
-The cluster's GPU capacity is derived from its node pools' InferenceClasses and
-used by the scheduler when placing models. A cluster must be `Ready` and have a
-gateway address to be eligible for scheduling.
+Modelplane installs an inference stack (e.g. LeaderWorkerSet, llm-d, Dynamo,
+Envoy Gateway, etc) on every cluster it manages. This includes existing
+clusters, which Modelplane assumes are solely for its use.
 
 ## ModelDeployment
 
@@ -102,7 +96,7 @@ A ModelDeployment is the ML team's interface. It carries everything needed to
 deploy a model to the fleet: the worker template, hardware topology, and replica
 count.
 
-When a ModelDeployment is created, the scheduler:
+When you create a ModelDeployment, the scheduler:
 
 1. Discovers all ready InferenceClusters (filtered by `clusterSelector` labels
    if set).
@@ -115,9 +109,8 @@ When a ModelDeployment is created, the scheduler:
    for routing.
 
 The worker template is a curated subset of `PodTemplateSpec`. The container
-named `engine` is the inference engine; additional containers pass through as
-sidecars. A CEL validation rule on the XRD enforces that exactly one container
-named `engine` exists.
+named `engine` is the inference engine (e.g. vLLM); additional containers pass
+through as sidecars.
 
 ### Scaling
 
@@ -131,8 +124,8 @@ pattern as Kubernetes Deployment + HPA.
 
 ## ModelReplica
 
-A ModelReplica is created by the ModelDeployment's composition function. Users
-don't create these directly.
+The ModelDeployment's composition function creates ModelReplicas. Don't create
+them directly.
 
 Each replica represents a model deployed to a specific cluster. It reads the
 worker template and topology, finds the engine container, and composes a KServe
@@ -145,9 +138,9 @@ A ModelEndpoint is a reachable inference endpoint. Modelplane composes one per
 ModelReplica, but ML teams can also create them manually for external SaaS
 providers (Together, BaseTen).
 
-Each endpoint composes an Envoy Gateway `Backend` on the control plane. The
-Backend's name is surfaced in `status.routing.backendName` so that ModelService
-can reference it in its HTTPRoute.
+Each endpoint composes an Envoy Gateway `Backend` on the control plane.
+ModelEndpoint surfaces the Backend's name in `status.routing.backendName` so
+ModelService can reference it in its HTTPRoute.
 
 ## ModelService
 
@@ -159,7 +152,7 @@ Each backendRef in the HTTPRoute carries its own `URLRewrite` filter derived
 from the endpoint's `spec.rewritePath`, so endpoints from different deployments
 or external providers with different path layouts coexist correctly.
 
-The service's public address is available in `status.address`:
+Read the service's public address from `status.address`:
 
 ```bash
 kubectl get ms qwen -n ml-team -o jsonpath='{.status.address}'
