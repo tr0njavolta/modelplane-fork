@@ -152,9 +152,7 @@ Configuration. This pulls the providers and composition functions it depends on.
 
 `up ctp pull-secret create` uses the credentials of the currently active `up`
 profile. Make sure you're logged in as a user account with access to the
-`modelplane` organization (run `up login` if not). Robot account profiles can
-push packages but typically can't pull them, so the resulting secret won't
-work.
+`modelplane` organization (run `up login` if not).
 
 ```bash
 up ctp pull-secret create -n crossplane-system upbound-pull-secret --organization modelplane
@@ -165,17 +163,17 @@ kubectl apply -f - <<'EOF'
 apiVersion: pkg.crossplane.io/v1
 kind: Configuration
 metadata:
-  name: modelplane-infra
+  name: modelplane
 spec:
   package: xpkg.upbound.io/modelplane/modelplane:v0.1.0-dev.125.g0cba874
 EOF
 ```
 
 Wait for the Configuration and all its dependencies to become healthy. This
-pulls several container images and takes 5-10 minutes.
+pulls several container images and takes a few minutes.
 
 ```bash
-kubectl get configuration modelplane-infra --watch
+kubectl get configuration modelplane --watch
 # Wait until HEALTHY shows True, then Ctrl-C.
 ```
 
