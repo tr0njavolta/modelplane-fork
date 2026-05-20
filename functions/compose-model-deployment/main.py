@@ -4,10 +4,6 @@ This function discovers InferenceClusters, matches the deployment's
 topology against available capacity, creates a ModelReplica per
 selected cluster, and creates one ModelEndpoint per replica for
 ModelService to route to.
-
-Routing on the control plane is the responsibility of ModelService:
-this function does not compose the HTTPRoute. Users author a
-ModelService to expose a deployment.
 """
 
 from crossplane.function import request, resource, response
