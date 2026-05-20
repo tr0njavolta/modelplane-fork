@@ -118,10 +118,6 @@ Replicas are the only scaling axis. Each `ModelReplica` is a complete,
 fixed-topology serving instance. Scaling `spec.replicas` adds or removes whole
 instances. There's no in-cluster pod autoscaling.
 
-The `ModelDeployment` XRD declares a Kubernetes scale subresource. Autoscaling
-is opt-in via a separate KEDA `ScaledObject` or similar, following the same
-pattern as Kubernetes Deployment + HPA.
-
 ## ModelReplica
 
 The ModelDeployment's composition function creates ModelReplicas. Don't create
