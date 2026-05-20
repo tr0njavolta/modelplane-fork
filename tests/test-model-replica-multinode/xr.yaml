@@ -9,6 +9,7 @@ spec:
   inferenceClusterRef:
     name: h100-cluster
   workers:
+    count: 2
     topology:
       tensor: 8
       pipeline: 2

@@ -97,7 +97,6 @@ class Composer:
         self.engine = self._engine_container()
         engine = self.engine
 
-        gpu_per_pod = int(topology.tensor)
         multi_node = int(topology.pipeline or 1) > 1
 
         # Extract the model name from engine args (e.g. --model=Qwen/...)
@@ -115,27 +114,33 @@ class Composer:
             else:
                 container_args.append(arg)
 
-        container = self._build_container(engine, gpu_per_pod, container_args)
+        container = self._build_container(engine, topology.tensor, container_args)
         pod_spec = self._build_pod_spec(template, container)
-        llmis_template = self._build_llmis_template(template, pod_spec)
 
         llmis_spec: dict = {
             "model": {"uri": f"hf://{model_name}" if model_name else "hf://unknown"},
-            "replicas": 1,
-            "template": llmis_template,
+            "replicas": int(self.xr.spec.workers.count or 1),
+            "template": pod_spec,
             "router": {"gateway": {}, "route": {}},
         }
 
-        # Multi-node: pipeline pods, each with `tensor` GPUs.
-        # Total tensor parallelism = tensor * pipeline. Worker count is
-        # pipeline - 1 (the leader is the "main" template).
+        # Pod metadata (labels, annotations) goes on the WorkloadSpec,
+        # not inside the PodSpec. KServe applies WorkloadSpec-level
+        # labels/annotations to both leader and worker pods.
+        if template.metadata:
+            if template.metadata.labels:
+                llmis_spec["labels"] = dict(template.metadata.labels)
+            if template.metadata.annotations:
+                llmis_spec["annotations"] = dict(template.metadata.annotations)
+
+        # Multi-node: set parallelism axes and a worker PodSpec.
+        # KServe derives the LWS group size from parallelism.pipeline.
         if multi_node:
-            total_gpus = gpu_per_pod * int(topology.pipeline)
-            llmis_spec["parallelism"] = {"tensor": total_gpus}
-            llmis_spec["worker"] = {
-                "size": int(topology.pipeline) - 1,
-                "template": self._build_llmis_template(template, pod_spec),
+            llmis_spec["parallelism"] = {
+                "tensor": topology.tensor,
+                "pipeline": topology.pipeline,
             }
+            llmis_spec["worker"] = pod_spec
 
         resource.update(
             self.rsp.desired.resources[MODEL_RESOURCE_KEY],
@@ -191,17 +196,6 @@ class Composer:
         if template.spec.imagePullSecrets:
             pod_spec["imagePullSecrets"] = [s.model_dump(exclude_none=True) for s in template.spec.imagePullSecrets]
         return pod_spec
-
-    def _build_llmis_template(self, template, pod_spec: dict) -> dict:
-        """Build the LLMInferenceService template, adding pod metadata if set."""
-        if not template.metadata:
-            return pod_spec
-        meta = {}
-        if template.metadata.labels:
-            meta["labels"] = dict(template.metadata.labels)
-        if template.metadata.annotations:
-            meta["annotations"] = dict(template.metadata.annotations)
-        return {"metadata": meta, **pod_spec} if meta else pod_spec
 
     def llmis_name(self):
         """LLMInferenceService name on the remote cluster.

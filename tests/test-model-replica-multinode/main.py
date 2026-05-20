@@ -1,10 +1,12 @@
 """Test multi-node KServe replica.
 
-A replica with tensor=8 pipeline=2 should compose an LLMInferenceService with:
+A replica with tensor=8, pipeline=2, count=2 should compose an
+LLMInferenceService with:
 
+- replicas = 2 (from workers.count)
 - 8 GPUs per pod (tensor)
-- parallelism.tensor = 16 (tensor * pipeline)
-- worker.size = 1 (pipeline - 1)
+- parallelism.tensor = 8, parallelism.pipeline = 2
+- worker PodSpec matching the leader template
 """
 
 from .lib import resource as libresource
@@ -69,9 +71,9 @@ test = compositiontest.CompositionTest(
         ],
         assertResources=[
             # Assert LLMInferenceService has multi-node configuration:
-            # - 8 GPUs per pod (tensor)
-            # - parallelism.tensor = 16 (tensor * pipeline)
-            # - worker.size = 1 (pipeline - 1)
+            # - replicas = 2 (workers.count)
+            # - parallelism.tensor = 8, parallelism.pipeline = 2
+            # - worker PodSpec matches the leader template
             libresource.model_to_dict(
                 k8sobjv1alpha1.Object(
                     metadata=metav1.ObjectMeta(
@@ -97,16 +99,13 @@ test = compositiontest.CompositionTest(
                                 },
                                 "spec": {
                                     "model": {"uri": "hf://meta-llama/Llama-3.1-405B"},
-                                    "replicas": 1,
-                                    "parallelism": {"tensor": 16},
+                                    "replicas": 2,
+                                    "parallelism": {"tensor": 8, "pipeline": 2},
                                     "template": {
                                         "containers": [CONTAINER],
                                     },
                                     "worker": {
-                                        "size": 1,
-                                        "template": {
-                                            "containers": [CONTAINER],
-                                        },
+                                        "containers": [CONTAINER],
                                     },
                                     "router": {"gateway": {}, "route": {}},
                                 },
