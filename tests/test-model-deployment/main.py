@@ -1,9 +1,10 @@
+from datetime import UTC, datetime
+
 from .lib import resource as libresource
-from .model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
-from .model.ai.modelplane.inferenceenvironment import v1alpha1 as iev1alpha1
-from .model.ai.modelplane.inferencegateway import v1alpha1 as igwv1alpha1
+from .model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from .model.ai.modelplane.modeldeployment import v1alpha1 as mdv1alpha1
-from .model.ai.modelplane.modelplacement import v1alpha1 as mpv1alpha1
+from .model.ai.modelplane.modelendpoint import v1alpha1 as mev1alpha1
+from .model.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
 from .model.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 from .model.io.upbound.dev.meta.compositiontest import v1alpha1 as compositiontest
 
@@ -17,26 +18,31 @@ test = compositiontest.CompositionTest(
         xrdPath="apis/modeldeployments/definition.yaml",
         timeoutSeconds=120,
         validate=False,
-        # extraResources is the up CLI's name for required resources.
-        # These are resources the function reads but doesn't own, resolved
-        # by Crossplane at runtime via response.require_resources().
         extraResources=[
-            # A ready InferenceEnvironment with KServe backend and one L4 pool.
+            # A ready InferenceCluster with KServe backend and one L4 pool.
             libresource.model_to_fixture(
-                iev1alpha1.InferenceEnvironment(
+                icv1alpha1.InferenceCluster(
                     metadata=metav1.ObjectMeta(
                         name="demo-us-central",
-                        labels={"modelplane.ai/environment": "true"},
+                        labels={"modelplane.ai/cluster": "true"},
                     ),
-                    spec=iev1alpha1.Spec(cluster=iev1alpha1.Cluster(source="Existing")),
-                    status=iev1alpha1.Status(
-                        providerConfigRef=iev1alpha1.ProviderConfigRef(
+                    spec=icv1alpha1.Spec(cluster=icv1alpha1.Cluster(source="Existing")),
+                    status=icv1alpha1.Status(
+                        conditions=[
+                            icv1alpha1.Condition(
+                                type="Ready",
+                                status="True",
+                                reason="Available",
+                                lastTransitionTime=datetime(2025, 1, 1, tzinfo=UTC),
+                            ),
+                        ],
+                        providerConfigRef=icv1alpha1.ProviderConfigRef(
                             name="demo-us-central-cluster",
                         ),
-                        gateway=iev1alpha1.Gateway(address="34.55.100.10"),
-                        capacity=iev1alpha1.Capacity(
+                        gateway=icv1alpha1.Gateway(address="34.55.100.10"),
+                        capacity=icv1alpha1.Capacity(
                             gpuPools=[
-                                iev1alpha1.GpuPool(
+                                icv1alpha1.GpuPool(
                                     acceleratorType="nvidia-l4",
                                     countPerNode=1,
                                     nodes=2,
@@ -47,138 +53,96 @@ test = compositiontest.CompositionTest(
                     ),
                 )
             ),
-            # The ClusterModel referenced by spec.modelRef.
-            libresource.model_to_fixture(
-                cmv1alpha1.ClusterModel(
-                    metadata=metav1.ObjectMeta(name="qwen-0.5b"),
-                    spec=cmv1alpha1.Spec(
-                        model=cmv1alpha1.Model(name="Qwen/Qwen2.5-0.5B-Instruct"),
-                        source="HuggingFace",
-                        huggingFace=cmv1alpha1.HuggingFace(
-                            repo="Qwen/Qwen2.5-0.5B-Instruct",
-                        ),
-                        serving=[
-                            cmv1alpha1.ServingItem(
-                                name="vllm-kserve",
-                                engine=cmv1alpha1.Engine(
-                                    name="vLLM",
-                                    image="vllm/vllm-openai:v0.7.3",
-                                ),
-                            ),
-                        ],
-                        resources=cmv1alpha1.Resources(
-                            vram="2Gi",
-                            cpu="3",
-                            memory="10Gi",
-                        ),
-                    ),
-                )
-            ),
-            # The InferenceGateway for the control plane routing endpoint.
-            libresource.model_to_fixture(
-                igwv1alpha1.InferenceGateway(
-                    metadata=metav1.ObjectMeta(name="default"),
-                    spec=igwv1alpha1.Spec(backend="EnvoyGateway"),
-                    status=igwv1alpha1.Status(address="10.0.0.1"),
-                )
-            ),
         ],
         assertResources=[
-            # Assert the XR has status populated with model name and placement
-            # count, plus the unified endpoint URL from the inference gateway.
+            # Assert the XR has status populated with the replica count.
             libresource.model_to_dict(
                 mdv1alpha1.ModelDeployment(
                     metadata=metav1.ObjectMeta(
                         name="qwen-demo",
                         namespace="ml-team",
                     ),
-                    spec=mdv1alpha1.Spec(
-                        modelRef=mdv1alpha1.ModelRef(
-                            name="qwen-0.5b",
+                    spec=mdv1alpha1.SpecModel(
+                        replicas=1,
+                        workers=mdv1alpha1.Workers(
+                            topology=mdv1alpha1.Topology(tensor=1),
+                            template=mdv1alpha1.Template(
+                                spec=mdv1alpha1.Spec(
+                                    containers=[
+                                        mdv1alpha1.Container(
+                                            name="engine",
+                                            image="vllm/vllm-openai:v0.7.3",
+                                            args=["--model=Qwen/Qwen2.5-0.5B-Instruct"],
+                                        ),
+                                    ],
+                                ),
+                            ),
                         ),
-                        environments=1,
                     ),
                     status=mdv1alpha1.Status(
-                        model=mdv1alpha1.Model(
-                            name="Qwen/Qwen2.5-0.5B-Instruct",
-                        ),
-                        placements=mdv1alpha1.Placements(
+                        replicas=mdv1alpha1.Replicas(
                             total=1,
                             ready=0,
                         ),
-                        endpoint=mdv1alpha1.Endpoint(
-                            url="http://10.0.0.1/ml-team/qwen-demo/v1/chat/completions",
-                        ),
                     ),
                 )
             ),
-            # Assert a ModelPlacement is composed for the matched environment.
+            # Assert a ModelReplica is composed for the matched cluster.
             libresource.model_to_dict(
-                mpv1alpha1.ModelPlacement(
+                mrv1alpha1.ModelReplica(
                     metadata=metav1.ObjectMeta(
                         annotations={
-                            "crossplane.io/composition-resource-name": "placement-demo-us-central",
+                            "crossplane.io/composition-resource-name": "replica-demo-us-central",
                         },
-                        name="qwen-demo-demo-us-central",
+                        name="qwen-demo-demo-us-central-7078d",
                         namespace="ml-team",
                         labels={
-                            "modelplane.ai/placement": "true",
+                            "modelplane.ai/replica": "true",
                             "modelplane.ai/deployment": "qwen-demo",
+                            "modelplane.ai/cluster": "demo-us-central",
                         },
                     ),
-                    spec=mpv1alpha1.Spec(
-                        modelRef=mpv1alpha1.ModelRef(
-                            kind="ClusterModel",
-                            name="qwen-0.5b",
-                        ),
-                        inferenceEnvironmentRef=mpv1alpha1.InferenceEnvironmentRef(
+                    spec=mrv1alpha1.SpecModel(
+                        inferenceClusterRef=mrv1alpha1.InferenceClusterRef(
                             name="demo-us-central",
+                        ),
+                        workers=mrv1alpha1.Workers(
+                            topology=mrv1alpha1.Topology(tensor=1),
+                            template=mrv1alpha1.Template(
+                                spec=mrv1alpha1.Spec(
+                                    containers=[
+                                        mrv1alpha1.Container(
+                                            name="engine",
+                                            image="vllm/vllm-openai:v0.7.3",
+                                            args=["--model=Qwen/Qwen2.5-0.5B-Instruct"],
+                                        ),
+                                    ],
+                                ),
+                            ),
                         ),
                     ),
                 )
             ),
-            # Assert an HTTPRoute is composed with the correct path rewrite.
-            {
-                "apiVersion": "gateway.networking.k8s.io/v1",
-                "kind": "HTTPRoute",
-                "metadata": {
-                    "namespace": "ml-team",
-                    "annotations": {
-                        "crossplane.io/composition-resource-name": "httproute",
-                    },
-                },
-                "spec": {
-                    "parentRefs": [
-                        {
-                            "name": "modelplane",
-                            "namespace": "modelplane-system",
-                        }
-                    ],
-                    "rules": [
-                        {
-                            "matches": [
-                                {
-                                    "path": {
-                                        "type": "PathPrefix",
-                                        "value": "/ml-team/qwen-demo/",
-                                    },
-                                }
-                            ],
-                            "filters": [
-                                {
-                                    "type": "URLRewrite",
-                                    "urlRewrite": {
-                                        "path": {
-                                            "type": "ReplacePrefixMatch",
-                                            "replacePrefixMatch": "/default/model-qwen-0-5b/",
-                                        },
-                                    },
-                                }
-                            ],
-                        }
-                    ],
-                },
-            },
+            # Assert a ModelEndpoint is composed for the matched cluster.
+            libresource.model_to_dict(
+                mev1alpha1.ModelEndpoint(
+                    metadata=metav1.ObjectMeta(
+                        annotations={
+                            "crossplane.io/composition-resource-name": "endpoint-demo-us-central",
+                        },
+                        name="qwen-demo-demo-us-central-7078d",
+                        namespace="ml-team",
+                        labels={
+                            "modelplane.ai/deployment": "qwen-demo",
+                            "modelplane.ai/cluster": "demo-us-central",
+                        },
+                    ),
+                    spec=mev1alpha1.Spec(
+                        url="http://34.55.100.10/default/qwen-demo-86093/v1",
+                        rewritePath="/default/qwen-demo-86093/",
+                    ),
+                )
+            ),
         ],
     ),
 )

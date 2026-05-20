@@ -4,6 +4,14 @@ metadata:
   name: qwen-demo
   namespace: ml-team
 spec:
-  modelRef:
-    name: qwen-0.5b
-  environments: 1
+  replicas: 1
+  workers:
+    topology:
+      tensor: 1
+    template:
+      spec:
+        containers:
+        - name: engine
+          image: vllm/vllm-openai:v0.7.3
+          args:
+          - "--model=Qwen/Qwen2.5-0.5B-Instruct"

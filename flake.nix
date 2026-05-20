@@ -11,27 +11,12 @@
   outputs =
     { self, nixpkgs }:
     let
-      # Set by CI to override the auto-generated dev version.
-      buildVersion = null;
-
       supportedSystems = [
         "x86_64-linux"
         "aarch64-linux"
         "x86_64-darwin"
         "aarch64-darwin"
       ];
-
-      # Semantic version for builds. Uses buildVersion if set by CI, otherwise
-      # generates a dev version from git metadata. (self ? shortRev tests if the
-      # attribute exists - clean commits have shortRev, uncommitted changes have
-      # dirtyShortRev.)
-      version =
-        if buildVersion != null then
-          buildVersion
-        else if self ? shortRev then
-          "v0.0.0-${builtins.toString self.lastModified}-${self.shortRev}"
-        else
-          "v0.0.0-${builtins.toString self.lastModified}-${self.dirtyShortRev}";
 
       # Helpers for per-system outputs.
       forAllSystems = f: nixpkgs.lib.genAttrs supportedSystems (system: forSystem system f);
@@ -44,24 +29,6 @@
 
     in
     {
-      # Build outputs (nix build).
-      packages = forAllSystems (
-        { pkgs, ... }:
-        let
-          build = import ./nix/build.nix { inherit pkgs self; };
-          fe = build.frontend { inherit version; };
-          px = build.proxy {
-            inherit version;
-            frontend = fe;
-          };
-        in
-        {
-          default = build.image { proxy = px; };
-          proxy = px;
-          frontend = fe;
-        }
-      );
-
       # CI checks (nix flake check).
       checks = forAllSystems (
         { pkgs, ... }:
@@ -69,9 +36,6 @@
           checks = import ./nix/checks.nix { inherit pkgs self; };
         in
         {
-          go-test = checks.goTest { inherit version; };
-          go-lint = checks.goLint { inherit version; };
-          frontend = checks.frontend { inherit version; };
           python = checks.python { };
           shell-lint = checks.shellLint { };
           nix-lint = checks.nixLint { };
@@ -86,20 +50,12 @@
           apps = import ./nix/apps.nix { inherit pkgs; };
           up = build.up { inherit system; };
           dockerCredentialUp = build.dockerCredentialUp { inherit system; };
-          fe = build.frontend { inherit version; };
-          px = build.proxy {
-            inherit version;
-            frontend = fe;
-          };
         in
         {
           build-crossplane = apps.buildCrossplane { inherit up dockerCredentialUp; };
           test-crossplane = apps.testCrossplane { inherit up dockerCredentialUp; };
           push-crossplane = apps.pushCrossplane { inherit up dockerCredentialUp; };
           lint = apps.lint { };
-          load-image = apps.loadImage { image = build.image { proxy = px; }; };
-          dev-proxy = apps.devProxy { };
-          dev-frontend = apps.devFrontend { };
         }
       );
 
@@ -129,13 +85,6 @@
               pkgs.ruff
               pkgs.pyright
 
-              # Go (for the web UI proxy)
-              pkgs.go
-              pkgs.golangci-lint
-
-              # Node.js (for the web UI frontend)
-              pkgs.nodejs
-
               # Nix
               pkgs.nixfmt-rfc-style
             ];
@@ -151,12 +100,9 @@
 
               echo "Modelplane development shell"
               echo ""
-              echo "  nix run .#build-crossplane    nix run .#dev-proxy"
-              echo "  nix run .#test-crossplane     nix run .#dev-frontend"
-              echo "  nix run .#push-crossplane     nix run .#load-image"
-              echo ""
-              echo "  nix build                     nix flake check"
-              echo "  nix flake show"
+              echo "  nix run .#build-crossplane    nix run .#lint"
+              echo "  nix run .#test-crossplane     nix flake check"
+              echo "  nix run .#push-crossplane     nix flake show"
               echo ""
             '';
           };

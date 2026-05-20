@@ -26,8 +26,8 @@ You also need:
 
 ## Create a kind cluster
 
-The control plane runs in a local kind cluster. No special configuration is
-needed.
+The control plane runs in a local kind cluster. It needs no special
+configuration.
 
 ```bash
 kind create cluster --name modelplane
@@ -126,7 +126,7 @@ spec:
       name: provider-helm-modelplane
 ---
 # Pull secret for Modelplane packages. The package registry requires
-# authentication. The pull secret is applied in the next step.
+# authentication. The next step applies the pull secret.
 apiVersion: pkg.crossplane.io/v1beta1
 kind: ImageConfig
 metadata:
@@ -152,9 +152,7 @@ Configuration. This pulls the providers and composition functions it depends on.
 
 `up ctp pull-secret create` uses the credentials of the currently active `up`
 profile. Make sure you're logged in as a user account with access to the
-`modelplane` organization (run `up login` if not). Robot account profiles can
-push packages but typically can't pull them, so the resulting secret won't
-work.
+`modelplane` organization (run `up login` if not).
 
 ```bash
 up ctp pull-secret create -n crossplane-system upbound-pull-secret --organization modelplane
@@ -165,17 +163,17 @@ kubectl apply -f - <<'EOF'
 apiVersion: pkg.crossplane.io/v1
 kind: Configuration
 metadata:
-  name: modelplane-infra
+  name: modelplane
 spec:
   package: xpkg.upbound.io/modelplane/modelplane:v0.1.0-dev.125.g0cba874
 EOF
 ```
 
 Wait for the Configuration and all its dependencies to become healthy. This
-pulls several container images and takes 5-10 minutes.
+pulls several container images and takes a few minutes.
 
 ```bash
-kubectl get configuration modelplane-infra --watch
+kubectl get configuration modelplane --watch
 # Wait until HEALTHY shows True, then Ctrl-C.
 ```
 
@@ -210,7 +208,7 @@ EOF
 ## Create the InferenceGateway
 
 The InferenceGateway installs Envoy Gateway and MetalLB on the control plane
-cluster and creates a Gateway that routes traffic to model placements.
+cluster and creates a Gateway that routes traffic to model endpoints.
 
 ```bash
 kubectl apply -f examples/platform/inference-gateway.yaml
@@ -222,48 +220,49 @@ Wait for it to become ready (~3-5 minutes):
 kubectl get ig default --watch
 ```
 
-## Register a model
+## Create an InferenceClass and InferenceCluster
 
-Register Qwen 2.5 0.5B in the catalog:
+An InferenceClass defines a hardware recipe (GPU type, count, provisioning
+config). An InferenceCluster references it to provision GPU node pools.
+
+Apply the L4 InferenceClass, then edit the cluster example to set your GCP
+project ID and apply it:
 
 ```bash
-kubectl apply -f examples/platform/cluster-model.yaml
+kubectl apply -f examples/platform/inference-class-gke-l4.yaml
 ```
 
-## Create an InferenceEnvironment
-
-Edit the example to set your GCP project ID, then apply it:
-
 ```bash
-# Edit examples/platform/inference-environment-gke.yaml and set
+# Edit examples/platform/inference-cluster-gke.yaml and set
 # spec.cluster.gke.project to your GCP project ID.
-kubectl apply -f examples/platform/inference-environment-gke.yaml
+kubectl apply -f examples/platform/inference-cluster-gke.yaml
 ```
 
 This provisions a GKE cluster with an L4 GPU and installs the inference stack.
 It's the longest step, taking roughly 20-30 minutes.
 
 ```bash
-kubectl get ie --watch
+kubectl get ic --watch
 # Wait until READY shows True, then Ctrl-C.
 ```
 
 ## Deploy a model
 
-Create the `ml-team` namespace and deploy the model:
+Create the `ml-team` namespace, deploy the model, and create a ModelService to
+expose it:
 
 ```bash
 kubectl create namespace ml-team
 kubectl apply -f examples/deployment/model-deployment.yaml
+kubectl apply -f examples/deployment/model-service.yaml
 ```
 
-The scheduler matches the model's serving profile to the environment, checks GPU
-capacity, and creates a ModelPlacement. Wait for the placement to
-become ready:
+The scheduler matches the deployment's topology against the cluster's GPU
+capacity and creates a ModelReplica. Wait for the deployment to become ready:
 
 ```bash
 kubectl get md -n ml-team --watch
-# Wait until READY shows True, then Ctrl-C.
+# Wait until REPLICAS shows 1, then Ctrl-C.
 ```
 
 ## Talk to the model
@@ -275,7 +274,7 @@ Use a pod to send a request:
 kubectl run -i --rm curl-test \
   --image=curlimages/curl \
   --restart=Never \
-  -- curl -s http://172.18.255.200/ml-team/qwen-demo/v1/chat/completions \
+  -- curl -s http://172.18.255.200/ml-team/qwen/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "Qwen/Qwen2.5-0.5B-Instruct",
@@ -284,28 +283,29 @@ kubectl run -i --rm curl-test \
   }'
 ```
 
-You can also get the endpoint URL from the ModelDeployment status:
+You can also get the endpoint URL from the ModelService status:
 
 ```bash
-kubectl get md qwen-demo -n ml-team -o jsonpath='{.status.endpoint.url}'
+kubectl get ms qwen -n ml-team -o jsonpath='{.status.address}'
 ```
 
 ## Clean up
 
-Delete the ModelDeployment before the InferenceEnvironment. If you delete the
-environment first, the deployment will be stuck trying to reconcile against an
-environment that's being torn down.
+Delete the ModelDeployment before the InferenceCluster. If you delete the
+cluster first, the deployment gets stuck reconciling against a cluster
+Crossplane is tearing down.
 
 Wait for the GKE cluster to be fully deprovisioned before deleting the kind
 cluster. If you delete the kind cluster while Crossplane is still cleaning up,
-the GKE resources will be orphaned.
+Crossplane orphans the GKE resources.
 
 ```bash
 kubectl delete md --all -n ml-team
-kubectl delete ie --all
+kubectl delete ms --all -n ml-team
+kubectl delete ic --all
 
-# Wait for the InferenceEnvironment to be fully deleted.
-kubectl get ie --watch
+# Wait for the InferenceCluster to be fully deleted.
+kubectl get ic --watch
 # Wait until no resources remain, then Ctrl-C.
 
 kind delete cluster --name modelplane

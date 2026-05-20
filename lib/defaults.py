@@ -6,44 +6,31 @@ all intermediate Optional fields populated with their zero values, so
 downstream code can access fields directly.
 """
 
-from ..model.ai.modelplane.clustermodel import v1alpha1 as cmv1alpha1
-from ..model.ai.modelplane.inferenceenvironment import v1alpha1 as iev1alpha1
+from ..model.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from ..model.ai.modelplane.inferencegateway import v1alpha1 as igwv1alpha1
-from ..model.ai.modelplane.modelplacement import v1alpha1 as mpv1alpha1
+from ..model.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
 
 
-def inference_environment(
-    ie: iev1alpha1.InferenceEnvironment,
-) -> iev1alpha1.InferenceEnvironment:
+def inference_cluster(
+    ic: icv1alpha1.InferenceCluster,
+) -> icv1alpha1.InferenceCluster:
     """Return a copy with status fields defaulted."""
-    ie = ie.model_copy(deep=True)
-    ie.status = ie.status or iev1alpha1.Status()
-    ie.status.providerConfigRef = ie.status.providerConfigRef or iev1alpha1.ProviderConfigRef()
-    ie.status.gateway = ie.status.gateway or iev1alpha1.Gateway()
-    ie.status.capacity = ie.status.capacity or iev1alpha1.Capacity()
-    ie.status.capacity.gpuPools = ie.status.capacity.gpuPools or []
-    return ie
+    ic = ic.model_copy(deep=True)
+    ic.status = ic.status or icv1alpha1.Status()
+    ic.status.providerConfigRef = ic.status.providerConfigRef or icv1alpha1.ProviderConfigRef()
+    ic.status.gateway = ic.status.gateway or icv1alpha1.Gateway()
+    ic.status.capacity = ic.status.capacity or icv1alpha1.Capacity()
+    ic.status.capacity.gpuPools = ic.status.capacity.gpuPools or []
+    return ic
 
 
-def cluster_model(
-    model: cmv1alpha1.ClusterModel,
-) -> cmv1alpha1.ClusterModel:
-    """Return a copy with optional spec fields defaulted."""
-    model = model.model_copy(deep=True)
-    model.spec.serving = model.spec.serving or []
-    return model
-
-
-def model_placement(
-    p: mpv1alpha1.ModelPlacement,
-) -> mpv1alpha1.ModelPlacement:
+def model_replica(
+    r: mrv1alpha1.ModelReplica,
+) -> mrv1alpha1.ModelReplica:
     """Return a copy with status fields defaulted."""
-    p = p.model_copy(deep=True)
-    p.metadata = p.metadata or mpv1alpha1.ModelPlacement().metadata
-    p.status = p.status or mpv1alpha1.Status()
-    p.status.resources = p.status.resources or mpv1alpha1.Resources()
-    p.status.resources.gpu = p.status.resources.gpu or mpv1alpha1.Gpu()
-    return p
+    r = r.model_copy(deep=True)
+    r.metadata = r.metadata or mrv1alpha1.ModelReplica().metadata
+    return r
 
 
 def inference_gateway(

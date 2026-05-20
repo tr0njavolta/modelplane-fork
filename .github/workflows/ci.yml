@@ -29,27 +29,9 @@ jobs:
       - name: Lint
         run: >
           nix build
-          .#checks.x86_64-linux.go-lint
           .#checks.x86_64-linux.python
           .#checks.x86_64-linux.shell-lint
           .#checks.x86_64-linux.nix-lint
-          --print-build-logs
-
-  test:
-    runs-on: ubuntu-24.04
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Nix
-        uses: cachix/install-nix-action@v31
-
-      - name: Test
-        run: >
-          nix build
-          .#checks.x86_64-linux.go-test
-          .#checks.x86_64-linux.frontend
           --print-build-logs
 
   composition-tests:
@@ -67,7 +49,7 @@ jobs:
 
   push-package:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [lint, test, composition-tests]
+    needs: [lint, composition-tests]
     runs-on: ubuntu-24.04
 
     steps:

@@ -1,0 +1,34 @@
+# An InferenceCluster using an existing cluster you manage yourself.
+#
+# Provide a kubeconfig Secret so Modelplane can install the inference
+# stack and deploy models. Each GPU pool references an InferenceClass
+# that describes the hardware - used by the scheduler to know what
+# capacity is available.
+#
+# The kubeconfig Secret must exist in the control plane cluster before
+# creating this InferenceCluster.
+apiVersion: modelplane.ai/v1alpha1
+kind: InferenceCluster
+metadata:
+  name: byo-us-east
+  labels:
+    modelplane.ai/cluster: "true"
+    modelplane.ai/region: us-east
+spec:
+  cluster:
+    source: Existing
+    existing:
+      secretRef:
+        name: byo-cluster-kubeconfig
+        key: kubeconfig
+
+      # Optional: a cloud identity Secret for pulling images from private
+      # registries or accessing cloud APIs from the remote cluster.
+      # identitySecretRef:
+      #   name: byo-cluster-sa-key
+      #   key: private_key
+
+  nodePools:
+  - name: gpu-h100
+    className: h100-8x-byo
+    nodeCount: 2

@@ -1,0 +1,193 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: inferenceclusters.modelplane.ai
+spec:
+  group: modelplane.ai
+  names:
+    categories: [crossplane, modelplane]
+    kind: InferenceCluster
+    plural: inferenceclusters
+    shortNames: [ic]
+  scope: Cluster
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: SOURCE
+      type: string
+      jsonPath: .spec.cluster.source
+    - name: GATEWAY
+      type: string
+      jsonPath: .status.gateway.address
+    schema:
+      openAPIV3Schema:
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [cluster]
+            properties:
+              cluster:
+                type: object
+                required: [source]
+                properties:
+                  source:
+                    type: string
+                    description: >-
+                      Cluster provisioning method.
+                    enum: [GKE, Existing]
+                  existing:
+                    type: object
+                    description: >-
+                      Bring-your-own cluster configuration. Required when
+                      source is Existing. Modelplane manages the inference
+                      stack on the cluster but does not provision the
+                      cluster itself.
+                    required: [secretRef]
+                    properties:
+                      secretRef:
+                        type: object
+                        description: >-
+                          Reference to a Secret containing a kubeconfig
+                          for the existing cluster. The Secret must exist
+                          in the modelplane-system namespace.
+                        required: [name]
+                        properties:
+                          name:
+                            type: string
+                            minLength: 1
+                            maxLength: 253
+                          key:
+                            type: string
+                            default: kubeconfig
+                            minLength: 1
+                            maxLength: 253
+                      identitySecretRef:
+                        type: object
+                        description: >-
+                          Optional reference to a Secret containing cloud
+                          provider credentials for IAM-based authentication.
+                        required: [name]
+                        properties:
+                          name:
+                            type: string
+                            minLength: 1
+                            maxLength: 253
+                          key:
+                            type: string
+                            default: private_key
+                            minLength: 1
+                            maxLength: 253
+                  gke:
+                    type: object
+                    description: >-
+                      GKE cluster configuration. Required when source is GKE.
+                    required: [project, region]
+                    properties:
+                      project:
+                        type: string
+                        minLength: 6
+                        maxLength: 30
+                      region:
+                        type: string
+                        minLength: 1
+                        maxLength: 32
+                      kubernetesVersion:
+                        type: string
+                        default: "1.35"
+              nodePools:
+                type: array
+                description: >-
+                  GPU node pools available on this cluster. Each pool
+                  references an InferenceClass that describes the
+                  hardware shape and (for provisioned clusters) how to
+                  create the pool. System pools for control-plane
+                  components are provisioned automatically.
+                minItems: 1
+                maxItems: 8
+                x-kubernetes-list-type: map
+                x-kubernetes-list-map-keys: [name]
+                items:
+                  type: object
+                  required: [name, className]
+                  properties:
+                    name:
+                      type: string
+                      maxLength: 40
+                    className:
+                      type: string
+                      description: >-
+                        Name of the InferenceClass describing this pool's
+                        hardware.
+                      minLength: 1
+                      maxLength: 253
+                    nodeCount:
+                      type: integer
+                      default: 1
+                      minimum: 0
+                    minNodeCount:
+                      type: integer
+                      minimum: 0
+                    maxNodeCount:
+                      type: integer
+                      description: >-
+                        Maximum node count for autoscaling. Omit for
+                        fixed-size pools.
+                      minimum: 1
+                    zones:
+                      type: array
+                      description: >-
+                        Zones to restrict this node pool to. Required for
+                        provisioned pools because not all zones in a
+                        region have every GPU type.
+                      items:
+                        type: string
+          status:
+            type: object
+            properties:
+              providerConfigRef:
+                type: object
+                properties:
+                  name:
+                    type: string
+                    description: >-
+                      Name of the ProviderConfig targeting the remote cluster.
+                      Used by ModelReplica to create resources on the cluster.
+              gateway:
+                type: object
+                properties:
+                  address:
+                    type: string
+                    description: >-
+                      External IP of the inference gateway on the remote cluster.
+                      Used by ModelDeployment for unified endpoint routing.
+              capacity:
+                type: object
+                description: >-
+                  Declared capacity derived from the referenced classes
+                  and the per-pool node counts.
+                properties:
+                  gpuPools:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        acceleratorType:
+                          type: string
+                        memory:
+                          type: string
+                          description: Per-GPU VRAM (e.g. "24Gi").
+                        countPerNode:
+                          type: integer
+                        nodes:
+                          type: integer
+                          description: >-
+                            Number of nodes in this pool. Derived from
+                            maxNodeCount (if autoscaling) or nodeCount.
+              namespace:
+                type: string
+                description: >-
+                  Namespace where the internal XRs (cluster, backend) were created.
