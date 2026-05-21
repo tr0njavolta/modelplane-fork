@@ -81,6 +81,20 @@ spec:
                             default: private_key
                             minLength: 1
                             maxLength: 253
+                      cache:
+                        type: object
+                        description: >-
+                          ModelCache configuration for this cluster.
+                        properties:
+                          storageClassName:
+                            type: string
+                            default: modelplane-rwx
+                            description: >-
+                              Name of the RWX StorageClass for ModelCache
+                              PVCs. The admin creates the StorageClass on
+                              the workload cluster (must support
+                              ReadWriteMany dynamic provisioning).
+                            minLength: 1
                   gke:
                     type: object
                     description: >-
@@ -98,6 +112,22 @@ spec:
                       kubernetesVersion:
                         type: string
                         default: "1.35"
+                      cache:
+                        type: object
+                        description: >-
+                          ModelCache configuration for this cluster.
+                        properties:
+                          storageClassName:
+                            type: string
+                            default: modelplane-rwx
+                            description: >-
+                              Name of the RWX StorageClass for ModelCache
+                              PVCs. At the default value, Modelplane
+                              provisions Filestore Enterprise via the
+                              Filestore CSI addon and composes the
+                              StorageClass; set this to a different name to
+                              use one the admin has already created.
+                            minLength: 1
               nodePools:
                 type: array
                 description: >-

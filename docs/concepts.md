@@ -19,6 +19,7 @@ graph TD
     end
 
     subgraph "ML team"
+        MC[ModelCache<br><i>kimi-k2</i>]
         MD[ModelDeployment<br><i>qwen-demo</i>]
         MS[ModelService<br><i>qwen</i>]
     end
@@ -31,6 +32,7 @@ graph TD
     end
 
     IC1 -- "references" --> ICL
+    MD -- "references" --> MC
     MD -. "creates" .-> MR1
     MD -. "creates" .-> MR2
     MD -. "creates" .-> ME1
@@ -93,8 +95,8 @@ clusters, which Modelplane assumes are solely for its use.
 ## ModelDeployment
 
 A ModelDeployment is the ML team's interface. It carries everything needed to
-deploy a model to the fleet: the worker template, hardware topology, and replica
-count.
+deploy a model to the fleet: the worker template, hardware topology, replica
+count, and an optional [ModelCache](#modelcache) reference for staged weights.
 
 When you create a ModelDeployment, the scheduler:
 
@@ -117,6 +119,41 @@ through as sidecars.
 Replicas are the only scaling axis. Each `ModelReplica` is a complete,
 fixed-topology serving instance. Scaling `spec.replicas` adds or removes whole
 instances. There's no in-cluster pod autoscaling.
+
+## Multi-node Inference
+
+When a model is too large to fit on one node's GPUs, set
+`workers.topology.pipeline` greater than 1. Modelplane composes a
+LeaderWorkerSet gang of pods that serve the model together: pipeline
+parallelism splits the model across nodes, tensor parallelism splits it
+across GPUs within a node.
+
+Multi-node deployments require a [ModelCache](#modelcache) referenced via
+`spec.modelCacheRef.name`.
+
+## ModelCache
+
+A ModelCache stages a model artifact on workload-cluster storage as a
+first-class resource. Modelplane composes a ReadWriteMany PVC on each matched
+cluster and hydrates it from the configured source. ModelDeployments reference
+a cache via `spec.modelCacheRef.name`; the cache's PVC is mounted into every
+worker pod automatically.
+
+Each cache has:
+
+- A **source**: a discriminated union of where to fetch the artifact, with
+  source-specific fields (e.g. `huggingFace.repo` and `huggingFace.sizeGiB`
+  today). Future types (`dragonfly` for P2P distribution, `oci` for NIM-style
+  bundled artifacts) will declare different fields under their own
+  discriminator.
+- An optional **clusterSelector** to scope replication. If omitted, the cache
+  replicates to every InferenceCluster.
+
+The cache mounts at `/mnt/models` on every consuming pod; engine container
+args should reference this path (e.g. `--model=/mnt/models` for vLLM).
+
+ModelCache is required for multi-node deployments and optional for single-node
+cold-start optimization.
 
 ## ModelReplica
 
@@ -153,3 +190,20 @@ Read the service's public address from `status.address`:
 ```bash
 kubectl get ms qwen -n ml-team -o jsonpath='{.status.address}'
 ```
+
+## Custom Cache Backends
+
+Modelplane provisions Filestore Enterprise on `GKE` clusters and expects a
+StorageClass named `modelplane-rwx` on `Existing` clusters (created by the
+admin). When the default doesn't fit — different cost profile, an RWX backend
+the org already runs, etc. — platform teams point Modelplane at a different
+StorageClass via `cluster.<source>.cache.storageClassName`. On GKE the admin
+must first create the StorageClass on the workload cluster (any backend
+supporting ReadWriteMany dynamic provisioning — WekaIO, NetApp Trident, FSx
+for NetApp, and similar). On Existing clusters the field points at whatever
+name the admin chose. The ML team's ModelCache and ModelDeployment specs are
+unchanged regardless.
+
+Backends that don't fit dynamic-PVC provisioning (e.g. Dragonfly's P2P
+distribution to per-node local caches) will be added natively as new types
+under `ModelCache.spec.source` rather than through this override.
