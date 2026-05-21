@@ -43,6 +43,18 @@ spec:
                   matchLabels:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
+              modelCacheRef:
+                type: object
+                required: [name]
+                description: >-
+                  Reference to a ModelCache in the same namespace.
+                  Optional for single-node deployments; required for
+                  multi-node (workers.topology.pipeline > 1).
+                properties:
+                  name:
+                    type: string
+                    description: ModelCache resource name in the same namespace.
+                    minLength: 1
               workers:
                 type: object
                 required: [topology, template]

@@ -1,0 +1,110 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: modelcaches.modelplane.ai
+spec:
+  group: modelplane.ai
+  names:
+    categories: [crossplane, modelplane]
+    kind: ModelCache
+    plural: modelcaches
+    shortNames: [mc]
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    served: true
+    referenceable: true
+    additionalPrinterColumns:
+    - name: SOURCE
+      type: string
+      jsonPath: .spec.source.huggingFace.repo
+    - name: READY
+      type: string
+      jsonPath: .status.summary.ready
+    schema:
+      openAPIV3Schema:
+        type: object
+        required: [spec]
+        properties:
+          spec:
+            type: object
+            required: [source]
+            properties:
+              source:
+                type: object
+                description: >-
+                  Where to fetch the artifact from. A discriminated
+                  union; exactly one source must be set.
+                properties:
+                  huggingFace:
+                    type: object
+                    required: [repo, sizeGiB]
+                    properties:
+                      repo:
+                        type: string
+                        description: HuggingFace repository ID.
+                        minLength: 1
+                      revision:
+                        type: string
+                        description: >-
+                          Branch, tag, or commit SHA. Defaults to
+                          the repo's default branch.
+                      authSecret:
+                        type: object
+                        description: >-
+                          Optional Secret holding an HF token for
+                          gated or private repos. Resolved on the
+                          workload cluster at hydration time.
+                        required: [name]
+                        properties:
+                          name:
+                            type: string
+                            minLength: 1
+                          key:
+                            type: string
+                            default: HF_TOKEN
+                      sizeGiB:
+                        type: integer
+                        description: >-
+                          Capacity to allocate for the staged artifact
+                          on each matched cluster.
+                        minimum: 1
+                        maximum: 100000
+              clusterSelector:
+                type: object
+                description: >-
+                  Label selector to pick the InferenceClusters that
+                  stage this artifact. If omitted, the cache replicates
+                  to every cluster.
+                properties:
+                  matchLabels:
+                    type: object
+                    x-kubernetes-preserve-unknown-fields: true
+          status:
+            type: object
+            properties:
+              conditions:
+                type: array
+                items:
+                  type: object
+              summary:
+                type: object
+                description: Per-cluster ready / total counts.
+                properties:
+                  ready:
+                    type: string
+                    description: e.g. "2/3"
+              clusters:
+                type: array
+                description: Per-cluster staging status.
+                items:
+                  type: object
+                  required: [name]
+                  properties:
+                    name:
+                      type: string
+                    phase:
+                      type: string
+                      enum: [Pending, Hydrating, Ready, Failed]
+                    message:
+                      type: string
