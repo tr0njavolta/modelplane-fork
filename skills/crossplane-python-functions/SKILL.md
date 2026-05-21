@@ -1,15 +1,15 @@
 ---
 name: crossplane-python-functions
-description: Write Python composition functions for Crossplane v2 using the up CLI. Use when writing, debugging, or refactoring composition functions, when working with the compose(req, rsp) pattern, when dealing with required resources, readiness tracking, resource gating, deletion ordering, or when the user mentions function-python, compose functions, or Crossplane compositions.
-compatibility: Requires the up CLI and Docker with buildx.
+description: Write Python composition functions for Crossplane v2 using the Crossplane CLI. Use when writing, debugging, or refactoring composition functions, when working with the compose(req, rsp) pattern, when dealing with required resources, readiness tracking, resource gating, deletion ordering, or when the user mentions function-python, compose functions, or Crossplane compositions.
+compatibility: Requires the Crossplane CLI and Docker.
 ---
 
 # Writing Crossplane v2 Python Composition Functions
 
 ## The Function Contract
 
-Functions are embedded Python executed by `function-python`. Each lives in
-`functions/{name}/main.py` and exports one function:
+Each function is a hatch-buildable Python package under `functions/{name}/`.
+The composition logic lives in `function/compose.py` and exports:
 
 ```python
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
@@ -18,23 +18,26 @@ def compose(req: fnv1.RunFunctionRequest, rsp: fnv1.RunFunctionResponse):
     pass  # Mutate rsp in place. Don't return anything.
 ```
 
-Do NOT use the class-based `FunctionRunner` pattern from standalone SDK docs.
-Do NOT call `response.to(req)`. Do NOT return `rsp`.
+Do NOT call `response.to(req)` in compose(). Do NOT return `rsp`. The
+`fn.py` boilerplate handles creating the response and calling compose().
 
-Each function directory contains `main.py` and a `model` symlink:
+Each function directory has this structure:
 ```
 functions/my-function/
-├── main.py
-└── model -> ../../.up/python/models
+├── pyproject.toml          # Declares deps on crossplane-models, modelplanelib, SDK
+├── function/
+│   ├── __init__.py
+│   ├── __version__.py
+│   ├── main.py             # CLI entrypoint (boilerplate)
+│   ├── fn.py               # FunctionRunner gRPC service (boilerplate)
+│   └── compose.py          # The actual composition logic
 ```
 
 See [references/example.py](references/example.py) for a complete example
 function demonstrating all key patterns: Pydantic models, gating, readiness,
 events, status, deletion ordering.
 
-The `model` symlink is required. Without it, the function crashes at runtime
-with `ModuleNotFoundError: No module named 'function.model'`. Use
-`up function generate` to create new functions, or create the symlink manually.
+Use `crossplane function generate` to scaffold new functions.
 
 ## Build Cycle
 
@@ -42,35 +45,29 @@ with `ModuleNotFoundError: No module named 'function.model'`. Use
 # 1. Write XRD (apis/myresource/definition.yaml)
 # 2. Write composition (apis/myresource/composition.yaml)
 # 3. Build to generate Pydantic models
-up project build
-# 4. Write the function (functions/compose-myresource/main.py)
-# 5. Write test (tests/test-myresource/main.py)
+crossplane project build
+# 4. Write the function (functions/compose-myresource/function/compose.py)
+# 5. Write test (tests/test_myresource.py)
 # 6. Build again, then test
-up project build
-up test run tests/test-myresource
+crossplane project build
+python3 -m pytest tests/test_myresource.py -v
 ```
 
 Build before writing the function — it generates Pydantic models under
-`.up/python/models/` that the function imports.
+`schemas/python/models/` that the function imports.
 
-### How the Build Works (No Docker Buildx)
+### How the Build Works
 
-`up project build` does NOT use Docker or buildx to build function images.
-It pulls the `function-interpreter-python` base image from the registry,
-tars the function directory (following symlinks like `model`), and appends
-it as a layer using `go-containerregistry`. The result is written to the
-`.uppkg` file, not to the Docker daemon.
+`crossplane project build` builds each function using Docker. For Python
+functions, it runs `hatch build` in a Debian container to produce a wheel,
+installs it into a fresh venv, then appends that venv as a layer on top of
+a distroless Python base image. The result is written to an `.xpkg` file
+under `_output/`.
 
 This means:
-- `up project build` always picks up code changes (it reads the filesystem
-  directly — no caching)
-- `docker images` shows stale images from previous `up test run` or
-  `up project run` sessions, not the latest build
-- `docker run <image>` inspects the stale Docker cache, not the `.uppkg`
-- `up project push` reads from the `.uppkg`, not Docker
-
-Do NOT use `docker run` to verify build output — it shows stale images.
-The build is always fresh.
+- Functions are real Python packages with `pyproject.toml` and declared deps
+- Third-party packages (e.g. pyyaml) can be added as dependencies
+- The shared library `modelplanelib` is installed via path dependency
 
 ### Deploying Changes to a Cluster
 
@@ -94,17 +91,25 @@ via digest comparison in the ConfigurationRevision's dependencies.
 
 ## Import Paths
 
-Both functions and tests use the `.m.` (managed/namespaced) variants:
+Pydantic models are generated under `schemas/python/models/` and installed
+as the `crossplane-models` package. Import them as `models.X`:
+
 ```python
-from .model.io.upbound.m.gcp.compute.network import v1beta1 as networkv1beta1
-from .model.io.crossplane.m.helm.release import v1beta1 as helmv1beta1
+from models.io.crossplane.m.helm.release import v1beta1 as helmv1beta1
+from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 ```
 
-When in doubt, check what exists under `.up/python/models/`.
+The shared library is installed as `modelplanelib`:
+```python
+from modelplanelib import conditions, metadata, naming
+from modelplanelib import resource as libresource
+```
+
+When in doubt, check what exists under `schemas/python/models/`.
 
 XR models have no `.m.` segment:
 ```python
-from .model.example.acme.platform import v1alpha1
+from models.ai.modelplane.modeldeployment import v1alpha1
 ```
 
 ## Composing Resources

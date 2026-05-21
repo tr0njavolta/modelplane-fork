@@ -22,9 +22,9 @@
         chmod -R u+w src
         cd src
         echo "Checking Python formatting..."
-        ruff format --check functions/ lib/ tests/
+        ruff format --check functions/
         echo "Running Python linter..."
-        ruff check functions/ lib/ tests/
+        ruff check functions/
         mkdir -p $out
         touch $out/.python-checks-passed
       '';

@@ -6,10 +6,18 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+
+    # The Crossplane CLI, pinned to a specific commit.
+    # https://github.com/crossplane/cli
+    crossplane-cli.url = "github:crossplane/cli/bc595092600d24b56c506472d2731f4fa3cad333";
   };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      crossplane-cli,
+    }:
     let
       supportedSystems = [
         "x86_64-linux"
@@ -46,15 +54,16 @@
       apps = forAllSystems (
         { pkgs, system, ... }:
         let
-          build = import ./nix/build.nix { inherit pkgs self; };
+          build = import ./nix/build.nix { inherit pkgs crossplane-cli; };
           apps = import ./nix/apps.nix { inherit pkgs; };
-          up = build.up { inherit system; };
+          crossplane = build.crossplane { inherit system; };
           dockerCredentialUp = build.dockerCredentialUp { inherit system; };
         in
         {
-          build-crossplane = apps.buildCrossplane { inherit up dockerCredentialUp; };
-          test-crossplane = apps.testCrossplane { inherit up dockerCredentialUp; };
-          push-crossplane = apps.pushCrossplane { inherit up dockerCredentialUp; };
+          build-crossplane = apps.buildCrossplane { inherit crossplane dockerCredentialUp; };
+          test-crossplane = apps.testCrossplane { inherit crossplane dockerCredentialUp; };
+          push-crossplane = apps.pushCrossplane { inherit crossplane dockerCredentialUp; };
+          format = apps.format { };
           lint = apps.lint { };
         }
       );
@@ -63,15 +72,15 @@
       devShells = forAllSystems (
         { pkgs, system, ... }:
         let
-          build = import ./nix/build.nix { inherit pkgs self; };
-          up = build.up { inherit system; };
+          build = import ./nix/build.nix { inherit pkgs crossplane-cli; };
+          crossplane = build.crossplane { inherit system; };
           dockerCredentialUp = build.dockerCredentialUp { inherit system; };
         in
         {
           default = pkgs.mkShell {
             buildInputs = [
-              # Crossplane / Upbound
-              up
+              # Crossplane
+              crossplane
               dockerCredentialUp
 
               # Kubernetes
@@ -80,7 +89,7 @@
               pkgs.kind
               pkgs.docker-client
 
-              # Python (for linting composition functions)
+              # Python (for linting and testing composition functions)
               pkgs.python3
               pkgs.ruff
               pkgs.pyright
@@ -100,9 +109,9 @@
 
               echo "Modelplane development shell"
               echo ""
-              echo "  nix run .#build-crossplane    nix run .#lint"
-              echo "  nix run .#test-crossplane     nix flake check"
-              echo "  nix run .#push-crossplane     nix flake show"
+              echo "  nix run .#build-crossplane    nix run .#format"
+              echo "  nix run .#test-crossplane     nix run .#lint"
+              echo "  nix run .#push-crossplane     nix flake check"
               echo ""
             '';
           };

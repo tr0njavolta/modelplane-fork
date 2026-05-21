@@ -34,7 +34,7 @@ jobs:
           .#checks.x86_64-linux.nix-lint
           --print-build-logs
 
-  composition-tests:
+  unit-tests:
     runs-on: ubuntu-24.04
 
     steps:
@@ -49,7 +49,7 @@ jobs:
 
   push-package:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [lint, composition-tests]
+    needs: [lint, unit-tests]
     runs-on: ubuntu-24.04
 
     steps:
@@ -61,15 +61,8 @@ jobs:
       - name: Install Nix
         uses: cachix/install-nix-action@v31
 
-      # action-up handles robot token auth for both the API and the
-      # registry. docker/login-action is also needed because up project
-      # push uses Docker's credential store for OCI pushes.
-      - name: Login to Upbound
-        uses: upbound/action-up@v1
-        with:
-          api-token: ${{ secrets.UP_ROBOT_TOKEN }}
-          organization: modelplane
-
+      # Authenticate with the registry using standard Docker credentials.
+      # The Crossplane CLI uses Docker's credential store for OCI pushes.
       - name: Login to registry
         uses: docker/login-action@v3
         with:
