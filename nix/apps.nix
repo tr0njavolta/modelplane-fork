@@ -21,6 +21,7 @@
           pkgs.shellcheck
           pkgs.shfmt
           pkgs.gnupatch
+          pkgs.unstable.uv
         ];
         inheritPath = false;
         text = ''
@@ -39,6 +40,9 @@
           echo "Formatting and linting Python..."
           ruff format functions/
           ruff check --fix functions/
+
+          echo "Refreshing uv.lock..."
+          uv lock
         '';
       }
     );

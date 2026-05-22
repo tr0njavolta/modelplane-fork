@@ -90,6 +90,35 @@ in
         mkdir -p $out
         touch $out/.nix-lint-passed
       '';
+
+  # Fail if uv.lock is out of sync with any pyproject.toml in the workspace.
+  # uv lock --check resolves the workspace against the lockfile without
+  # writing it. The sandbox has no network, no writable HOME, and no
+  # /bin/sh for uv's interpreter discovery, so:
+  #
+  #   --offline                  skip the network
+  #   UV_CACHE_DIR=...           write cache into the build dir
+  #   --no-managed-python        don't try to download a Python
+  #   --python ${pkgs.python3}/bin/python   use the nix-provided interpreter
+  uv-lock =
+    pkgs.runCommand "modelplane-uv-lock"
+      {
+        nativeBuildInputs = [
+          pkgs.unstable.uv
+          pkgs.python3
+        ];
+        env.UV_CACHE_DIR = "uv-cache";
+      }
+      ''
+        cp -r ${self} src
+        chmod -R u+w src
+        cd src
+        uv lock --check --offline \
+          --no-managed-python \
+          --python ${pkgs.python3}/bin/python
+        mkdir -p $out
+        touch $out/.uv-lock-passed
+      '';
 }
 // builtins.listToAttrs (
   map (name: {

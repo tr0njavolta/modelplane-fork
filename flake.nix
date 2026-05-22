@@ -7,6 +7,11 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
 
+    # Unstable nixpkgs, exposed as pkgs.unstable. Used when we need a
+    # newer version of a package than the stable channel ships, e.g. uv
+    # tracking the latest uv_build releases.
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
+
     # Pinned to the 'diy' branch until crossplane/cli#24 merges.
     crossplane-cli.url = "github:negz/cli/diy";
 
@@ -37,6 +42,7 @@
     {
       self,
       nixpkgs,
+      nixpkgs-unstable,
       crossplane-cli,
       pyproject-nix,
       uv2nix,
@@ -93,6 +99,13 @@
           pkgs = import nixpkgs {
             inherit system;
             config.allowUnfreePredicate = pkg: builtins.elem (nixpkgs.lib.getName pkg) [ "upbound" ];
+            overlays = [
+              (_: _: {
+                unstable = import nixpkgs-unstable {
+                  inherit system;
+                };
+              })
+            ];
           };
         };
 
@@ -165,7 +178,7 @@
               pkgs.kubernetes-helm
               pkgs.kind
               pkgs.docker-client
-              pkgs.uv
+              pkgs.unstable.uv
               pkgs.python3
               pkgs.ruff
               pkgs.pyright

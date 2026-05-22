@@ -49,6 +49,7 @@ wheels = [
 
 [[package]]
 name = "compose-gke-cluster"
+version = "0.0.0"
 source = { editable = "functions/compose-gke-cluster" }
 dependencies = [
     { name = "click" },
@@ -67,6 +68,7 @@ requires-dist = [
 
 [[package]]
 name = "compose-inference-class"
+version = "0.0.0"
 source = { editable = "functions/compose-inference-class" }
 dependencies = [
     { name = "click" },
@@ -85,6 +87,7 @@ requires-dist = [
 
 [[package]]
 name = "compose-inference-cluster"
+version = "0.0.0"
 source = { editable = "functions/compose-inference-cluster" }
 dependencies = [
     { name = "click" },
@@ -103,6 +106,7 @@ requires-dist = [
 
 [[package]]
 name = "compose-inference-gateway"
+version = "0.0.0"
 source = { editable = "functions/compose-inference-gateway" }
 dependencies = [
     { name = "click" },
@@ -121,6 +125,7 @@ requires-dist = [
 
 [[package]]
 name = "compose-kserve-backend"
+version = "0.0.0"
 source = { editable = "functions/compose-kserve-backend" }
 dependencies = [
     { name = "click" },
@@ -139,6 +144,7 @@ requires-dist = [
 
 [[package]]
 name = "compose-model-deployment"
+version = "0.0.0"
 source = { editable = "functions/compose-model-deployment" }
 dependencies = [
     { name = "click" },
@@ -157,6 +163,7 @@ requires-dist = [
 
 [[package]]
 name = "compose-model-endpoint"
+version = "0.0.0"
 source = { editable = "functions/compose-model-endpoint" }
 dependencies = [
     { name = "click" },
@@ -175,6 +182,7 @@ requires-dist = [
 
 [[package]]
 name = "compose-model-replica"
+version = "0.0.0"
 source = { editable = "functions/compose-model-replica" }
 dependencies = [
     { name = "click" },
@@ -193,6 +201,7 @@ requires-dist = [
 
 [[package]]
 name = "compose-model-service"
+version = "0.0.0"
 source = { editable = "functions/compose-model-service" }
 dependencies = [
     { name = "click" },

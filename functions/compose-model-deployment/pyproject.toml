@@ -1,9 +1,10 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["uv_build>=0.11.0,<0.12"]
+build-backend = "uv_build"
 
 [project]
 name = "compose-model-deployment"
+version = "0.0.0"
 description = "Fan out a ModelDeployment to ModelReplicas and ModelEndpoints."
 requires-python = ">=3.11,<3.14"
 license = "Apache-2.0"
@@ -13,7 +14,6 @@ dependencies = [
   "grpcio>=1.73.1",
   "crossplane-models",
 ]
-dynamic = ["version"]
 
 [tool.uv.sources]
 crossplane-models = { workspace = true }
@@ -21,10 +21,6 @@ crossplane-models = { workspace = true }
 [project.scripts]
 function = "function.main:cli"
 
-[tool.hatch.build.targets.wheel]
-packages = ["function"]
-
-[tool.hatch.version]
-path = "function/__version__.py"
-validate-bump = false
-
+[tool.uv.build-backend]
+module-name = "function"
+module-root = ""
