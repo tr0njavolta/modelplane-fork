@@ -181,7 +181,6 @@
               pkgs.unstable.uv
               pkgs.python3
               pkgs.ruff
-              pkgs.pyright
               pkgs.nixfmt-rfc-style
             ];
 

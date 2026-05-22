@@ -50,8 +50,3 @@ max-args = 8
 "**/tests/**" = ["E501", "PLR2004", "PLR0913"]
 # fn.py uses gRPC's required PascalCase method name.
 "functions/*/function/fn.py" = ["N802"]
-
-[tool.pyright]
-pythonVersion = "3.12"
-include = ["functions"]
-exclude = ["schemas"]
