@@ -2,8 +2,6 @@
 .venv-*
 _output
 .up
-schemas/*
-!schemas/python/
 result
 .direnv
 __pycache__/

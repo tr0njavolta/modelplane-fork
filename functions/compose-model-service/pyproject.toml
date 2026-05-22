@@ -8,12 +8,15 @@ description = "Compose a Gateway API HTTPRoute from a ModelService."
 requires-python = ">=3.11,<3.14"
 license = "Apache-2.0"
 dependencies = [
-  "crossplane-function-sdk-python==0.12.0",
-  "click==8.3.2",
+  "crossplane-function-sdk-python>=0.12.0",
+  "click>=8.1.0",
   "grpcio>=1.73.1",
-  "crossplane-models @ file:./../../schemas/python",
+  "crossplane-models",
 ]
 dynamic = ["version"]
+
+[tool.uv.sources]
+crossplane-models = { workspace = true }
 
 [project.scripts]
 function = "function.main:cli"
@@ -25,5 +28,3 @@ packages = ["function"]
 path = "function/__version__.py"
 validate-bump = false
 
-[tool.hatch.metadata]
-allow-direct-references = true

@@ -7,6 +7,46 @@ spec:
   source: github.com/modelplaneai/modelplane
   license: Apache-2.0
   description: An open-source AI inference platform built on Crossplane.
+  architectures: [amd64, arm64]
+  schemas:
+    languages: [python]
+  functions:
+  - source: Tarball
+    tarball:
+      name: compose-gke-cluster
+      pathPrefix: _output/functions/compose-gke-cluster
+  - source: Tarball
+    tarball:
+      name: compose-inference-class
+      pathPrefix: _output/functions/compose-inference-class
+  - source: Tarball
+    tarball:
+      name: compose-inference-cluster
+      pathPrefix: _output/functions/compose-inference-cluster
+  - source: Tarball
+    tarball:
+      name: compose-inference-gateway
+      pathPrefix: _output/functions/compose-inference-gateway
+  - source: Tarball
+    tarball:
+      name: compose-kserve-backend
+      pathPrefix: _output/functions/compose-kserve-backend
+  - source: Tarball
+    tarball:
+      name: compose-model-deployment
+      pathPrefix: _output/functions/compose-model-deployment
+  - source: Tarball
+    tarball:
+      name: compose-model-endpoint
+      pathPrefix: _output/functions/compose-model-endpoint
+  - source: Tarball
+    tarball:
+      name: compose-model-replica
+      pathPrefix: _output/functions/compose-model-replica
+  - source: Tarball
+    tarball:
+      name: compose-model-service
+      pathPrefix: _output/functions/compose-model-service
   dependencies:
   - type: crd
     git:
