@@ -155,7 +155,10 @@
         {
           fix = apps.fix { };
           generate = apps.generate { inherit crossplane pkgs; };
-          build-crossplane = apps.buildCrossplane { inherit crossplane functionsPkg; };
+          build-crossplane = apps.buildCrossplane {
+            inherit crossplane functionsPkg;
+            dockerCredentialUp = pkgs.upbound;
+          };
           push-crossplane = apps.pushCrossplane {
             inherit crossplane version;
             dockerCredentialUp = pkgs.upbound;

@@ -76,8 +76,16 @@
   # Build the Crossplane project. On Linux, materialises Nix-built function
   # runtime images into _output/functions/ before invoking the CLI. The CLI
   # loads them via the Tarball function source in crossplane-project.yaml.
+  #
+  # docker-credential-up is needed because `crossplane project build` calls
+  # `crossplane dependency update-cache` to resolve providers and CRDs from
+  # xpkg.upbound.io, which requires authentication.
   buildCrossplane =
-    { crossplane, functionsPkg }:
+    {
+      crossplane,
+      dockerCredentialUp,
+      functionsPkg,
+    }:
     {
       type = "app";
       meta.description = "Build the Crossplane project";
@@ -86,6 +94,7 @@
           name = "modelplane-build-crossplane";
           runtimeInputs = [
             crossplane
+            dockerCredentialUp
             pkgs.coreutils
           ];
           inheritPath = false;
