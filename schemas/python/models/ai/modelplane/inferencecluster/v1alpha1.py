@@ -11,6 +11,13 @@ from pydantic import BaseModel, Field, conint, constr
 from ....io.k8s.apimachinery.pkg.apis.meta import v1
 
 
+class Cache(BaseModel):
+    storageClassName: Optional[constr(min_length=1)] = 'modelplane-rwx'
+    """
+    Name of the RWX StorageClass for ModelCache PVCs. The admin creates the StorageClass on the workload cluster (must support ReadWriteMany dynamic provisioning).
+    """
+
+
 class IdentitySecretRef(BaseModel):
     key: Optional[constr(min_length=1, max_length=253)] = 'private_key'
     name: constr(min_length=1, max_length=253)
@@ -22,6 +29,10 @@ class SecretRef(BaseModel):
 
 
 class Existing(BaseModel):
+    cache: Optional[Cache] = None
+    """
+    ModelCache configuration for this cluster.
+    """
     identitySecretRef: Optional[IdentitySecretRef] = None
     """
     Optional reference to a Secret containing cloud provider credentials for IAM-based authentication.
@@ -32,7 +43,18 @@ class Existing(BaseModel):
     """
 
 
+class CacheModel(BaseModel):
+    storageClassName: Optional[constr(min_length=1)] = 'modelplane-rwx'
+    """
+    Name of the RWX StorageClass for ModelCache PVCs. At the default value, Modelplane provisions Filestore Enterprise via the Filestore CSI addon and composes the StorageClass; set this to a different name to use one the admin has already created.
+    """
+
+
 class Gke(BaseModel):
+    cache: Optional[CacheModel] = None
+    """
+    ModelCache configuration for this cluster.
+    """
     kubernetesVersion: Optional[str] = '1.35'
     project: constr(min_length=6, max_length=30)
     region: constr(min_length=1, max_length=32)

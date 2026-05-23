@@ -46,6 +46,13 @@ class Crossplane(BaseModel):
     resourceRefs: Optional[List[ResourceRef]] = None
 
 
+class ModelCacheRef(BaseModel):
+    name: constr(min_length=1)
+    """
+    ModelCache resource name in the same namespace.
+    """
+
+
 class Metadata(BaseModel):
     annotations: Optional[Dict[str, str]] = None
     labels: Optional[Dict[str, str]] = None
@@ -153,6 +160,10 @@ class SpecModel(BaseModel):
     crossplane: Optional[Crossplane] = None
     """
     Configures how Crossplane will reconcile this composite resource
+    """
+    modelCacheRef: Optional[ModelCacheRef] = None
+    """
+    Reference to a ModelCache in the same namespace. Optional for single-node deployments; required for multi-node (workers.topology.pipeline > 1).
     """
     replicas: conint(ge=1, le=10)
     """
