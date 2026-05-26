@@ -1,37 +1,61 @@
-# CI check builders for Modelplane.
+# CI checks (nix flake check).
 #
-# Checks run inside the Nix sandbox without network or filesystem access. This
-# makes them fully reproducible but means Go modules and npm dependencies must
-# be prefetched.
-#
-# All checks are builder functions that take an attrset of arguments and return
-# a derivation. The actual check definitions live in flake.nix.
-{ pkgs, self }:
+# All checks run inside the Nix sandbox without network or filesystem access.
+# Unit tests run against uv2nix-built venvs with test sources copied from the
+# flake source tree.
 {
-  # Run Python lint and formatting checks. Ruff works on source files only,
-  # no network access needed. Configuration lives in pyproject.toml.
+  pkgs,
+  self,
+  functionNames,
+  pyproject-nix,
+  uv2nix,
+  pyproject-build-systems,
+}:
+let
+  workspace = uv2nix.lib.workspace.loadWorkspace { workspaceRoot = self; };
+  pythonSet =
+    (pkgs.callPackage pyproject-nix.build.packages { python = pkgs.python312; }).overrideScope
+      (
+        pkgs.lib.composeManyExtensions [
+          pyproject-build-systems.overlays.wheel
+          (workspace.mkPyprojectOverlay { sourcePreference = "wheel"; })
+        ]
+      );
+
+  # Each function exports a 'function' Python module, so tests must run from
+  # a directory where that module is importable via the venv. We copy tests/
+  # from the source tree and run unittest against the venv's Python.
+  mkFunctionTest =
+    name:
+    let
+      venv = pythonSet.mkVirtualEnv "${name}-test-env" {
+        ${name} = [ ];
+      };
+    in
+    pkgs.runCommand "modelplane-test-${name}" { } ''
+      cp -r ${self}/functions/${name}/tests tests
+      ${venv}/bin/python -m unittest discover -s tests -v
+      mkdir -p $out
+      touch $out/.tests-passed
+    '';
+in
+{
   python =
-    _:
     pkgs.runCommand "modelplane-python-checks"
       {
         nativeBuildInputs = [ pkgs.ruff ];
       }
       ''
-        # Copy source to a writable directory. Ruff needs to write a cache.
         cp -r ${self} src
         chmod -R u+w src
         cd src
-        echo "Checking Python formatting..."
-        ruff format --check functions/ lib/ tests/
-        echo "Running Python linter..."
-        ruff check functions/ lib/ tests/
+        ruff format --check functions/
+        ruff check functions/
         mkdir -p $out
         touch $out/.python-checks-passed
       '';
 
-  # Run shell linters (shellcheck, shfmt).
-  shellLint =
-    _:
+  shell-lint =
     pkgs.runCommand "modelplane-shell-lint"
       {
         nativeBuildInputs = [
@@ -50,9 +74,7 @@
         touch $out/.shell-lint-passed
       '';
 
-  # Run Nix linters (statix, deadnix, nixfmt).
-  nixLint =
-    _:
+  nix-lint =
     pkgs.runCommand "modelplane-nix-lint"
       {
         nativeBuildInputs = [
@@ -68,4 +90,39 @@
         mkdir -p $out
         touch $out/.nix-lint-passed
       '';
+
+  # Fail if uv.lock is out of sync with any pyproject.toml in the workspace.
+  # uv lock --check resolves the workspace against the lockfile without
+  # writing it. The sandbox has no network, no writable HOME, and no
+  # /bin/sh for uv's interpreter discovery, so:
+  #
+  #   --offline                  skip the network
+  #   UV_CACHE_DIR=...           write cache into the build dir
+  #   --no-managed-python        don't try to download a Python
+  #   --python ${pkgs.python3}/bin/python   use the nix-provided interpreter
+  uv-lock =
+    pkgs.runCommand "modelplane-uv-lock"
+      {
+        nativeBuildInputs = [
+          pkgs.unstable.uv
+          pkgs.python3
+        ];
+        env.UV_CACHE_DIR = "uv-cache";
+      }
+      ''
+        cp -r ${self} src
+        chmod -R u+w src
+        cd src
+        uv lock --check --offline \
+          --no-managed-python \
+          --python ${pkgs.python3}/bin/python
+        mkdir -p $out
+        touch $out/.uv-lock-passed
+      '';
 }
+// builtins.listToAttrs (
+  map (name: {
+    name = "test-${name}";
+    value = mkFunctionTest name;
+  }) functionNames
+)

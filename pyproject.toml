@@ -1,6 +1,21 @@
-# Tool configuration for ruff and pyright. The up CLI handles building and
-# packaging composition functions — this file is only for linting and
-# type-checking.
+[project]
+name = "modelplane"
+version = "0.0.0"
+description = "An open-source AI inference platform built on Crossplane."
+requires-python = ">=3.11,<3.14"
+license = "Apache-2.0"
+
+[tool.uv]
+# This is a workspace root; it's not installable itself.
+package = false
+
+[tool.uv.workspace]
+members = ["functions/*", "schemas/python"]
+
+[dependency-groups]
+dev = [
+  "crossplane-function-sdk-python>=0.12.0",
+]
 
 [tool.ruff]
 target-version = "py312"
@@ -30,11 +45,8 @@ max-args = 8
 
 [tool.ruff.lint.per-file-ignores]
 # Generated models are not under our control.
-".up/python/models/**" = ["ALL"]
-
-[tool.pyright]
-pythonVersion = "3.12"
-# Type-check the function code and shared library. Exclude generated models
-# and the tests directory (up CLI's test runner has its own structure).
-include = ["functions", "lib"]
-exclude = [".up"]
+"schemas/python/**" = ["ALL"]
+# Tests use magic values, many parameters, and long hardcoded resource dicts.
+"**/tests/**" = ["E501", "PLR2004", "PLR0913"]
+# fn.py uses gRPC's required PascalCase method name.
+"functions/*/function/fn.py" = ["N802"]

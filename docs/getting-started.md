@@ -15,8 +15,8 @@ You need the following tools installed:
 - [kind](https://kind.sigs.k8s.io/)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/)
 - [Helm](https://helm.sh/docs/intro/install/)
-- The [Upbound CLI](https://docs.upbound.io/reference/cli/) (`up`), used to
-  create a pull secret for the Modelplane package registry.
+- [Docker](https://www.docker.com/) (or a compatible credential helper) for
+  registry authentication.
 
 You also need:
 
@@ -146,16 +146,16 @@ EOF
 
 Modelplane is packaged as a Crossplane
 [Configuration](https://docs.crossplane.io/latest/concepts/packages/#configuration-packages).
-The package registry requires authentication. Create a pull secret using the
-[Upbound CLI](https://docs.upbound.io/reference/cli/), then install the
-Configuration. This pulls the providers and composition functions it depends on.
-
-`up ctp pull-secret create` uses the credentials of the currently active `up`
-profile. Make sure you're logged in as a user account with access to the
-`modelplane` organization (run `up login` if not).
+The package registry requires authentication. Create a pull secret, then install
+the Configuration. This pulls the providers and composition functions it depends
+on.
 
 ```bash
-up ctp pull-secret create -n crossplane-system upbound-pull-secret --organization modelplane
+kubectl create secret docker-registry upbound-pull-secret \
+  --docker-server=xpkg.upbound.io \
+  --docker-username='<robot-id>' \
+  --docker-password='<robot-token>' \
+  -n crossplane-system
 ```
 
 ```bash

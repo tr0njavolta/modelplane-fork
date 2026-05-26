@@ -6,11 +6,65 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+
+    # Unstable nixpkgs, exposed as pkgs.unstable. Used when we need a
+    # newer version of a package than the stable channel ships, e.g. uv
+    # tracking the latest uv_build releases.
+    nixpkgs-unstable.url = "github:NixOS/nixpkgs/nixos-unstable";
+
+    # Pinned to the 'diy' branch until crossplane/cli#24 merges.
+    crossplane-cli.url = "github:negz/cli/diy";
+
+    # uv2nix reads a uv workspace's uv.lock and generates Nix derivations
+    # for each Python package, using pyproject.nix's build infrastructure.
+    pyproject-nix = {
+      url = "github:pyproject-nix/pyproject.nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    uv2nix = {
+      url = "github:pyproject-nix/uv2nix";
+      inputs = {
+        pyproject-nix.follows = "pyproject-nix";
+        nixpkgs.follows = "nixpkgs";
+      };
+    };
+    pyproject-build-systems = {
+      url = "github:pyproject-nix/build-system-pkgs";
+      inputs = {
+        pyproject-nix.follows = "pyproject-nix";
+        uv2nix.follows = "uv2nix";
+        nixpkgs.follows = "nixpkgs";
+      };
+    };
   };
 
   outputs =
-    { self, nixpkgs }:
+    {
+      self,
+      nixpkgs,
+      nixpkgs-unstable,
+      crossplane-cli,
+      pyproject-nix,
+      uv2nix,
+      pyproject-build-systems,
+    }:
     let
+      # Set by CI to override the auto-generated dev version.
+      buildVersion = null;
+
+      # The composition functions that make up Modelplane.
+      functionNames = [
+        "compose-gke-cluster"
+        "compose-inference-class"
+        "compose-inference-cluster"
+        "compose-inference-gateway"
+        "compose-kserve-backend"
+        "compose-model-deployment"
+        "compose-model-endpoint"
+        "compose-model-replica"
+        "compose-model-service"
+      ];
+
       supportedSystems = [
         "x86_64-linux"
         "aarch64-linux"
@@ -18,74 +72,118 @@
         "aarch64-darwin"
       ];
 
-      # Helpers for per-system outputs.
+      # Function images contain Linux Python interpreters. They can only be
+      # built on Linux hosts. macOS users can still use apps, checks, and the
+      # dev shell.
+      linuxSystems = [
+        "x86_64-linux"
+        "aarch64-linux"
+      ];
+
+      # Semantic version for packages. Uses buildVersion if set by CI,
+      # otherwise generates a dev version from git metadata.
+      version =
+        if buildVersion != null then
+          buildVersion
+        else if self ? shortRev then
+          "v0.1.0-dev.${builtins.toString self.lastModified}.g${self.shortRev}"
+        else
+          "v0.1.0-dev.${builtins.toString self.lastModified}.g${self.dirtyShortRev}";
+
       forAllSystems = f: nixpkgs.lib.genAttrs supportedSystems (system: forSystem system f);
+      forLinuxSystems = f: nixpkgs.lib.genAttrs linuxSystems (system: forSystem system f);
       forSystem =
         system: f:
         f {
           inherit system;
-          pkgs = import nixpkgs { inherit system; };
+          pkgs = import nixpkgs {
+            inherit system;
+            config.allowUnfreePredicate = pkg: builtins.elem (nixpkgs.lib.getName pkg) [ "upbound" ];
+            overlays = [
+              (_: _: {
+                unstable = import nixpkgs-unstable {
+                  inherit system;
+                };
+              })
+            ];
+          };
         };
 
     in
     {
-      # CI checks (nix flake check).
       checks = forAllSystems (
         { pkgs, ... }:
-        let
-          checks = import ./nix/checks.nix { inherit pkgs self; };
-        in
-        {
-          python = checks.python { };
-          shell-lint = checks.shellLint { };
-          nix-lint = checks.nixLint { };
+        import ./nix/checks.nix {
+          inherit
+            pkgs
+            self
+            functionNames
+            pyproject-nix
+            uv2nix
+            pyproject-build-systems
+            ;
         }
       );
 
-      # Development commands (nix run .#<app>).
+      # Function runtime images. Build individual images with
+      # nix build .#<function>-<arch>, or all of them with nix build .#functions.
+      packages = forLinuxSystems (
+        { pkgs, ... }:
+        let
+          functions = import ./nix/functions.nix {
+            inherit
+              pkgs
+              self
+              functionNames
+              pyproject-nix
+              uv2nix
+              pyproject-build-systems
+              ;
+          };
+        in
+        functions.images // { functions = functions.all; }
+      );
+
       apps = forAllSystems (
         { pkgs, system, ... }:
         let
-          build = import ./nix/build.nix { inherit pkgs self; };
+          deps = import ./nix/deps.nix { inherit pkgs crossplane-cli; };
           apps = import ./nix/apps.nix { inherit pkgs; };
-          up = build.up { inherit system; };
-          dockerCredentialUp = build.dockerCredentialUp { inherit system; };
+          crossplane = deps.crossplane { inherit system; };
+          functionsPkg = self.packages.${system}.functions or null;
         in
         {
-          build-crossplane = apps.buildCrossplane { inherit up dockerCredentialUp; };
-          test-crossplane = apps.testCrossplane { inherit up dockerCredentialUp; };
-          push-crossplane = apps.pushCrossplane { inherit up dockerCredentialUp; };
-          lint = apps.lint { };
+          fix = apps.fix { };
+          generate = apps.generate { inherit crossplane pkgs; };
+          build-crossplane = apps.buildCrossplane {
+            inherit crossplane functionsPkg;
+            dockerCredentialUp = pkgs.upbound;
+          };
+          push-crossplane = apps.pushCrossplane {
+            inherit crossplane version;
+            dockerCredentialUp = pkgs.upbound;
+          };
         }
       );
 
-      # Development shell (nix develop).
       devShells = forAllSystems (
         { pkgs, system, ... }:
         let
-          build = import ./nix/build.nix { inherit pkgs self; };
-          up = build.up { inherit system; };
-          dockerCredentialUp = build.dockerCredentialUp { inherit system; };
+          deps = import ./nix/deps.nix { inherit pkgs crossplane-cli; };
+          crossplane = deps.crossplane { inherit system; };
         in
         {
           default = pkgs.mkShell {
             buildInputs = [
-              # Crossplane / Upbound
-              up
-              dockerCredentialUp
-
-              # Kubernetes
+              crossplane
+              pkgs.upbound
               pkgs.kubectl
               pkgs.kubernetes-helm
               pkgs.kind
               pkgs.docker-client
-
-              # Python (for linting composition functions)
+              pkgs.unstable.uv
               pkgs.python3
               pkgs.ruff
-              pkgs.pyright
-
-              # Nix
               pkgs.nixfmt-rfc-style
             ];
 
@@ -100,9 +198,9 @@
 
               echo "Modelplane development shell"
               echo ""
-              echo "  nix run .#build-crossplane    nix run .#lint"
-              echo "  nix run .#test-crossplane     nix flake check"
-              echo "  nix run .#push-crossplane     nix flake show"
+              echo "  nix flake check               nix run .#fix"
+              echo "  nix run .#generate            nix run .#build-crossplane"
+              echo "  nix run .#push-crossplane"
               echo ""
             '';
           };
