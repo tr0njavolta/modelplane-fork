@@ -6,10 +6,12 @@ address and parentRef) and the matching ModelEndpoints (for their
 backend names and rewrite paths), then composes a single HTTPRoute on
 the control plane.
 
-The match prefix is `/<service-ns>/<service-name>/`. Each backendRef
-carries its own URLRewrite filter derived from the endpoint's
-spec.rewritePath, so endpoints from different deployments or external
-providers can coexist with different rewrite targets.
+The match prefix is `/<service-ns>/<service-name>/`. Endpoints are
+grouped by rewritePath; each group becomes one HTTPRoute rule with a
+rule-level URLRewrite filter. This is necessary because Gateway API
+only allows RequestHeaderModifier and ResponseHeaderModifier at the
+backendRef level. Endpoints with the same rewritePath share a rule and
+are load-balanced by weight within it.
 """
 
 import grpc
@@ -163,11 +165,15 @@ class Composer:
     def compose_httproute(self):
         """Compose an HTTPRoute that load-balances across matched endpoints.
 
-        Each backendRef carries its own URLRewrite filter so endpoints
-        with different rewritePaths (e.g. composed replicas vs. external
-        SaaS providers) are rewritten correctly per-backend.
+        Endpoints are grouped by rewritePath. Each group becomes one
+        HTTPRoute rule sharing the same PathPrefix match. The URLRewrite
+        filter is attached at the rule level (not per-backendRef) because
+        Gateway API only permits RequestHeaderModifier and
+        ResponseHeaderModifier on individual backendRefs.
         """
-        backend_refs = []
+        # Group ready endpoints by rewritePath. Endpoints without a
+        # rewritePath use None as the key (no rewrite filter).
+        groups: dict[str | None, list[dict]] = {}
         for ep in self.endpoints:
             if not ep.status or not ep.status.routing or not ep.status.routing.backendName:
                 continue
@@ -178,38 +184,41 @@ class Composer:
                 "port": 80,
                 "weight": 1,
             }
-            if ep.spec.rewritePath:
-                ref["filters"] = [
+            key = ep.spec.rewritePath or None
+            groups.setdefault(key, []).append(ref)
+
+        match_prefix = f"/{self.xr.metadata.namespace}/{self.xr.metadata.name}/"
+        match = {"path": {"type": "PathPrefix", "value": match_prefix}}
+
+        rules = []
+        # Emit rules in a deterministic order: sorted rewritePaths first,
+        # then the no-rewrite group (None key) last.
+        for key in sorted(groups, key=lambda k: (k is None, k or "")):
+            rule: dict = {"matches": [match]}
+            if key is not None:
+                rule["filters"] = [
                     {
                         "type": "URLRewrite",
                         "urlRewrite": {
                             "path": {
                                 "type": "ReplacePrefixMatch",
-                                "replacePrefixMatch": ep.spec.rewritePath,
+                                "replacePrefixMatch": key,
                             },
                         },
                     }
                 ]
-            backend_refs.append(ref)
+            rule["backendRefs"] = groups[key]
+            rules.append(rule)
 
-        match_prefix = f"/{self.xr.metadata.namespace}/{self.xr.metadata.name}/"
-
-        rule: dict = {
-            "matches": [
-                {
-                    "path": {
-                        "type": "PathPrefix",
-                        "value": match_prefix,
-                    },
-                }
-            ],
-        }
-        if backend_refs:
-            rule["backendRefs"] = backend_refs
+        # No ready backends — emit a single rule with no backendRefs so
+        # the HTTPRoute still exists (Envoy returns 500 until backends
+        # appear, but the route object is valid).
+        if not rules:
+            rules.append({"matches": [match]})
 
         httproute_spec = {
             "parentRefs": [{"name": _GATEWAY_NAME, "namespace": _NAMESPACE_SYSTEM}],
-            "rules": [rule],
+            "rules": rules,
         }
 
         resource.update(

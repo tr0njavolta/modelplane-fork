@@ -98,6 +98,17 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                             "matches": [
                                                 {"path": {"type": "PathPrefix", "value": "/ml-team/test-service/"}}
                                             ],
+                                            "filters": [
+                                                {
+                                                    "type": "URLRewrite",
+                                                    "urlRewrite": {
+                                                        "path": {
+                                                            "type": "ReplacePrefixMatch",
+                                                            "replacePrefixMatch": "/default/model/",
+                                                        },
+                                                    },
+                                                }
+                                            ],
                                             "backendRefs": [
                                                 {
                                                     "group": "gateway.envoyproxy.io",
@@ -105,17 +116,6 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                     "name": "backend-1",
                                                     "port": 80,
                                                     "weight": 1,
-                                                    "filters": [
-                                                        {
-                                                            "type": "URLRewrite",
-                                                            "urlRewrite": {
-                                                                "path": {
-                                                                    "type": "ReplacePrefixMatch",
-                                                                    "replacePrefixMatch": "/default/model/",
-                                                                },
-                                                            },
-                                                        }
-                                                    ],
                                                 },
                                             ],
                                         }
@@ -266,10 +266,268 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         sel0_3.match_labels.labels.update({"app": "model"})
         want3.requirements.resources["endpoints-0"].CopyFrom(sel0_3)
 
+        # Case 4: two endpoints with the same rewritePath produce one rule with two backendRefs.
+        req4 = fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=fnv1.Resource(resource=resource.dict_to_struct(xr)),
+            ),
+        )
+        req4.required_resources["inference-gateway"].items.append(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "modelplane.ai/v1alpha1",
+                        "kind": "InferenceGateway",
+                        "metadata": {"name": "default"},
+                        "spec": {"backend": "EnvoyGateway"},
+                        "status": {"address": "34.55.100.10"},
+                    }
+                )
+            )
+        )
+        for name, ip in [("ep-1", "10.0.0.1"), ("ep-2", "10.0.0.2")]:
+            req4.required_resources["endpoints-0"].items.append(
+                fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        {
+                            "apiVersion": "modelplane.ai/v1alpha1",
+                            "kind": "ModelEndpoint",
+                            "metadata": {"name": name, "namespace": "ml-team"},
+                            "spec": {"url": f"http://{ip}/default/model/v1", "rewritePath": "/default/model/"},
+                            "status": {"routing": {"backendName": f"backend-{name}"}},
+                        }
+                    )
+                )
+            )
+
+        want4 = fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        {"status": {"address": "http://34.55.100.10/ml-team/test-service"}}
+                    ),
+                ),
+                resources={
+                    "httproute": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "gateway.networking.k8s.io/v1",
+                                "kind": "HTTPRoute",
+                                "metadata": {"namespace": "ml-team"},
+                                "spec": {
+                                    "parentRefs": [{"name": "modelplane", "namespace": "modelplane-system"}],
+                                    "rules": [
+                                        {
+                                            "matches": [
+                                                {"path": {"type": "PathPrefix", "value": "/ml-team/test-service/"}}
+                                            ],
+                                            "filters": [
+                                                {
+                                                    "type": "URLRewrite",
+                                                    "urlRewrite": {
+                                                        "path": {
+                                                            "type": "ReplacePrefixMatch",
+                                                            "replacePrefixMatch": "/default/model/",
+                                                        },
+                                                    },
+                                                }
+                                            ],
+                                            "backendRefs": [
+                                                {
+                                                    "group": "gateway.envoyproxy.io",
+                                                    "kind": "Backend",
+                                                    "name": "backend-ep-1",
+                                                    "port": 80,
+                                                    "weight": 1,
+                                                },
+                                                {
+                                                    "group": "gateway.envoyproxy.io",
+                                                    "kind": "Backend",
+                                                    "name": "backend-ep-2",
+                                                    "port": 80,
+                                                    "weight": 1,
+                                                },
+                                            ],
+                                        }
+                                    ],
+                                },
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(
+                    type="EndpointsResolved",
+                    status=fnv1.STATUS_CONDITION_TRUE,
+                    reason="Resolved",
+                    message="Matched 2 endpoint(s)",
+                ),
+                fnv1.Condition(
+                    type="RoutingReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="Configuring",
+                ),
+            ],
+            context=structpb.Struct(),
+        )
+        want4.requirements.resources["inference-gateway"].CopyFrom(
+            fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway", match_name="default")
+        )
+        sel0_4 = fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelEndpoint")
+        sel0_4.match_labels.labels.update({"app": "model"})
+        want4.requirements.resources["endpoints-0"].CopyFrom(sel0_4)
+
+        # Case 5: two endpoints with different rewritePaths produce two rules.
+        req5 = fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=fnv1.Resource(resource=resource.dict_to_struct(xr)),
+            ),
+        )
+        req5.required_resources["inference-gateway"].items.append(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "modelplane.ai/v1alpha1",
+                        "kind": "InferenceGateway",
+                        "metadata": {"name": "default"},
+                        "spec": {"backend": "EnvoyGateway"},
+                        "status": {"address": "34.55.100.10"},
+                    }
+                )
+            )
+        )
+        req5.required_resources["endpoints-0"].items.append(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "modelplane.ai/v1alpha1",
+                        "kind": "ModelEndpoint",
+                        "metadata": {"name": "ep-a", "namespace": "ml-team"},
+                        "spec": {"url": "http://10.0.0.1/default/model-a/v1", "rewritePath": "/default/model-a/"},
+                        "status": {"routing": {"backendName": "backend-a"}},
+                    }
+                )
+            )
+        )
+        req5.required_resources["endpoints-0"].items.append(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "modelplane.ai/v1alpha1",
+                        "kind": "ModelEndpoint",
+                        "metadata": {"name": "ep-b", "namespace": "ml-team"},
+                        "spec": {"url": "http://10.0.0.2/default/model-b/v1", "rewritePath": "/default/model-b/"},
+                        "status": {"routing": {"backendName": "backend-b"}},
+                    }
+                )
+            )
+        )
+
+        want5 = fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        {"status": {"address": "http://34.55.100.10/ml-team/test-service"}}
+                    ),
+                ),
+                resources={
+                    "httproute": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "gateway.networking.k8s.io/v1",
+                                "kind": "HTTPRoute",
+                                "metadata": {"namespace": "ml-team"},
+                                "spec": {
+                                    "parentRefs": [{"name": "modelplane", "namespace": "modelplane-system"}],
+                                    "rules": [
+                                        {
+                                            "matches": [
+                                                {"path": {"type": "PathPrefix", "value": "/ml-team/test-service/"}}
+                                            ],
+                                            "filters": [
+                                                {
+                                                    "type": "URLRewrite",
+                                                    "urlRewrite": {
+                                                        "path": {
+                                                            "type": "ReplacePrefixMatch",
+                                                            "replacePrefixMatch": "/default/model-a/",
+                                                        },
+                                                    },
+                                                }
+                                            ],
+                                            "backendRefs": [
+                                                {
+                                                    "group": "gateway.envoyproxy.io",
+                                                    "kind": "Backend",
+                                                    "name": "backend-a",
+                                                    "port": 80,
+                                                    "weight": 1,
+                                                },
+                                            ],
+                                        },
+                                        {
+                                            "matches": [
+                                                {"path": {"type": "PathPrefix", "value": "/ml-team/test-service/"}}
+                                            ],
+                                            "filters": [
+                                                {
+                                                    "type": "URLRewrite",
+                                                    "urlRewrite": {
+                                                        "path": {
+                                                            "type": "ReplacePrefixMatch",
+                                                            "replacePrefixMatch": "/default/model-b/",
+                                                        },
+                                                    },
+                                                }
+                                            ],
+                                            "backendRefs": [
+                                                {
+                                                    "group": "gateway.envoyproxy.io",
+                                                    "kind": "Backend",
+                                                    "name": "backend-b",
+                                                    "port": 80,
+                                                    "weight": 1,
+                                                },
+                                            ],
+                                        },
+                                    ],
+                                },
+                            }
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(
+                    type="EndpointsResolved",
+                    status=fnv1.STATUS_CONDITION_TRUE,
+                    reason="Resolved",
+                    message="Matched 2 endpoint(s)",
+                ),
+                fnv1.Condition(
+                    type="RoutingReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="Configuring",
+                ),
+            ],
+            context=structpb.Struct(),
+        )
+        want5.requirements.resources["inference-gateway"].CopyFrom(
+            fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="InferenceGateway", match_name="default")
+        )
+        sel0_5 = fnv1.ResourceSelector(api_version="modelplane.ai/v1alpha1", kind="ModelEndpoint")
+        sel0_5.match_labels.labels.update({"app": "model"})
+        want5.requirements.resources["endpoints-0"].CopyFrom(sel0_5)
+
         cases = [
             Case(name="endpoints with ready backends compose HTTPRoute with backendRefs", req=req1, want=want1),
             Case(name="no endpoints produces warning and EndpointsResolved=False", req=req2, want=want2),
             Case(name="endpoint without backend composes HTTPRoute without backendRefs", req=req3, want=want3),
+            Case(name="same rewritePath produces one rule with two backendRefs", req=req4, want=want4),
+            Case(name="different rewritePaths produce one rule per path", req=req5, want=want5),
         ]
 
         for case in cases:
