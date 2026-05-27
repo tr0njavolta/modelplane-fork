@@ -3,14 +3,18 @@
 ModelService selects ModelEndpoints by label and load-balances across
 them. This function fetches the InferenceGateway (for the public
 address and parentRef) and the matching ModelEndpoints (for their
-backend names and rewrite paths), then composes a single HTTPRoute on
-the control plane.
+backend service names and rewrite paths), then composes a single
+HTTPRoute on the control plane.
 
-The match prefix is `/<service-ns>/<service-name>/`. Each backendRef
-carries its own URLRewrite filter derived from the endpoint's
-spec.rewritePath, so endpoints from different deployments or external
-providers can coexist with different rewrite targets.
+The match prefix is `/<service-ns>/<service-name>/`. Each endpoint's
+rewritePath is attached as a per-backendRef URLRewrite filter so that
+endpoints with different path conventions (e.g. composed replicas at
+/v1/ alongside external providers at /openai/v1/) each get the correct
+path rewrite. This is a Gateway API Extended feature (per-backendRef
+filters) supported by Traefik Proxy.
 """
+
+import urllib.parse
 
 import grpc
 from crossplane.function import logging, request, resource, response
@@ -44,6 +48,18 @@ def _inference_gateway(
     gw = gw.model_copy(deep=True)
     gw.status = gw.status or igwv1alpha1.Status()
     return gw
+
+
+def _port_from_url(url: str) -> int:
+    """Parse the backend port from a ModelEndpoint URL.
+
+    Defaults to 443 for https and 80 for http when not explicit, matching
+    what compose-model-endpoint uses when creating the backend Service.
+    """
+    parsed = urllib.parse.urlparse(url)
+    if parsed.port:
+        return parsed.port
+    return 443 if parsed.scheme == "https" else 80
 
 
 def _has_parent_condition(req: fnv1.RunFunctionRequest, name: str, cond: str) -> bool:
@@ -163,19 +179,26 @@ class Composer:
     def compose_httproute(self):
         """Compose an HTTPRoute that load-balances across matched endpoints.
 
-        Each backendRef carries its own URLRewrite filter so endpoints
-        with different rewritePaths (e.g. composed replicas vs. external
-        SaaS providers) are rewritten correctly per-backend.
+        A single rule matches the service prefix and fans out to all
+        ready endpoints via weighted backendRefs. Each backendRef carries
+        its own URLRewrite filter derived from the endpoint's rewritePath,
+        so endpoints with different path conventions are rewritten
+        correctly per-backend. This is a Gateway API Extended feature
+        supported by Traefik Proxy.
         """
+        match_prefix = f"/{self.xr.metadata.namespace}/{self.xr.metadata.name}/"
+        match = {"path": {"type": "PathPrefix", "value": match_prefix}}
+
         backend_refs = []
         for ep in self.endpoints:
             if not ep.status or not ep.status.routing or not ep.status.routing.backendName:
                 continue
+            # Derive the backend Service port from the endpoint's URL.
+            # compose-model-endpoint creates a Service with this port.
+            port = _port_from_url(ep.spec.url)
             ref: dict = {
-                "group": "gateway.envoyproxy.io",
-                "kind": "Backend",
                 "name": ep.status.routing.backendName,
-                "port": 80,
+                "port": port,
                 "weight": 1,
             }
             if ep.spec.rewritePath:
@@ -192,25 +215,9 @@ class Composer:
                 ]
             backend_refs.append(ref)
 
-        match_prefix = f"/{self.xr.metadata.namespace}/{self.xr.metadata.name}/"
-
-        rule: dict = {
-            "matches": [
-                {
-                    "path": {
-                        "type": "PathPrefix",
-                        "value": match_prefix,
-                    },
-                }
-            ],
-        }
+        rule: dict = {"matches": [match]}
         if backend_refs:
             rule["backendRefs"] = backend_refs
-
-        httproute_spec = {
-            "parentRefs": [{"name": _GATEWAY_NAME, "namespace": _NAMESPACE_SYSTEM}],
-            "rules": [rule],
-        }
 
         resource.update(
             self.rsp.desired.resources["httproute"],
@@ -218,7 +225,10 @@ class Composer:
                 "apiVersion": "gateway.networking.k8s.io/v1",
                 "kind": "HTTPRoute",
                 "metadata": {"namespace": self.xr.metadata.namespace},
-                "spec": httproute_spec,
+                "spec": {
+                    "parentRefs": [{"name": _GATEWAY_NAME, "namespace": _NAMESPACE_SYSTEM}],
+                    "rules": [rule],
+                },
             },
         )
 
