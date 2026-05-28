@@ -38,7 +38,7 @@ spec:
                     type: string
                     description: >-
                       Cluster provisioning method.
-                    enum: [GKE, Existing]
+                    enum: [GKE, EKS, Existing]
                   existing:
                     type: object
                     description: >-
@@ -127,6 +127,36 @@ spec:
                               Filestore CSI addon and composes the
                               StorageClass; set this to a different name to
                               use one the admin has already created.
+                            minLength: 1
+                  eks:
+                    type: object
+                    description: >-
+                      EKS cluster configuration. Required when source is EKS.
+                    required: [region]
+                    properties:
+                      region:
+                        type: string
+                        description: >-
+                          AWS region for the cluster (e.g. us-west-2).
+                        minLength: 1
+                        maxLength: 32
+                      kubernetesVersion:
+                        type: string
+                        default: "1.31"
+                      cache:
+                        type: object
+                        description: >-
+                          ModelCache configuration for this cluster.
+                        properties:
+                          storageClassName:
+                            type: string
+                            default: modelplane-rwx-efs
+                            description: >-
+                              Name of the RWX StorageClass for ModelCache
+                              PVCs. Modelplane does not currently provision
+                              EFS automatically; the admin must create an
+                              EFS file system and the EFS CSI
+                              StorageClass on the cluster.
                             minLength: 1
               nodePools:
                 type: array

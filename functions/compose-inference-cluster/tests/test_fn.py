@@ -29,6 +29,8 @@ def setUpModule() -> None:
 class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
     """Tests for FunctionRunner.RunFunction."""
 
+    maxDiff = None
+
     @classmethod
     def setUpClass(cls) -> None:
         cls.runner = fn.FunctionRunner()
@@ -436,10 +438,143 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         )
         want3.requirements.resources["class-gpu-l4"].CopyFrom(class_selector)
 
+        # --- Case 4: EKS cluster first pass - no observed EKS, classes resolved. ---
+        inference_class_l4_eks = {
+            "apiVersion": "modelplane.ai/v1alpha1",
+            "kind": "InferenceClass",
+            "metadata": {"name": "gpu-l4-eks"},
+            "spec": {
+                "resources": {
+                    "gpu": {"count": 1, "memory": "24Gi"},
+                },
+                "provisioning": {
+                    "provider": "EKS",
+                    "eks": {
+                        "instanceType": "g6.xlarge",
+                        "diskSizeGb": 100,
+                        "accelerator": {"type": "nvidia-l4", "count": 1},
+                    },
+                },
+            },
+        }
+        class_selector_eks = fnv1.ResourceSelector(
+            api_version="modelplane.ai/v1alpha1",
+            kind="InferenceClass",
+            match_name="gpu-l4-eks",
+        )
+
+        req4 = fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        v1alpha1.InferenceCluster(
+                            metadata=metav1.ObjectMeta(
+                                name="test-cluster",
+                                namespace="modelplane-system",
+                            ),
+                            spec=v1alpha1.Spec(
+                                cluster=v1alpha1.Cluster(
+                                    source="EKS",
+                                    eks=v1alpha1.Eks(region="us-west-2"),
+                                ),
+                                nodePools=[
+                                    v1alpha1.NodePool(
+                                        name="l4-pool",
+                                        className="gpu-l4-eks",
+                                        nodeCount=2,
+                                        maxNodeCount=4,
+                                        zones=["us-west-2a", "us-west-2b"],
+                                    ),
+                                ],
+                            ),
+                        ).model_dump(exclude_none=True, mode="json"),
+                    ),
+                ),
+            ),
+        )
+        req4.required_resources["class-gpu-l4-eks"].items.append(
+            fnv1.Resource(resource=resource.dict_to_struct(inference_class_l4_eks)),
+        )
+
+        want4 = fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        {
+                            "status": {
+                                "providerConfigRef": {
+                                    "name": "test-cluster-cluster-kubeconfig-d0f89",
+                                },
+                                "namespace": "modelplane-system",
+                                "capacity": {
+                                    "gpuPools": [
+                                        {
+                                            "acceleratorType": "nvidia-l4",
+                                            "memory": "24Gi",
+                                            "countPerNode": 1,
+                                            "nodes": 4,
+                                        },
+                                    ],
+                                },
+                            },
+                        },
+                    ),
+                ),
+                resources={
+                    "eks-cluster": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                                "kind": "EKSCluster",
+                                "metadata": {
+                                    "name": "test-cluster",
+                                    "namespace": "modelplane-system",
+                                },
+                                "spec": {
+                                    "region": "us-west-2",
+                                    "nodePools": [
+                                        {
+                                            "name": "l4-pool",
+                                            "role": "GPU",
+                                            "instanceType": "g6.xlarge",
+                                            "nodeCount": 2,
+                                            "minNodeCount": None,
+                                            "maxNodeCount": 4,
+                                            "gpu": {
+                                                "acceleratorType": "nvidia-l4",
+                                                "memory": "24Gi",
+                                            },
+                                            "zones": ["us-west-2a", "us-west-2b"],
+                                        },
+                                    ],
+                                },
+                            },
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(
+                    type="ClusterReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="Provisioning",
+                ),
+                fnv1.Condition(
+                    type="BackendReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="WaitingForCluster",
+                ),
+            ],
+            context=structpb.Struct(),
+        )
+        want4.requirements.resources["class-gpu-l4-eks"].CopyFrom(class_selector_eks)
+
         cases = [
             Case(name="existing cluster with secrets composes backend and CPC", req=req1, want=want1),
             Case(name="GKE cluster first pass composes GKECluster XR only", req=req2, want=want2),
             Case(name="existing cluster second pass with backend ready", req=req3, want=want3),
+            Case(name="EKS cluster first pass composes EKSCluster XR only", req=req4, want=want4),
         ]
 
         for case in cases:

@@ -12,6 +12,25 @@ from ....io.k8s.apimachinery.pkg.apis.meta import v1
 
 
 class Cache(BaseModel):
+    storageClassName: Optional[constr(min_length=1)] = 'modelplane-rwx-efs'
+    """
+    Name of the RWX StorageClass for ModelCache PVCs. Modelplane does not currently provision EFS automatically; the admin must create an EFS file system and the EFS CSI StorageClass on the cluster.
+    """
+
+
+class Eks(BaseModel):
+    cache: Optional[Cache] = None
+    """
+    ModelCache configuration for this cluster.
+    """
+    kubernetesVersion: Optional[str] = '1.31'
+    region: constr(min_length=1, max_length=32)
+    """
+    AWS region for the cluster (e.g. us-west-2).
+    """
+
+
+class CacheModel(BaseModel):
     storageClassName: Optional[constr(min_length=1)] = 'modelplane-rwx'
     """
     Name of the RWX StorageClass for ModelCache PVCs. The admin creates the StorageClass on the workload cluster (must support ReadWriteMany dynamic provisioning).
@@ -29,7 +48,7 @@ class SecretRef(BaseModel):
 
 
 class Existing(BaseModel):
-    cache: Optional[Cache] = None
+    cache: Optional[CacheModel] = None
     """
     ModelCache configuration for this cluster.
     """
@@ -43,7 +62,7 @@ class Existing(BaseModel):
     """
 
 
-class CacheModel(BaseModel):
+class CacheModel1(BaseModel):
     storageClassName: Optional[constr(min_length=1)] = 'modelplane-rwx'
     """
     Name of the RWX StorageClass for ModelCache PVCs. At the default value, Modelplane provisions Filestore Enterprise via the Filestore CSI addon and composes the StorageClass; set this to a different name to use one the admin has already created.
@@ -51,7 +70,7 @@ class CacheModel(BaseModel):
 
 
 class Gke(BaseModel):
-    cache: Optional[CacheModel] = None
+    cache: Optional[CacheModel1] = None
     """
     ModelCache configuration for this cluster.
     """
@@ -61,6 +80,10 @@ class Gke(BaseModel):
 
 
 class Cluster(BaseModel):
+    eks: Optional[Eks] = None
+    """
+    EKS cluster configuration. Required when source is EKS.
+    """
     existing: Optional[Existing] = None
     """
     Bring-your-own cluster configuration. Required when source is Existing. Modelplane manages the inference stack on the cluster but does not provision the cluster itself.
@@ -69,7 +92,7 @@ class Cluster(BaseModel):
     """
     GKE cluster configuration. Required when source is GKE.
     """
-    source: Literal['GKE', 'Existing']
+    source: Literal['GKE', 'EKS', 'Existing']
     """
     Cluster provisioning method.
     """

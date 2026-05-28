@@ -1,0 +1,42 @@
+# An InferenceCluster backed by an EKS cluster.
+#
+# Modelplane provisions the full EKS cluster (VPC, subnets, internet
+# gateway, IAM roles for the cluster and nodes, system + GPU node
+# groups, vpc-cni / kube-proxy / coredns addons) and installs the
+# inference stack (cert-manager, Traefik, Prometheus, KEDA,
+# LeaderWorkerSet).
+#
+# The system node group that hosts control-plane components is
+# provisioned automatically and is not declared here. Only GPU node
+# groups - each referencing an InferenceClass that describes the
+# hardware shape and how to provision it - need to be declared.
+#
+# Modelplane does not currently provision EFS for RWX ModelCache
+# storage on EKS. The admin should create an EFS file system and the
+# EFS CSI StorageClass on the cluster, then set cache.storageClassName
+# to its name (default 'modelplane-rwx-efs').
+#
+# The modelplane.ai/cluster label is required for the ModelDeployment
+# scheduler to discover this cluster.
+apiVersion: modelplane.ai/v1alpha1
+kind: InferenceCluster
+metadata:
+  name: eks-us-west
+  labels:
+    modelplane.ai/cluster: "true"
+    modelplane.ai/region: us-west
+spec:
+  cluster:
+    source: EKS
+    eks:
+      region: us-west-2
+
+  nodePools:
+  - name: gpu-l4
+    className: eks-l4-1x-g6
+    nodeCount: 1
+    minNodeCount: 0
+    maxNodeCount: 4
+    zones:
+    - us-west-2a
+    - us-west-2b

@@ -1,0 +1,755 @@
+"""Compose an EKS cluster with networking, node groups, and IAM roles.
+
+This function provisions the AWS infrastructure for an inference environment:
+a VPC with one subnet per AZ, an EKS cluster with system and GPU node groups,
+IAM roles for the control plane and nodes, and ProviderConfigs for
+provider-kubernetes and provider-helm to reach the cluster.
+
+The kubeconfig written by the EKS ClusterAuth managed resource contains a
+static bearer token that the AWS provider refreshes every refreshPeriod
+(default 10 minutes) using its own ProviderConfig credentials. The AWS
+principal that creates the cluster is granted cluster-admin via
+bootstrapClusterCreatorAdminPermissions, so the same credentials are
+authorised on the cluster. Downstream consumers only need the kubeconfig;
+no per-cluster AWS identity has to be wired into provider-kubernetes.
+"""
+
+import grpc
+from crossplane.function import logging, resource, response
+from crossplane.function.proto.v1 import run_function_pb2 as fnv1
+from crossplane.function.proto.v1 import run_function_pb2_grpc as grpcv1
+from models.ai.modelplane.infrastructure.ekscluster import v1alpha1
+from models.io.crossplane.m.helm.providerconfig import v1beta1 as helmpcv1beta1
+from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
+from models.io.crossplane.m.kubernetes.providerconfig import v1alpha1 as k8spcv1alpha1
+from models.io.crossplane.protection.usage import v1beta1 as usagev1beta1
+from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
+from models.io.upbound.m.aws.ec2.internetgateway import v1beta1 as igwv1beta1
+from models.io.upbound.m.aws.ec2.route import v1beta1 as routev1beta1
+from models.io.upbound.m.aws.ec2.routetable import v1beta1 as rtv1beta1
+from models.io.upbound.m.aws.ec2.routetableassociation import v1beta1 as rtav1beta1
+from models.io.upbound.m.aws.ec2.subnet import v1beta1 as subnetv1beta1
+from models.io.upbound.m.aws.ec2.vpc import v1beta1 as vpcv1beta1
+from models.io.upbound.m.aws.eks.addon import v1beta1 as addonv1beta1
+from models.io.upbound.m.aws.eks.cluster import v1beta1 as clusterv1beta1
+from models.io.upbound.m.aws.eks.clusterauth import v1beta1 as clusterauthv1beta1
+from models.io.upbound.m.aws.eks.nodegroup import v1beta1 as ngv1beta1
+from models.io.upbound.m.aws.iam.role import v1beta1 as rolev1beta1
+from models.io.upbound.m.aws.iam.rolepolicyattachment import v1beta1 as rpav1beta1
+
+# System node group injected into every EKS cluster to host control-plane
+# components (Envoy Gateway, KEDA, KServe controller, etc.). Not part of
+# the user-facing API — compose-inference-cluster only passes GPU groups.
+_SYSTEM_POOL_NAME = "system"
+_SYSTEM_POOL_INSTANCE_TYPE = "m6i.xlarge"
+_SYSTEM_POOL_NODE_COUNT = 1
+_SYSTEM_POOL_MIN_NODE_COUNT = 1
+_SYSTEM_POOL_MAX_NODE_COUNT = 2
+
+# Labels written on EKS node groups. compose-model-deployment reads
+# these labels for GPU scheduling.
+_LABEL_GPU = "modelplane.ai/gpu"
+_LABEL_POOL = "modelplane.ai/pool"
+
+# Internal labels written on composed AWS resources so other resources
+# can select them. _LABEL_ROLE distinguishes the cluster IAM role from
+# the node IAM role. _LABEL_AZ tags each subnet with its Availability
+# Zone so NodeGroup subnetIdSelector can pick the right subnets.
+_LABEL_ROLE = "modelplane.ai/iam-role"
+_LABEL_AZ = "modelplane.ai/zone"
+
+_ROLE_CLUSTER = "cluster"
+_ROLE_NODE = "node"
+
+# Secret type written to XR status. compose-inference-cluster reads
+# this to wire the kubeconfig into a ClusterProviderConfig.
+_SECRET_TYPE_KUBECONFIG = "Kubeconfig"
+_SECRET_KEY_KUBECONFIG = "kubeconfig"
+
+# AMI types for EKS-optimised AMIs. AL2023 NVIDIA includes the NVIDIA
+# driver and container toolkit pre-installed. AL2023 standard is the
+# default Amazon Linux 2023 AMI for non-GPU workloads.
+_AMI_TYPE_SYSTEM = "AL2023_x86_64_STANDARD"
+_AMI_TYPE_GPU = "AL2023_x86_64_NVIDIA"
+
+# GPU taint applied to GPU node groups so non-GPU pods don't land on
+# expensive GPU nodes. GPU workloads still schedule because EKS enables
+# the ExtendedResourceToleration admission controller, which injects a
+# matching nvidia.com/gpu toleration into any pod that requests the
+# nvidia.com/gpu extended resource. The device plugin DaemonSet tolerates
+# the taint explicitly (it doesn't request the resource).
+_GPU_TAINT_KEY = "nvidia.com/gpu"
+_GPU_TAINT_VALUE = "true"
+_GPU_TAINT_EFFECT = "NO_SCHEDULE"
+
+# IAM policies attached to the cluster and node roles. These are
+# AWS-managed policies; their ARNs are stable.
+_POLICY_CLUSTER = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+_POLICY_NODE_WORKER = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+_POLICY_NODE_CNI = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+_POLICY_NODE_ECR = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+
+# Trust policies for the cluster and node roles. The cluster role is
+# assumed by the EKS service; the node role is assumed by EC2 instances
+# that join the cluster.
+_ASSUME_ROLE_CLUSTER = (
+    '{"Version":"2012-10-17","Statement":[{"Effect":"Allow",'
+    '"Principal":{"Service":"eks.amazonaws.com"},'
+    '"Action":"sts:AssumeRole"}]}'
+)
+_ASSUME_ROLE_NODE = (
+    '{"Version":"2012-10-17","Statement":[{"Effect":"Allow",'
+    '"Principal":{"Service":"ec2.amazonaws.com"},'
+    '"Action":"sts:AssumeRole"}]}'
+)
+
+# EKS Addons installed on every cluster. The vpc-cni addon provides pod
+# networking, kube-proxy programs node iptables, and coredns provides
+# in-cluster DNS. All three are required for a functional cluster.
+_ADDONS = ("vpc-cni", "kube-proxy", "coredns")
+
+# NVIDIA device plugin. The GPU node groups run the AL2023 NVIDIA AMI,
+# which ships the driver and container toolkit but not the Kubernetes
+# device plugin. Without the plugin, nodes never advertise the
+# nvidia.com/gpu resource and GPU pods stay Pending. Managed clusters
+# like GKE install this automatically; EKS does not, so we install it.
+# It runs as a DaemonSet on GPU nodes (selected by the GPU pool label)
+# and tolerates the GPU taint those nodes carry.
+_DEVICE_PLUGIN_IMAGE = "nvcr.io/nvidia/k8s-device-plugin:v0.19.2"
+_DEVICE_PLUGIN_NAME = "nvidia-device-plugin-daemonset"
+_DEVICE_PLUGIN_NAMESPACE = "kube-system"
+
+# Label distinguishing the device-plugin Object from other composed
+# provider-kubernetes Objects, so the deletion-ordering Usages can select
+# it specifically by controller ref + label.
+_LABEL_RESOURCE = "modelplane.ai/resource"
+_RESOURCE_DEVICE_PLUGIN = "device-plugin"
+
+
+def _kubeconfig_secret_name(xr):
+    """Derive the kubeconfig secret name from the XR."""
+    return resource.child_name(xr.metadata.name, "kubeconfig")
+
+
+def _subnet_name(xr, az):
+    """Derive a stable Crossplane resource name for the subnet in az."""
+    return resource.child_name(xr.metadata.name, f"subnet-{az}")
+
+
+def _az(region, index):
+    """Derive an Availability Zone name from a region and an index.
+
+    AWS conventionally names AZs as ``<region><letter>`` where the letter
+    starts at ``a`` for the first AZ. The function does not validate
+    that the derived AZ actually exists in the region — invalid AZs will
+    surface as managed-resource errors at apply time.
+    """
+    return f"{region}{chr(ord('a') + index)}"
+
+
+class FunctionRunner(grpcv1.FunctionRunnerService):
+    """A FunctionRunner handles gRPC RunFunctionRequests."""
+
+    def __init__(self):
+        """Create a new FunctionRunner."""
+        self.log = logging.get_logger()
+
+    async def RunFunction(self, req: fnv1.RunFunctionRequest, _: grpc.aio.ServicerContext) -> fnv1.RunFunctionResponse:
+        """Run the function."""
+        log = self.log.bind(tag=req.meta.tag)
+        log.info("Running function")
+
+        rsp = response.to(req)
+        c = Composer(req, rsp)
+        c.compose()
+        return rsp
+
+
+class Composer:
+    def __init__(self, req, rsp):
+        self.req = req
+        self.rsp = rsp
+        self.xr = v1alpha1.EKSCluster(**resource.struct_to_dict(req.observed.composite.resource))
+
+    def compose(self):
+        self.compose_network()
+        self.compose_iam()
+        self.compose_cluster()
+        self.compose_cluster_auth()
+        self.compose_node_groups()
+        self.compose_addons()
+        self.compose_provider_configs()
+        self.compose_device_plugin()
+        self.write_status()
+        self.mark_readiness()
+
+    def compose_network(self):
+        """Compose the VPC, subnets, and internet routing."""
+        resource.update(
+            self.rsp.desired.resources["vpc"],
+            vpcv1beta1.VPC(
+                spec=vpcv1beta1.Spec(
+                    forProvider=vpcv1beta1.ForProvider(
+                        region=self.xr.spec.region,
+                        cidrBlock=self._networking().vpcCidr,
+                        enableDnsHostnames=True,
+                        enableDnsSupport=True,
+                    ),
+                ),
+            ),
+        )
+
+        for i, cidr in enumerate(self._networking().subnetCidrs):
+            az = _az(self.xr.spec.region, i)
+            cidr_str = cidr.root if hasattr(cidr, "root") else cidr
+            resource.update(
+                self.rsp.desired.resources[f"subnet-{i}"],
+                subnetv1beta1.Subnet(
+                    metadata=metav1.ObjectMeta(
+                        name=_subnet_name(self.xr, az),
+                        labels={_LABEL_AZ: az},
+                    ),
+                    spec=subnetv1beta1.Spec(
+                        forProvider=subnetv1beta1.ForProvider(
+                            region=self.xr.spec.region,
+                            availabilityZone=az,
+                            cidrBlock=cidr_str,
+                            mapPublicIpOnLaunch=True,
+                            vpcIdSelector=subnetv1beta1.VpcIdSelector(
+                                matchControllerRef=True,
+                            ),
+                        ),
+                    ),
+                ),
+            )
+
+        resource.update(
+            self.rsp.desired.resources["internet-gateway"],
+            igwv1beta1.InternetGateway(
+                spec=igwv1beta1.Spec(
+                    forProvider=igwv1beta1.ForProvider(
+                        region=self.xr.spec.region,
+                        vpcIdSelector=igwv1beta1.VpcIdSelector(
+                            matchControllerRef=True,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        resource.update(
+            self.rsp.desired.resources["route-table"],
+            rtv1beta1.RouteTable(
+                spec=rtv1beta1.Spec(
+                    forProvider=rtv1beta1.ForProvider(
+                        region=self.xr.spec.region,
+                        vpcIdSelector=rtv1beta1.VpcIdSelector(
+                            matchControllerRef=True,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        resource.update(
+            self.rsp.desired.resources["route-default"],
+            routev1beta1.Route(
+                spec=routev1beta1.Spec(
+                    forProvider=routev1beta1.ForProvider(
+                        region=self.xr.spec.region,
+                        destinationCidrBlock="0.0.0.0/0",
+                        gatewayIdSelector=routev1beta1.GatewayIdSelector(
+                            matchControllerRef=True,
+                        ),
+                        routeTableIdSelector=routev1beta1.RouteTableIdSelector(
+                            matchControllerRef=True,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        for i in range(len(self._networking().subnetCidrs)):
+            az = _az(self.xr.spec.region, i)
+            resource.update(
+                self.rsp.desired.resources[f"route-table-association-{i}"],
+                rtav1beta1.RouteTableAssociation(
+                    spec=rtav1beta1.Spec(
+                        forProvider=rtav1beta1.ForProvider(
+                            region=self.xr.spec.region,
+                            routeTableIdSelector=rtav1beta1.RouteTableIdSelector(
+                                matchControllerRef=True,
+                            ),
+                            subnetIdSelector=rtav1beta1.SubnetIdSelector(
+                                matchControllerRef=True,
+                                matchLabels={_LABEL_AZ: az},
+                            ),
+                        ),
+                    ),
+                ),
+            )
+
+    def compose_iam(self):
+        """Compose the cluster and node IAM roles."""
+        resource.update(
+            self.rsp.desired.resources["iam-role-cluster"],
+            rolev1beta1.Role(
+                metadata=metav1.ObjectMeta(labels={_LABEL_ROLE: _ROLE_CLUSTER}),
+                spec=rolev1beta1.Spec(
+                    forProvider=rolev1beta1.ForProvider(
+                        assumeRolePolicy=_ASSUME_ROLE_CLUSTER,
+                    ),
+                ),
+            ),
+        )
+
+        resource.update(
+            self.rsp.desired.resources["iam-attach-cluster-policy"],
+            rpav1beta1.RolePolicyAttachment(
+                spec=rpav1beta1.Spec(
+                    forProvider=rpav1beta1.ForProvider(
+                        policyArn=_POLICY_CLUSTER,
+                        roleSelector=rpav1beta1.RoleSelector(
+                            matchControllerRef=True,
+                            matchLabels={_LABEL_ROLE: _ROLE_CLUSTER},
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        resource.update(
+            self.rsp.desired.resources["iam-role-node"],
+            rolev1beta1.Role(
+                metadata=metav1.ObjectMeta(labels={_LABEL_ROLE: _ROLE_NODE}),
+                spec=rolev1beta1.Spec(
+                    forProvider=rolev1beta1.ForProvider(
+                        assumeRolePolicy=_ASSUME_ROLE_NODE,
+                    ),
+                ),
+            ),
+        )
+
+        for key, arn in (
+            ("iam-attach-node-worker", _POLICY_NODE_WORKER),
+            ("iam-attach-node-cni", _POLICY_NODE_CNI),
+            ("iam-attach-node-ecr", _POLICY_NODE_ECR),
+        ):
+            resource.update(
+                self.rsp.desired.resources[key],
+                rpav1beta1.RolePolicyAttachment(
+                    spec=rpav1beta1.Spec(
+                        forProvider=rpav1beta1.ForProvider(
+                            policyArn=arn,
+                            roleSelector=rpav1beta1.RoleSelector(
+                                matchControllerRef=True,
+                                matchLabels={_LABEL_ROLE: _ROLE_NODE},
+                            ),
+                        ),
+                    ),
+                ),
+            )
+
+    def compose_cluster(self):
+        """Compose the EKS cluster."""
+        resource.update(
+            self.rsp.desired.resources["cluster"],
+            clusterv1beta1.Cluster(
+                spec=clusterv1beta1.Spec(
+                    forProvider=clusterv1beta1.ForProvider(
+                        region=self.xr.spec.region,
+                        version=self.xr.spec.kubernetesVersion,
+                        roleArnSelector=clusterv1beta1.RoleArnSelector(
+                            matchControllerRef=True,
+                            matchLabels={_LABEL_ROLE: _ROLE_CLUSTER},
+                        ),
+                        accessConfig=clusterv1beta1.AccessConfig(
+                            authenticationMode="API_AND_CONFIG_MAP",
+                            bootstrapClusterCreatorAdminPermissions=True,
+                        ),
+                        vpcConfig=clusterv1beta1.VpcConfig(
+                            endpointPrivateAccess=True,
+                            endpointPublicAccess=True,
+                            subnetIdSelector=clusterv1beta1.SubnetIdSelector(
+                                matchControllerRef=True,
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+    def compose_cluster_auth(self):
+        """Compose the ClusterAuth resource that writes a kubeconfig.
+
+        ClusterAuth uses the AWS provider's own credentials to mint an
+        EKS authentication token, and writes a kubeconfig Secret with
+        that token embedded. It refreshes the token every refreshPeriod
+        (default 10m) before it expires.
+        """
+        resource.update(
+            self.rsp.desired.resources["cluster-auth"],
+            clusterauthv1beta1.ClusterAuth(
+                spec=clusterauthv1beta1.Spec(
+                    forProvider=clusterauthv1beta1.ForProvider(
+                        region=self.xr.spec.region,
+                        clusterNameSelector=clusterauthv1beta1.ClusterNameSelector(
+                            matchControllerRef=True,
+                        ),
+                    ),
+                    writeConnectionSecretToRef=clusterauthv1beta1.WriteConnectionSecretToRef(
+                        name=_kubeconfig_secret_name(self.xr),
+                    ),
+                ),
+            ),
+        )
+
+    def compose_node_groups(self):
+        """Compose the system and user-declared GPU node groups."""
+        self._compose_system_node_group()
+        for pool in self.xr.spec.nodePools:
+            fp = ngv1beta1.ForProvider(
+                region=self.xr.spec.region,
+                amiType=_AMI_TYPE_GPU if pool.role == "GPU" else _AMI_TYPE_SYSTEM,
+                instanceTypes=[pool.instanceType],
+                diskSize=pool.diskSizeGb,
+                clusterNameSelector=ngv1beta1.ClusterNameSelector(
+                    matchControllerRef=True,
+                ),
+                nodeRoleArnSelector=ngv1beta1.NodeRoleArnSelector(
+                    matchControllerRef=True,
+                    matchLabels={_LABEL_ROLE: _ROLE_NODE},
+                ),
+                scalingConfig=ngv1beta1.ScalingConfig(
+                    desiredSize=pool.nodeCount,
+                    minSize=pool.minNodeCount,
+                    maxSize=pool.maxNodeCount,
+                ),
+                labels={_LABEL_POOL: pool.name},
+            )
+
+            zone_refs = self._subnet_refs_for_pool(pool)
+            if zone_refs:
+                fp.subnetIdRefs = zone_refs
+            else:
+                fp.subnetIdSelector = ngv1beta1.SubnetIdSelector(matchControllerRef=True)
+
+            if pool.role == "GPU" and pool.gpu:
+                fp.labels = {
+                    _LABEL_GPU: pool.gpu.acceleratorType,
+                    _LABEL_POOL: pool.name,
+                }
+                fp.taint = [
+                    ngv1beta1.TaintItem(
+                        key=_GPU_TAINT_KEY,
+                        value=_GPU_TAINT_VALUE,
+                        effect=_GPU_TAINT_EFFECT,
+                    ),
+                ]
+
+            resource.update(
+                self.rsp.desired.resources[f"nodegroup-{pool.name}"],
+                ngv1beta1.NodeGroup(spec=ngv1beta1.Spec(forProvider=fp)),
+            )
+
+    def _compose_system_node_group(self):
+        """Compose the system node group for control-plane components."""
+        resource.update(
+            self.rsp.desired.resources[f"nodegroup-{_SYSTEM_POOL_NAME}"],
+            ngv1beta1.NodeGroup(
+                spec=ngv1beta1.Spec(
+                    forProvider=ngv1beta1.ForProvider(
+                        region=self.xr.spec.region,
+                        amiType=_AMI_TYPE_SYSTEM,
+                        instanceTypes=[_SYSTEM_POOL_INSTANCE_TYPE],
+                        clusterNameSelector=ngv1beta1.ClusterNameSelector(
+                            matchControllerRef=True,
+                        ),
+                        nodeRoleArnSelector=ngv1beta1.NodeRoleArnSelector(
+                            matchControllerRef=True,
+                            matchLabels={_LABEL_ROLE: _ROLE_NODE},
+                        ),
+                        subnetIdSelector=ngv1beta1.SubnetIdSelector(
+                            matchControllerRef=True,
+                        ),
+                        scalingConfig=ngv1beta1.ScalingConfig(
+                            desiredSize=_SYSTEM_POOL_NODE_COUNT,
+                            minSize=_SYSTEM_POOL_MIN_NODE_COUNT,
+                            maxSize=_SYSTEM_POOL_MAX_NODE_COUNT,
+                        ),
+                        labels={_LABEL_POOL: _SYSTEM_POOL_NAME},
+                    ),
+                ),
+            ),
+        )
+
+    def _subnet_refs_for_pool(self, pool):
+        """Resolve a pool's zones to a list of Crossplane Subnet refs.
+
+        Subnets are composed with deterministic names derived from the
+        XR name and the AZ. Pools that pin to specific zones reference
+        them by name. Pools without explicit zones return None so the
+        NodeGroup's subnetIdSelector picks up all controller-owned
+        subnets via matchControllerRef.
+        """
+        if not pool.zones:
+            return None
+        return [
+            ngv1beta1.SubnetIdRef(name=_subnet_name(self.xr, z.root if hasattr(z, "root") else z)) for z in pool.zones
+        ]
+
+    def compose_addons(self):
+        for name in _ADDONS:
+            resource.update(
+                self.rsp.desired.resources[f"addon-{name}"],
+                addonv1beta1.Addon(
+                    spec=addonv1beta1.Spec(
+                        forProvider=addonv1beta1.ForProvider(
+                            region=self.xr.spec.region,
+                            addonName=name,
+                            clusterNameSelector=addonv1beta1.ClusterNameSelector(
+                                matchControllerRef=True,
+                            ),
+                        ),
+                    ),
+                ),
+            )
+
+    def compose_provider_configs(self):
+        kubeconfig_secret = _kubeconfig_secret_name(self.xr)
+        resource.update(
+            self.rsp.desired.resources["provider-config-kubernetes"],
+            k8spcv1alpha1.ProviderConfig(
+                metadata=metav1.ObjectMeta(name=kubeconfig_secret),
+                spec=k8spcv1alpha1.Spec(
+                    credentials=k8spcv1alpha1.Credentials(
+                        source="Secret",
+                        secretRef=k8spcv1alpha1.SecretRef(
+                            name=kubeconfig_secret,
+                            namespace=self.xr.metadata.namespace,
+                            key=_SECRET_KEY_KUBECONFIG,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        resource.update(
+            self.rsp.desired.resources["provider-config-helm"],
+            helmpcv1beta1.ProviderConfig(
+                metadata=metav1.ObjectMeta(name=kubeconfig_secret),
+                spec=helmpcv1beta1.Spec(
+                    credentials=helmpcv1beta1.Credentials(
+                        source="Secret",
+                        secretRef=helmpcv1beta1.SecretRef(
+                            name=kubeconfig_secret,
+                            namespace=self.xr.metadata.namespace,
+                            key=_SECRET_KEY_KUBECONFIG,
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+    def compose_device_plugin(self):
+        """Compose the NVIDIA device plugin DaemonSet on the cluster.
+
+        Gated on ClusterAuth being ready: the plugin is applied via
+        provider-kubernetes using the kubeconfig that ClusterAuth writes,
+        so there's nothing to target until that Secret exists. Once
+        observed, the Object stays composed so it isn't dropped on later
+        reconciles.
+
+        Deletion ordering is handled by Usages (see compose_device_plugin_
+        usages): the Object's Delete uninstalls the DaemonSet from the
+        cluster, which only works while the Cluster (API endpoint) and
+        ClusterAuth (kubeconfig credentials) still exist. The Usages hold
+        both until the Object is gone.
+        """
+        kubeconfig_secret = _kubeconfig_secret_name(self.xr)
+        auth_ready = resource.get_condition(self.req.observed.resources.get("cluster-auth"), "Ready").status == "True"
+        if not (auth_ready or "device-plugin" in self.req.observed.resources):
+            return
+
+        resource.update(
+            self.rsp.desired.resources["device-plugin"],
+            k8sobjv1alpha1.Object(
+                metadata=metav1.ObjectMeta(labels={_LABEL_RESOURCE: _RESOURCE_DEVICE_PLUGIN}),
+                spec=k8sobjv1alpha1.Spec(
+                    providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
+                        kind="ProviderConfig",
+                        name=kubeconfig_secret,
+                    ),
+                    forProvider=k8sobjv1alpha1.ForProvider(
+                        manifest=self._device_plugin_manifest(),
+                    ),
+                ),
+            ),
+        )
+        self.compose_device_plugin_usages()
+
+    def compose_device_plugin_usages(self):
+        """Compose Usages ordering the device-plugin Object's deletion.
+
+        The Object deletes the DaemonSet from the cluster via provider-
+        kubernetes, which needs both the cluster's API endpoint and the
+        kubeconfig credentials ClusterAuth writes. Without ordering, the
+        EKSCluster XR's composed resources delete concurrently and the
+        Object hangs on its finalizer once the Cluster or the kubeconfig
+        Secret is gone. These Usages hold the Cluster and ClusterAuth
+        until the Object is deleted first.
+        """
+        for key, of_kind in (
+            ("usage-cluster-by-device-plugin", "Cluster"),
+            ("usage-cluster-auth-by-device-plugin", "ClusterAuth"),
+        ):
+            resource.update(
+                self.rsp.desired.resources[key],
+                usagev1beta1.Usage(
+                    spec=usagev1beta1.Spec(
+                        of=usagev1beta1.Of(
+                            apiVersion="eks.aws.m.upbound.io/v1beta1",
+                            kind=of_kind,
+                            resourceSelector=usagev1beta1.ResourceSelectorModel(matchControllerRef=True),
+                        ),
+                        by=usagev1beta1.By(
+                            apiVersion="kubernetes.m.crossplane.io/v1alpha1",
+                            kind="Object",
+                            resourceSelector=usagev1beta1.ResourceSelector(
+                                matchControllerRef=True,
+                                matchLabels={_LABEL_RESOURCE: _RESOURCE_DEVICE_PLUGIN},
+                            ),
+                        ),
+                        replayDeletion=True,
+                    ),
+                ),
+            )
+            self.rsp.desired.resources[key].ready = fnv1.READY_TRUE
+
+    def _device_plugin_manifest(self) -> dict:
+        """Return the NVIDIA device plugin DaemonSet manifest.
+
+        Scheduled onto GPU nodes only (the GPU pool label) and tolerating
+        the GPU taint those nodes carry, so it doesn't run on the system
+        pool where there are no GPUs to advertise.
+        """
+        labels = {"name": _DEVICE_PLUGIN_NAME}
+        return {
+            "apiVersion": "apps/v1",
+            "kind": "DaemonSet",
+            "metadata": {
+                "name": _DEVICE_PLUGIN_NAME,
+                "namespace": _DEVICE_PLUGIN_NAMESPACE,
+            },
+            "spec": {
+                "selector": {"matchLabels": labels},
+                "updateStrategy": {"type": "RollingUpdate"},
+                "template": {
+                    "metadata": {"labels": labels},
+                    "spec": {
+                        "priorityClassName": "system-node-critical",
+                        "tolerations": [
+                            {
+                                "key": _GPU_TAINT_KEY,
+                                "operator": "Exists",
+                                "effect": "NoSchedule",
+                            },
+                        ],
+                        # Run only on GPU nodes. The GPU pool label is set
+                        # to the accelerator type (e.g. nvidia-t4), so match
+                        # on the key's presence with Exists rather than a
+                        # fixed value.
+                        "affinity": {
+                            "nodeAffinity": {
+                                "requiredDuringSchedulingIgnoredDuringExecution": {
+                                    "nodeSelectorTerms": [
+                                        {
+                                            "matchExpressions": [
+                                                {"key": _LABEL_GPU, "operator": "Exists"},
+                                            ],
+                                        },
+                                    ],
+                                },
+                            },
+                        },
+                        "containers": [
+                            {
+                                "name": "nvidia-device-plugin-ctr",
+                                "image": _DEVICE_PLUGIN_IMAGE,
+                                "env": [{"name": "FAIL_ON_INIT_ERROR", "value": "false"}],
+                                "securityContext": {
+                                    "allowPrivilegeEscalation": False,
+                                    "capabilities": {"drop": ["ALL"]},
+                                },
+                                "volumeMounts": [
+                                    {"name": "device-plugin", "mountPath": "/var/lib/kubelet/device-plugins"},
+                                ],
+                            },
+                        ],
+                        "volumes": [
+                            {
+                                "name": "device-plugin",
+                                "hostPath": {"path": "/var/lib/kubelet/device-plugins"},
+                            },
+                        ],
+                    },
+                },
+            },
+        }
+
+    def write_status(self):
+        status = v1alpha1.Status(
+            secrets=[
+                v1alpha1.Secret(
+                    type=_SECRET_TYPE_KUBECONFIG,
+                    name=_kubeconfig_secret_name(self.xr),
+                    key=_SECRET_KEY_KUBECONFIG,
+                ),
+            ],
+        )
+        # The XRD marks status.secrets[].type as required, but the generated
+        # Secret model gives `type` its only valid enum value as a default.
+        # resource.update_status strips defaults (exclude_defaults=True),
+        # which would drop `type` and fail XRD validation. Dump the model
+        # ourselves keeping defaults so every required field is emitted.
+        resource.update_status(
+            self.rsp.desired.composite,
+            status.model_dump(exclude_none=True),
+        )
+
+    def mark_readiness(self):
+        """Mark composed resources ready based on their observed conditions."""
+        managed_resources = [
+            "vpc",
+            "internet-gateway",
+            "route-table",
+            "route-default",
+            "iam-role-cluster",
+            "iam-attach-cluster-policy",
+            "iam-role-node",
+            "iam-attach-node-worker",
+            "iam-attach-node-cni",
+            "iam-attach-node-ecr",
+            "cluster",
+            "cluster-auth",
+            f"nodegroup-{_SYSTEM_POOL_NAME}",
+        ]
+        for i in range(len(self._networking().subnetCidrs)):
+            managed_resources.append(f"subnet-{i}")
+            managed_resources.append(f"route-table-association-{i}")
+        managed_resources += [f"nodegroup-{p.name}" for p in self.xr.spec.nodePools]
+        managed_resources += [f"addon-{a}" for a in _ADDONS]
+
+        if "device-plugin" in self.rsp.desired.resources:
+            managed_resources.append("device-plugin")
+
+        for r in managed_resources:
+            if resource.get_condition(self.req.observed.resources.get(r), "Ready").status == "True":
+                self.rsp.desired.resources[r].ready = fnv1.READY_TRUE
+
+        self.rsp.desired.resources["provider-config-kubernetes"].ready = fnv1.READY_TRUE
+        self.rsp.desired.resources["provider-config-helm"].ready = fnv1.READY_TRUE
+
+    def _networking(self):
+        """Return the (defaulted) networking config from the XR."""
+        return self.xr.spec.networking or v1alpha1.Networking()

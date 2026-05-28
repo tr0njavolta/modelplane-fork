@@ -13,6 +13,10 @@ spec:
   functions:
   - source: Tarball
     tarball:
+      name: compose-eks-cluster
+      pathPrefix: _output/functions/compose-eks-cluster
+  - source: Tarball
+    tarball:
       name: compose-gke-cluster
       pathPrefix: _output/functions/compose-gke-cluster
   - source: Tarball
