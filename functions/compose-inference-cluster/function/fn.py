@@ -165,15 +165,10 @@ class Composer:
         gke_ready = resource.get_condition(self.req.observed.resources.get("gke-cluster"), "Ready").status == "True"
         kubeconfig = self.observed_gke_secret(_SECRET_TYPE_KUBECONFIG)
         sa_key = self.observed_gke_secret(_SECRET_TYPE_GCP_SA_KEY)
-        cpc_exists = "cluster-provider-config-kubernetes" in self.req.observed.resources
         backend_exists = BACKEND_RESOURCE_KEY in self.req.observed.resources
 
-        if (gke_ready and kubeconfig) or cpc_exists:
-            self.compose_cluster_provider_config(
-                kubeconfig.name if kubeconfig else "",
-                kubeconfig.key if kubeconfig else "",
-                sa_key,
-            )
+        if gke_ready and kubeconfig:
+            self.compose_cluster_provider_config(kubeconfig.name, kubeconfig.key, sa_key)
 
         backend_secrets = self.resolve_gke_backend_secrets(gke_ready, backend_exists)
         if backend_secrets or backend_exists:
@@ -208,14 +203,10 @@ class Composer:
 
         eks_ready = resource.get_condition(self.req.observed.resources.get("eks-cluster"), "Ready").status == "True"
         kubeconfig = self.observed_eks_secret(_SECRET_TYPE_KUBECONFIG)
-        cpc_exists = "cluster-provider-config-kubernetes" in self.req.observed.resources
         backend_exists = BACKEND_RESOURCE_KEY in self.req.observed.resources
 
-        if (eks_ready and kubeconfig) or cpc_exists:
-            self.compose_cluster_provider_config(
-                kubeconfig.name if kubeconfig else "",
-                kubeconfig.key if kubeconfig else "",
-            )
+        if eks_ready and kubeconfig:
+            self.compose_cluster_provider_config(kubeconfig.name, kubeconfig.key)
 
         backend_secrets = self.resolve_eks_backend_secrets(eks_ready, backend_exists)
         if backend_secrets or backend_exists:

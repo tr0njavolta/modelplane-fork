@@ -568,11 +568,42 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         )
         want4.requirements.resources["class-gpu-l4-eks"].CopyFrom(class_selector_eks)
 
+        # --- Case 5: EKS cluster not yet ready (no kubeconfig observed) but a
+        # ClusterProviderConfig already exists from a prior reconcile. The CPC
+        # is built only from the kubeconfig, so without one it's simply omitted
+        # from desired state this reconcile (and recreated once the kubeconfig
+        # is observed again) - it is never emitted with an empty secretRef.
+        observed_cpc = {
+            "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+            "kind": "ClusterProviderConfig",
+            "metadata": {"name": "test-cluster-cluster-kubeconfig-d0f89"},
+            "spec": {
+                "credentials": {
+                    "source": "Secret",
+                    "secretRef": {
+                        "namespace": "modelplane-system",
+                        "name": "test-cluster-kubeconfig-abcde",
+                        "key": "kubeconfig",
+                    },
+                },
+            },
+        }
+        req5 = fnv1.RunFunctionRequest()
+        req5.CopyFrom(req4)
+        req5.observed.resources["cluster-provider-config-kubernetes"].CopyFrom(
+            fnv1.Resource(resource=resource.dict_to_struct(observed_cpc)),
+        )
+
+        # Desired state is identical to case 4: no ClusterProviderConfig.
+        want5 = fnv1.RunFunctionResponse()
+        want5.CopyFrom(want4)
+
         cases = [
             Case(name="existing cluster with secrets composes backend and CPC", req=req1, want=want1),
             Case(name="GKE cluster first pass composes GKECluster XR only", req=req2, want=want2),
             Case(name="existing cluster second pass with backend ready", req=req3, want=want3),
             Case(name="EKS cluster first pass composes EKSCluster XR only", req=req4, want=want4),
+            Case(name="EKS cluster not ready re-emits existing CPC unchanged", req=req5, want=want5),
         ]
 
         for case in cases:
