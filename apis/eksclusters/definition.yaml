@@ -149,30 +149,16 @@ spec:
                         GPU configuration. Required when role is GPU.
                       required:
                       - acceleratorType
-                      - memory
                       properties:
                         acceleratorType:
                           type: string
                           description: >-
                             GPU accelerator type (e.g. nvidia-a10g,
-                            nvidia-h100, nvidia-l4). Informational - the
-                            actual GPU is determined by the instance type.
+                            nvidia-h100, nvidia-l4). Used to label GPU
+                            nodes; the actual GPU and count are determined
+                            by the instance type.
                           minLength: 1
                           maxLength: 63
-                        acceleratorCount:
-                          type: integer
-                          default: 1
-                          description: Number of GPUs per node.
-                          minimum: 1
-                          maximum: 16
-                        memory:
-                          type: string
-                          description: >-
-                            Per-GPU VRAM (e.g. "80Gi"). Reported on the
-                            consuming InferenceCluster's status and used
-                            by the scheduler.
-                          minLength: 1
-                          maxLength: 16
                     zones:
                       type: array
                       description: >-

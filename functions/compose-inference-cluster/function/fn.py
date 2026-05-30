@@ -388,7 +388,6 @@ class Composer:
                     gpu=gkev1alpha1.Gpu(
                         acceleratorType=prov.accelerator.type,
                         acceleratorCount=prov.accelerator.count,
-                        memory=cls.spec.resources.gpu.memory,
                     ),
                     zones=list(pool.zones or []),
                 )
@@ -446,8 +445,6 @@ class Composer:
                     maxNodeCount=pool.maxNodeCount,
                     gpu=eksv1alpha1.Gpu(
                         acceleratorType=prov.accelerator.type,
-                        acceleratorCount=prov.accelerator.count,
-                        memory=cls.spec.resources.gpu.memory,
                     ),
                     zones=list(pool.zones or []),
                 )

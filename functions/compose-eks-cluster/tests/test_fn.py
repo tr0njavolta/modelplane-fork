@@ -50,8 +50,6 @@ def _xr() -> v1alpha1.EKSCluster:
                     maxNodeCount=4,
                     gpu=v1alpha1.Gpu(
                         acceleratorType="nvidia-l4",
-                        acceleratorCount=1,
-                        memory="24Gi",
                     ),
                     zones=["us-west-2a", "us-west-2b"],
                 ),

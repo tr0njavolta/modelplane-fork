@@ -152,29 +152,21 @@ spec:
                         GPU configuration. Required when role is GPU.
                       required:
                       - acceleratorType
-                      - memory
                       properties:
                         acceleratorType:
                           type: string
                           description: >-
                             GPU accelerator type (e.g. nvidia-tesla-a100,
-                            nvidia-h100-80gb, nvidia-l4).
+                            nvidia-h100-80gb, nvidia-l4). Attached to each
+                            node along with acceleratorCount.
                           minLength: 1
                           maxLength: 63
                         acceleratorCount:
                           type: integer
                           default: 1
-                          description: Number of GPUs per node.
+                          description: Number of GPUs to attach per node.
                           minimum: 1
                           maximum: 16
-                        memory:
-                          type: string
-                          description: >-
-                            Per-GPU VRAM (e.g. "80Gi"). Reported on the
-                            consuming InferenceCluster's status and
-                            used by the scheduler.
-                          minLength: 1
-                          maxLength: 16
                     zones:
                       type: array
                       description: >-

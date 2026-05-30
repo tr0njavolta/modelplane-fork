@@ -273,7 +273,6 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                             "maxNodeCount": 4,
                                             "gpu": {
                                                 "acceleratorType": "nvidia-l4",
-                                                "memory": "24Gi",
                                             },
                                             "zones": ["us-central1-a"],
                                         },
@@ -543,7 +542,6 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                             "maxNodeCount": 4,
                                             "gpu": {
                                                 "acceleratorType": "nvidia-l4",
-                                                "memory": "24Gi",
                                             },
                                             "zones": ["us-west-2a", "us-west-2b"],
                                         },

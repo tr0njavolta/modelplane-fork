@@ -65,17 +65,9 @@ class Networking(BaseModel):
 
 
 class Gpu(BaseModel):
-    acceleratorCount: Optional[conint(ge=1, le=16)] = 1
-    """
-    Number of GPUs per node.
-    """
     acceleratorType: constr(min_length=1, max_length=63)
     """
-    GPU accelerator type (e.g. nvidia-a10g, nvidia-h100, nvidia-l4). Informational - the actual GPU is determined by the instance type.
-    """
-    memory: constr(min_length=1, max_length=16)
-    """
-    Per-GPU VRAM (e.g. "80Gi"). Reported on the consuming InferenceCluster's status and used by the scheduler.
+    GPU accelerator type (e.g. nvidia-a10g, nvidia-h100, nvidia-l4). Used to label GPU nodes; the actual GPU and count are determined by the instance type.
     """
 
 
