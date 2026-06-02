@@ -103,6 +103,57 @@ def _gateway_usage_resources() -> dict:
     }
 
 
+def _traefik_desired_release(ready: bool) -> fnv1.Resource:
+    """The desired Traefik Helm Release the function composes once the
+    ProviderConfig is observed and the Gateway API CRDs are Established."""
+    res = fnv1.Resource(
+        resource=resource.dict_to_struct(
+            {
+                "apiVersion": "helm.m.crossplane.io/v1beta1",
+                "kind": "Release",
+                "metadata": {
+                    "namespace": "modelplane-system",
+                    "labels": {"modelplane.ai/release": "traefik"},
+                },
+                "spec": {
+                    "providerConfigRef": {
+                        "kind": "ProviderConfig",
+                        "name": "modelplane-in-cluster",
+                    },
+                    "forProvider": {
+                        "chart": {
+                            "name": "traefik",
+                            "repository": "https://traefik.github.io/charts",
+                            "version": "40.2.0",
+                        },
+                        "namespace": "traefik-system",
+                        "values": {
+                            "providers": {
+                                "kubernetesGateway": {
+                                    "enabled": True,
+                                    "statusAddress": {
+                                        "service": {
+                                            "namespace": "traefik-system",
+                                            "name": "traefik",
+                                        },
+                                    },
+                                },
+                                "kubernetesIngress": {"enabled": False},
+                            },
+                            "service": {"nameOverride": "traefik"},
+                            "gateway": {"enabled": False},
+                            "gatewayClass": {"enabled": False},
+                        },
+                    },
+                },
+            }
+        ),
+    )
+    if ready:
+        res.ready = fnv1.READY_TRUE
+    return res
+
+
 def setUpModule() -> None:
     logging.configure(level=logging.Level.DISABLED)
 
@@ -159,6 +210,107 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                             # observed as Established, so they aren't ready and
                             # Traefik stays gated.
                             **_crd_desired_resources(ready=False),
+                        },
+                    ),
+                    conditions=[
+                        fnv1.Condition(
+                            type="ControllerReady",
+                            status=fnv1.STATUS_CONDITION_FALSE,
+                            reason="Installing",
+                        ),
+                    ],
+                    context=structpb.Struct(),
+                ),
+            ),
+            Case(
+                name="traefik is composed with its gateway usages in the same pass the crds become established",
+                req=fnv1.RunFunctionRequest(
+                    observed=fnv1.State(
+                        composite=fnv1.Resource(
+                            resource=resource.dict_to_struct(
+                                v1alpha1.InferenceGateway(
+                                    metadata=metav1.ObjectMeta(
+                                        name="test-gateway",
+                                        namespace="modelplane-system",
+                                    ),
+                                    spec=v1alpha1.Spec(traefik=v1alpha1.Traefik(version="40.2.0")),
+                                ).model_dump(exclude_none=True, mode="json")
+                            ),
+                        ),
+                        # The ProviderConfig is observed and the CRDs report
+                        # Established, so Traefik is composed this pass. It is
+                        # not yet observed: its Usages must still be composed
+                        # now so deletion-order protection is in place the
+                        # moment the Release is first emitted as desired state.
+                        resources={
+                            "provider-config-helm": fnv1.Resource(
+                                resource=resource.dict_to_struct(
+                                    {
+                                        "apiVersion": "helm.m.crossplane.io/v1beta1",
+                                        "kind": "ProviderConfig",
+                                        "metadata": {"name": "modelplane-in-cluster"},
+                                    }
+                                ),
+                            ),
+                            **_crd_observed_resources(),
+                        },
+                    ),
+                ),
+                want=fnv1.RunFunctionResponse(
+                    meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+                    desired=fnv1.State(
+                        composite=fnv1.Resource(
+                            resource=resource.dict_to_struct({"status": {}}),
+                        ),
+                        resources={
+                            "provider-config-helm": fnv1.Resource(
+                                resource=resource.dict_to_struct(
+                                    {
+                                        "apiVersion": "helm.m.crossplane.io/v1beta1",
+                                        "kind": "ProviderConfig",
+                                        "metadata": {
+                                            "name": "modelplane-in-cluster",
+                                            "namespace": "modelplane-system",
+                                        },
+                                        "spec": {"credentials": {"source": "InjectedIdentity"}},
+                                    }
+                                ),
+                                ready=fnv1.READY_TRUE,
+                            ),
+                            # Traefik is composed but not yet observed, so it
+                            # isn't marked ready and the Gateway/GatewayClass
+                            # stay gated.
+                            "traefik": _traefik_desired_release(ready=False),
+                            "usage-pc-by-traefik": fnv1.Resource(
+                                resource=resource.dict_to_struct(
+                                    {
+                                        "apiVersion": "protection.crossplane.io/v1beta1",
+                                        "kind": "Usage",
+                                        "metadata": {"namespace": "modelplane-system"},
+                                        "spec": {
+                                            "of": {
+                                                "apiVersion": "helm.m.crossplane.io/v1beta1",
+                                                "kind": "ProviderConfig",
+                                                "resourceRef": {"name": "modelplane-in-cluster"},
+                                            },
+                                            "by": {
+                                                "apiVersion": "helm.m.crossplane.io/v1beta1",
+                                                "kind": "Release",
+                                                "resourceSelector": {
+                                                    "matchControllerRef": True,
+                                                    "matchLabels": {"modelplane.ai/release": "traefik"},
+                                                },
+                                            },
+                                            "replayDeletion": True,
+                                        },
+                                    }
+                                ),
+                                ready=fnv1.READY_TRUE,
+                            ),
+                            **_crd_desired_resources(ready=True),
+                            # The gateway usages are composed alongside Traefik,
+                            # before the Release is observed.
+                            **_gateway_usage_resources(),
                         },
                     ),
                     conditions=[
@@ -260,50 +412,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                 ),
                                 ready=fnv1.READY_TRUE,
                             ),
-                            "traefik": fnv1.Resource(
-                                resource=resource.dict_to_struct(
-                                    {
-                                        "apiVersion": "helm.m.crossplane.io/v1beta1",
-                                        "kind": "Release",
-                                        "metadata": {
-                                            "namespace": "modelplane-system",
-                                            "labels": {"modelplane.ai/release": "traefik"},
-                                        },
-                                        "spec": {
-                                            "providerConfigRef": {
-                                                "kind": "ProviderConfig",
-                                                "name": "modelplane-in-cluster",
-                                            },
-                                            "forProvider": {
-                                                "chart": {
-                                                    "name": "traefik",
-                                                    "repository": "https://traefik.github.io/charts",
-                                                    "version": "40.2.0",
-                                                },
-                                                "namespace": "traefik-system",
-                                                "values": {
-                                                    "providers": {
-                                                        "kubernetesGateway": {
-                                                            "enabled": True,
-                                                            "statusAddress": {
-                                                                "service": {
-                                                                    "namespace": "traefik-system",
-                                                                    "name": "traefik",
-                                                                },
-                                                            },
-                                                        },
-                                                        "kubernetesIngress": {"enabled": False},
-                                                    },
-                                                    "service": {"nameOverride": "traefik"},
-                                                    "gateway": {"enabled": False},
-                                                    "gatewayClass": {"enabled": False},
-                                                },
-                                            },
-                                        },
-                                    }
-                                ),
-                                ready=fnv1.READY_TRUE,
-                            ),
+                            "traefik": _traefik_desired_release(ready=True),
                             "usage-pc-by-traefik": fnv1.Resource(
                                 resource=resource.dict_to_struct(
                                     {

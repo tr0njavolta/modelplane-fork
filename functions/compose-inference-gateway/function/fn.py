@@ -462,10 +462,12 @@ class Composer:
         is still running to clear their finalizers.
 
         The GatewayClass is cluster-scoped, so it needs a ClusterUsage; the
-        Gateway is namespaced. Both are gated on Traefik being composed, since
-        the release is their protector and must exist for the selector to
-        resolve."""
-        if not ("traefik" in self.req.observed.resources or "gateway-class" in self.req.observed.resources):
+        Gateway is namespaced. Both are gated on Traefik being composed this
+        pass. The Usages select the Release by label rather than referencing
+        it directly, so they don't need it to exist yet; composing them
+        alongside the Release puts deletion-order protection in place from the
+        moment the Release is first emitted as desired state."""
+        if "traefik" not in self.rsp.desired.resources:
             return
 
         release_by = clusterusagev1beta1.By(
