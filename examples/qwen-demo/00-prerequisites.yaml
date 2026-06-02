@@ -1,10 +1,9 @@
 # Modelplane prerequisites. Apply once after installing Crossplane.
 #
 # These resources grant Crossplane and provider-helm the permissions
-# needed to compose Gateway API, Envoy Gateway, MetalLB,
-# Service/EndpointSlice routing, and Usage resources. They cannot be
-# self-composed because Crossplane needs the permissions before it can
-# compose anything.
+# needed to compose Gateway API, MetalLB, and Service/EndpointSlice
+# routing resources. They cannot be self-composed because Crossplane
+# needs the permissions before it can compose anything.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
