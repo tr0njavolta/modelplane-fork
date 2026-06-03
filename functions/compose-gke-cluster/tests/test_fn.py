@@ -58,7 +58,6 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                 gpu=v1alpha1.Gpu(
                                                     acceleratorType="nvidia-tesla-a100",
                                                     acceleratorCount=8,
-                                                    memory="80Gi",
                                                 ),
                                             ),
                                         ],
@@ -335,7 +334,6 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                 gpu=v1alpha1.Gpu(
                                                     acceleratorType="nvidia-tesla-a100",
                                                     acceleratorCount=8,
-                                                    memory="80Gi",
                                                 ),
                                             ),
                                         ],

@@ -13,6 +13,10 @@ spec:
   functions:
   - source: Tarball
     tarball:
+      name: compose-eks-cluster
+      pathPrefix: _output/functions/compose-eks-cluster
+  - source: Tarball
+    tarball:
       name: compose-gke-cluster
       pathPrefix: _output/functions/compose-gke-cluster
   - source: Tarball
@@ -70,6 +74,24 @@ spec:
       apiVersion: pkg.crossplane.io/v1
       kind: Provider
       package: xpkg.upbound.io/upbound/provider-gcp-cloudplatform
+      version: v2.5.0
+  - type: xpkg
+    xpkg:
+      apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      package: xpkg.upbound.io/upbound/provider-aws-eks
+      version: v2.5.0
+  - type: xpkg
+    xpkg:
+      apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      package: xpkg.upbound.io/upbound/provider-aws-ec2
+      version: v2.5.0
+  - type: xpkg
+    xpkg:
+      apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      package: xpkg.upbound.io/upbound/provider-aws-iam
       version: v2.5.0
   - type: xpkg
     xpkg:

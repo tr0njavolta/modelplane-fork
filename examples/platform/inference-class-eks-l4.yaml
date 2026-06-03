@@ -1,0 +1,24 @@
+# An InferenceClass describing EKS g6.xlarge with one NVIDIA L4 GPU.
+#
+# The provisioning block tells Modelplane how to create a node group of
+# this class on EKS. The resources block describes what hardware a node
+# of this class exposes - used by the scheduler to match models to
+# clusters.
+apiVersion: modelplane.ai/v1alpha1
+kind: InferenceClass
+metadata:
+  name: eks-l4-1x-g6
+spec:
+  description: "EKS g6.xlarge, 1x NVIDIA L4"
+  provisioning:
+    provider: EKS
+    eks:
+      instanceType: g6.xlarge
+      diskSizeGb: 100
+      accelerator:
+        type: nvidia-l4
+        count: 1
+  resources:
+    gpu:
+      count: 1
+      memory: 24Gi

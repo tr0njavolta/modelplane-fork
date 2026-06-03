@@ -47,19 +47,37 @@ class Accelerator(BaseModel):
     count: conint(ge=1, le=16)
     type: constr(min_length=1, max_length=63)
     """
+    GPU accelerator type (e.g. nvidia-a10g, nvidia-h100). Informational - reported on the consuming InferenceCluster's status.
+    """
+
+
+class Eks(BaseModel):
+    accelerator: Accelerator
+    diskSizeGb: Optional[conint(ge=10)] = 100
+    instanceType: constr(min_length=1)
+    """
+    EC2 instance type (e.g. g6.xlarge, p4d.24xlarge). The instance family determines the GPU model; the accelerator block below is informational.
+    """
+
+
+class AcceleratorModel(BaseModel):
+    count: conint(ge=1, le=16)
+    type: constr(min_length=1, max_length=63)
+    """
     GPU accelerator type passed to GCP (e.g. nvidia-l4, nvidia-h100-80gb).
     """
 
 
 class Gke(BaseModel):
-    accelerator: Accelerator
+    accelerator: AcceleratorModel
     diskSizeGb: Optional[conint(ge=10)] = 100
     machineType: constr(min_length=1)
 
 
 class Provisioning(BaseModel):
+    eks: Optional[Eks] = None
     gke: Optional[Gke] = None
-    provider: Literal['GKE'] = 'GKE'
+    provider: Literal['GKE', 'EKS']
 
 
 class Gpu(BaseModel):

@@ -21,6 +21,7 @@ from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 from crossplane.function.proto.v1 import run_function_pb2_grpc as grpcv1
 from models.ai.modelplane.inferenceclass import v1alpha1 as iclv1alpha1
 from models.ai.modelplane.inferencecluster import v1alpha1
+from models.ai.modelplane.infrastructure.ekscluster import v1alpha1 as eksv1alpha1
 from models.ai.modelplane.infrastructure.gkecluster import v1alpha1 as gkev1alpha1
 from models.ai.modelplane.infrastructure.kservebackend import v1alpha1 as kssv1alpha1
 from models.io.crossplane.m.kubernetes.clusterproviderconfig import (
@@ -35,6 +36,7 @@ KSERVE_VERSION = "v0.16.0"
 
 # Cluster source discriminator values from the XRD enum.
 CLUSTER_SOURCE_GKE = "GKE"
+CLUSTER_SOURCE_EKS = "EKS"
 CLUSTER_SOURCE_EXISTING = "Existing"
 
 # Condition types and reasons for the InferenceCluster XR.
@@ -104,6 +106,8 @@ class Composer:
         source = cluster.source
         if source == CLUSTER_SOURCE_GKE:
             self.compose_gke(cluster.gke)
+        elif source == CLUSTER_SOURCE_EKS:
+            self.compose_eks(cluster.eks)
         elif source == CLUSTER_SOURCE_EXISTING:
             self.compose_existing(cluster.existing)
         else:
@@ -161,15 +165,10 @@ class Composer:
         gke_ready = resource.get_condition(self.req.observed.resources.get("gke-cluster"), "Ready").status == "True"
         kubeconfig = self.observed_gke_secret(_SECRET_TYPE_KUBECONFIG)
         sa_key = self.observed_gke_secret(_SECRET_TYPE_GCP_SA_KEY)
-        cpc_exists = "cluster-provider-config-kubernetes" in self.req.observed.resources
         backend_exists = BACKEND_RESOURCE_KEY in self.req.observed.resources
 
-        if (gke_ready and kubeconfig) or cpc_exists:
-            self.compose_cluster_provider_config(
-                kubeconfig.name if kubeconfig else "",
-                kubeconfig.key if kubeconfig else "",
-                sa_key,
-            )
+        if gke_ready and kubeconfig:
+            self.compose_cluster_provider_config(kubeconfig.name, kubeconfig.key, sa_key)
 
         backend_secrets = self.resolve_gke_backend_secrets(gke_ready, backend_exists)
         if backend_secrets or backend_exists:
@@ -184,6 +183,44 @@ class Composer:
 
         self.write_status(self.gpu_pools())
         self.derive_conditions(cluster_ready=gke_ready)
+
+    def compose_eks(self, eks):
+        """Compose an InferenceCluster backed by a Modelplane-provisioned
+        EKS cluster. Composes the EKSCluster XR, waits for it to be ready,
+        then wires its kubeconfig into the backend.
+
+        The kubeconfig from ClusterAuth contains a static bearer token that
+        the AWS provider refreshes periodically, and the cluster grants the
+        AWS provider's principal cluster-admin via
+        bootstrapClusterCreatorAdminPermissions. So the kubeconfig alone is
+        enough to reach the cluster.
+        """
+        if not eks:
+            response.warning(self.rsp, "EKS configuration is required when source is EKS")
+            return
+
+        self.compose_eks_cluster(eks)
+
+        eks_ready = resource.get_condition(self.req.observed.resources.get("eks-cluster"), "Ready").status == "True"
+        kubeconfig = self.observed_eks_secret(_SECRET_TYPE_KUBECONFIG)
+        backend_exists = BACKEND_RESOURCE_KEY in self.req.observed.resources
+
+        if eks_ready and kubeconfig:
+            self.compose_cluster_provider_config(kubeconfig.name, kubeconfig.key)
+
+        backend_secrets = self.resolve_eks_backend_secrets(eks_ready, backend_exists)
+        if backend_secrets or backend_exists:
+            if backend_secrets:
+                self.compose_kserve_backend(backend_secrets)
+            self.compose_eks_usage()
+
+        if eks_ready:
+            self.rsp.desired.resources["eks-cluster"].ready = fnv1.READY_TRUE
+            if not backend_exists:
+                response.normal(self.rsp, "EKS cluster ready, composing backend")
+
+        self.write_status(self.gpu_pools())
+        self.derive_conditions(cluster_ready=eks_ready)
 
     def compose_existing(self, existing):
         """Compose an InferenceCluster backed by a user-supplied cluster.
@@ -342,7 +379,6 @@ class Composer:
                     gpu=gkev1alpha1.Gpu(
                         acceleratorType=prov.accelerator.type,
                         acceleratorCount=prov.accelerator.count,
-                        memory=cls.spec.resources.gpu.memory,
                     ),
                     zones=list(pool.zones or []),
                 )
@@ -363,6 +399,121 @@ class Composer:
                 ),
             ),
         )
+
+    def compose_eks_cluster(self, eks):
+        """Compose an EKSCluster XR.
+
+        Combines the cluster-level config (region) with GPU node pools
+        derived from the user's node pools + referenced classes. The
+        system pool is injected by compose-eks-cluster.
+        """
+        eks_node_pools: list[eksv1alpha1.NodePool] = []
+
+        for pool in self.xr.spec.nodePools or []:
+            cls = self.classes.get(pool.className)
+            if not cls or not cls.spec.provisioning or not cls.spec.provisioning.eks:
+                msg = f"InferenceClass {pool.className} has no EKS provisioning block"
+                response.set_conditions(
+                    self.rsp,
+                    resource.Condition(
+                        typ=CONDITION_TYPE_CLUSTER_READY,
+                        status="False",
+                        reason=CONDITION_REASON_INVALID_NODE_POOL,
+                        message=msg,
+                    ),
+                )
+                response.warning(self.rsp, msg)
+                return
+            prov = cls.spec.provisioning.eks
+            eks_node_pools.append(
+                eksv1alpha1.NodePool(
+                    name=pool.name,
+                    role="GPU",
+                    instanceType=prov.instanceType,
+                    diskSizeGb=prov.diskSizeGb,
+                    nodeCount=pool.nodeCount,
+                    minNodeCount=pool.minNodeCount,
+                    maxNodeCount=pool.maxNodeCount,
+                    gpu=eksv1alpha1.Gpu(
+                        acceleratorType=prov.accelerator.type,
+                    ),
+                    zones=list(pool.zones or []),
+                )
+            )
+
+        resource.update(
+            self.rsp.desired.resources["eks-cluster"],
+            eksv1alpha1.EKSCluster(
+                metadata=metav1.ObjectMeta(
+                    name=self.xr.metadata.name,
+                    namespace=_NAMESPACE_SYSTEM,
+                ),
+                spec=eksv1alpha1.Spec(
+                    region=eks.region,
+                    kubernetesVersion=eks.kubernetesVersion,
+                    nodePools=eks_node_pools,
+                ),
+            ),
+        )
+
+    def compose_eks_usage(self):
+        """Block EKSCluster deletion until the backend is deleted."""
+        resource.update(
+            self.rsp.desired.resources["usage-eks-by-backend"],
+            usagev1beta1.Usage(
+                metadata=metav1.ObjectMeta(namespace=_NAMESPACE_SYSTEM),
+                spec=usagev1beta1.Spec(
+                    of=usagev1beta1.Of(
+                        apiVersion="infrastructure.modelplane.ai/v1alpha1",
+                        kind="EKSCluster",
+                        resourceSelector=usagev1beta1.ResourceSelectorModel(matchControllerRef=True),
+                    ),
+                    by=usagev1beta1.By(
+                        apiVersion="infrastructure.modelplane.ai/v1alpha1",
+                        kind="KServeBackend",
+                        resourceSelector=usagev1beta1.ResourceSelector(matchControllerRef=True),
+                    ),
+                    replayDeletion=True,
+                ),
+            ),
+        )
+        self.rsp.desired.resources["usage-eks-by-backend"].ready = fnv1.READY_TRUE
+
+    def resolve_eks_backend_secrets(self, eks_ready, backend_exists) -> list[kssv1alpha1.Secret] | None:
+        """Resolve secrets for the backend from EKSCluster status. Falls
+        back to the observed backend's spec.secrets if EKSCluster secrets
+        aren't available but the backend already exists."""
+        eks_secrets = self.observed_eks_secrets()
+
+        if eks_ready and eks_secrets:
+            return [kssv1alpha1.Secret(type=s.type, name=s.name, key=s.key) for s in eks_secrets]
+
+        if backend_exists:
+            observed = self.req.observed.resources.get(BACKEND_RESOURCE_KEY)
+            if observed:
+                d = resource.struct_to_dict(observed.resource)
+                observed_secrets = d.get("spec", {}).get("secrets", [])
+                if observed_secrets:
+                    return [kssv1alpha1.Secret(type=s["type"], name=s["name"], key=s["key"]) for s in observed_secrets]
+
+        return None
+
+    def observed_eks_secrets(self):
+        """Read the EKSCluster's status.secrets from observed state."""
+        eks_observed = self.req.observed.resources.get("eks-cluster")
+        if not eks_observed:
+            return None
+        observed_eks = eksv1alpha1.EKSCluster.model_validate(resource.struct_to_dict(eks_observed.resource))
+        if not observed_eks.status:
+            return None
+        return observed_eks.status.secrets
+
+    def observed_eks_secret(self, secret_type):
+        """Read a specific secret from the observed EKSCluster status."""
+        eks_secrets = self.observed_eks_secrets()
+        if not eks_secrets:
+            return None
+        return next((s for s in eks_secrets if s.type == secret_type), None)
 
     def compose_gke_usage(self):
         """Block GKECluster deletion until the backend is deleted."""
@@ -409,9 +560,11 @@ class Composer:
     def gpu_pools(self):
         """Derive status.capacity.gpuPools from each node pool's class.
 
-        The same logic applies to both GKE and Existing clusters: the
-        class declares the per-node GPU resources, the pool declares how
-        many nodes.
+        The same logic applies to every cluster source: the class
+        declares the per-node GPU resources, the pool declares how many
+        nodes. The accelerator type comes from whichever provisioning
+        block the class carries (GKE or EKS); for BYO classes the
+        accelerator type is empty.
         """
         gpu_pools = []
         for pool in self.xr.spec.nodePools or []:
@@ -420,8 +573,11 @@ class Composer:
                 continue
             gpu = cls.spec.resources.gpu
             accelerator_type = ""
-            if cls.spec.provisioning and cls.spec.provisioning.gke and cls.spec.provisioning.gke.accelerator:
-                accelerator_type = cls.spec.provisioning.gke.accelerator.type
+            prov = cls.spec.provisioning
+            if prov and prov.gke and prov.gke.accelerator:
+                accelerator_type = prov.gke.accelerator.type
+            elif prov and prov.eks and prov.eks.accelerator:
+                accelerator_type = prov.eks.accelerator.type
             gpu_pools.append(
                 {
                     "acceleratorType": accelerator_type,

@@ -1,0 +1,215 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: eksclusters.infrastructure.modelplane.ai
+spec:
+  group: infrastructure.modelplane.ai
+  names:
+    categories:
+    - crossplane
+    - modelplane
+    kind: EKSCluster
+    plural: eksclusters
+    shortNames:
+    - eks
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    referenceable: true
+    additionalPrinterColumns:
+    - name: REGION
+      type: string
+      jsonPath: .spec.region
+    schema:
+      openAPIV3Schema:
+        description: >-
+          An EKSCluster provisions an EKS cluster with dedicated node groups
+          for GPU inference and system workloads. It outputs a Secret
+          containing the cluster kubeconfig that consumers use to target
+          the cluster. The kubeconfig embeds a static bearer token that the
+          AWS provider refreshes.
+        properties:
+          spec:
+            description: EKSClusterSpec defines the desired state of EKSCluster.
+            required:
+            - region
+            - nodePools
+            properties:
+              region:
+                type: string
+                description: >-
+                  AWS region for the cluster (e.g. us-west-2, eu-west-1).
+                minLength: 1
+                maxLength: 32
+              kubernetesVersion:
+                type: string
+                default: "1.31"
+                description: >-
+                  EKS cluster Kubernetes version. Must be a version EKS
+                  currently supports.
+                minLength: 1
+                maxLength: 16
+              networking:
+                type: object
+                description: >-
+                  VPC networking configuration. Defaults give a /16 VPC
+                  carved into three /20 subnets, one per Availability Zone.
+                  Override when VPC-peering multiple clusters to avoid CIDR
+                  collisions.
+                properties:
+                  vpcCidr:
+                    type: string
+                    default: "10.0.0.0/16"
+                    description: Primary CIDR block for the VPC.
+                    maxLength: 18
+                  subnetCidrs:
+                    type: array
+                    description: >-
+                      Subnet CIDRs, one per Availability Zone. EKS requires
+                      at least two subnets in different AZs. The function
+                      picks AZs by index from the region — index 0 maps to
+                      the region's first AZ alphabetically (e.g. us-west-2a),
+                      index 1 to the second, etc.
+                    minItems: 2
+                    maxItems: 6
+                    default: ["10.0.0.0/20", "10.0.16.0/20", "10.0.32.0/20"]
+                    items:
+                      type: string
+                      maxLength: 18
+              nodePools:
+                type: array
+                description: >-
+                  Node groups for the cluster. At least one System pool is
+                  required for controllers and infrastructure workloads.
+                minItems: 1
+                maxItems: 8
+                x-kubernetes-list-type: map
+                x-kubernetes-list-map-keys:
+                - name
+                items:
+                  type: object
+                  required:
+                  - name
+                  - role
+                  - instanceType
+                  properties:
+                    name:
+                      type: string
+                      description: >-
+                        Unique name for this node group. Used as a suffix
+                        in the EKS NodeGroup resource name.
+                      maxLength: 40
+                      minLength: 1
+                    role:
+                      type: string
+                      description: >-
+                        Determines what workloads this group runs. System
+                        groups host controllers, gateways, and infrastructure.
+                        GPU groups host inference workloads and use a
+                        GPU-enabled AMI.
+                      enum:
+                      - System
+                      - GPU
+                    instanceType:
+                      type: string
+                      description: >-
+                        EC2 instance type (e.g. m6i.large, g6.xlarge,
+                        p4d.24xlarge).
+                      minLength: 1
+                      maxLength: 63
+                    diskSizeGb:
+                      type: integer
+                      default: 100
+                      description: Root volume size in GB.
+                      minimum: 10
+                      maximum: 65536
+                    nodeCount:
+                      type: integer
+                      default: 1
+                      description: Initial number of nodes.
+                      minimum: 0
+                      maximum: 1000
+                    minNodeCount:
+                      type: integer
+                      default: 0
+                      description: >-
+                        Minimum number of nodes for autoscaling. Set to 1 or
+                        higher for groups that must always be available.
+                      minimum: 0
+                      maximum: 1000
+                    maxNodeCount:
+                      type: integer
+                      default: 8
+                      description: Maximum number of nodes for autoscaling.
+                      minimum: 0
+                      maximum: 1000
+                    gpu:
+                      type: object
+                      description: >-
+                        GPU configuration. Required when role is GPU.
+                      required:
+                      - acceleratorType
+                      properties:
+                        acceleratorType:
+                          type: string
+                          description: >-
+                            GPU accelerator type (e.g. nvidia-a10g,
+                            nvidia-h100, nvidia-l4). Used to label GPU
+                            nodes; the actual GPU and count are determined
+                            by the instance type.
+                          minLength: 1
+                          maxLength: 63
+                    zones:
+                      type: array
+                      description: >-
+                        Availability Zones to restrict this node group to.
+                        Required for GPU groups because not all AZs in a
+                        region have every instance type. Example:
+                        ["us-west-2a", "us-west-2b"].
+                      minItems: 1
+                      maxItems: 8
+                      items:
+                        type: string
+                        minLength: 1
+                        maxLength: 63
+            type: object
+          status:
+            description: EKSClusterStatus defines the observed state of EKSCluster.
+            properties:
+              secrets:
+                type: array
+                description: >-
+                  Secrets produced by this cluster. Consumers use these to
+                  authenticate to the cluster. All secrets are in the same
+                  namespace as this EKSCluster.
+                items:
+                  type: object
+                  required:
+                  - type
+                  - name
+                  - key
+                  properties:
+                    type:
+                      type: string
+                      description: >-
+                        The type of credential this secret contains.
+                        Kubeconfig contains a kubeconfig file with the
+                        cluster endpoint, CA certificate, and a static
+                        bearer token that ClusterAuth refreshes every
+                        10 minutes using the AWS provider's credentials.
+                      enum:
+                      - Kubeconfig
+                    name:
+                      type: string
+                      description: Name of the Secret.
+                      maxLength: 253
+                    key:
+                      type: string
+                      description: >-
+                        Key within the Secret that holds the credential data.
+                      maxLength: 253
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
