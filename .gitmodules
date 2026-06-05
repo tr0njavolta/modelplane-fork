@@ -1,0 +1,3 @@
+[submodule "docs/themes/geekboot"]
+	path = docs/themes/geekboot
+	url = https://github.com/crossplane/docs
