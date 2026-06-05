@@ -42,6 +42,8 @@ select = [
     "T20",    # flake8-print (no print() in library code)
     "FBT",    # flake8-boolean-trap (no boolean positional args)
     "TID",    # flake8-tidy-imports (no relative imports)
+    "BLE",    # flake8-blind-except (no bare except Exception)
+    "RUF",    # ruff-specific rules (incl. unused/malformed noqa)
 ]
 
 [tool.ruff.lint.pylint]
@@ -56,5 +58,6 @@ max-args = 8
 "**/tests/**" = ["E501", "PLR2004", "PLR0913", "FBT001"]
 # fn.py uses gRPC's required PascalCase method name.
 "functions/*/function/fn.py" = ["N802"]
-# main.py is the click CLI entrypoint, where boolean flags are idiomatic.
-"functions/*/function/main.py" = ["FBT001"]
+# main.py is the click CLI entrypoint: boolean flags are idiomatic, and it
+# catches Exception at the top level to report startup failures cleanly.
+"functions/*/function/main.py" = ["FBT001", "BLE001"]
