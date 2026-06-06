@@ -23,10 +23,13 @@ spec:
       modelplane.ai/tier: production
   replicas: 1
   nodeSelector:
-    cel: |
-      capacity["gpu.nvidia.com/memory"].compareTo(quantity("141Gi")) >= 0 &&
-      attributes["gpu.nvidia.com/cudaComputeCapability"].isGreaterThan(version("9.0.0")) &&
-      attributes["modelplane.ai/networkInterNode"].string == "infiniband"
+    devices:
+    - name: gpu
+      count: 8
+      selectors:
+      - cel: |
+          device.attributes["gpu.nvidia.com"].cudaComputeCapability.isGreaterThan(semver("9.0.0")) &&
+          device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("141Gi")) >= 0
   workers:
     topology:
       tensor: 8
@@ -170,7 +173,7 @@ flowchart TD
 | Resource | Scope | Created by | Purpose |
 |----------|-------|------------|---------|
 | `InferenceGateway` | Cluster | Platform team | Control plane routing infrastructure |
-| `InferenceClass` | Cluster | Platform team (or Modelplane defaults) | Hardware recipe: attributes, capacity + provisioning |
+| `InferenceClass` | Cluster | Platform team (or Modelplane defaults) | Hardware recipe: devices + provisioning |
 | `InferenceCluster` | Cluster | Platform team | A GPU cluster in the inference fleet |
 | `ModelDeployment` | Namespace | ML team | Self-contained model deployment spec |
 | `ModelReplica` | Namespace | Modelplane (composed) | One complete serving instance |
@@ -186,26 +189,29 @@ and workload resources.
 
 ### InferenceClass
 
-A tested recipe for a GPU node pool. Each class bundles **attributes and
-capacity** (what this hardware has, used by the scheduler) and optionally
-**provisioning** (how to create it on a specific cloud).
+A tested recipe for a GPU node pool. Each class describes the **devices** a node
+of this class has (what the scheduler matches against) and optionally
+**provisioning** (how to create the pool on a specific cloud).
 
-Attributes and capacity follow DRA's schema ([KEP-4381]) for structure:
-attributes are typed key-value pairs (`{string: "Hopper"}`, `{version:
-"9.0.0"}`), capacity is a map of Kubernetes Quantities. Keys use DRA's
-qualified-name convention (`domain/name`).
+Devices follow DRA's model ([KEP-4381]). Each device has a `driver`, a `count`
+(how many per node), typed `attributes` (`{string: "Hopper"}`, `{version:
+"9.0.0"}`), and `capacity` (Kubernetes Quantities). This is the shape the NVIDIA
+DRA driver publishes in a ResourceSlice, except a real driver publishes one
+entry per physical device where we publish one per *kind* with a `count`: the
+eight identical H200s in a node collapse to `count: 8`.
 
-The keys and values are a contract between the platform team (who authors
-InferenceClasses) and the ML team (who writes `nodeSelector.cel` on
-ModelDeployments). Modelplane doesn't enforce or validate specific keys or
-values. Keys that correspond to real DRA device attributes (e.g.
-`gpu.nvidia.com/architecture`, `gpu.nvidia.com/memory`) should match what the
-DRA driver publishes in ResourceSlices on the actual node pools. The composition
-function passes these through to DRA ResourceClaim selectors when binding GPUs
-to pods. Keys prefixed with `modelplane.ai/*` are fleet-scheduling attributes —
-pool-level properties like GPU count per node or inter-node networking that
-don't correspond to per-device DRA attributes. These are filtered out when
-forming ResourceClaims.
+A `claim` discriminator says how Modelplane treats the device. `DRA` (the
+default) emits the device as a request in a `ResourceClaim`, and DRA binds a
+matching device to the pod at admission time; use it for hardware a real DRA
+driver exposes, today GPUs. `Synthetic` describes the device for scheduling
+only, never claiming it; use it for hardware that matters for placement but has
+no DRA driver yet, like an InfiniBand fabric.
+
+The driver, attribute keys, and capacity keys are a contract between the
+platform team who authors InferenceClasses and the ML team who writes
+`nodeSelector`. For `claim: DRA` devices they should mirror what the DRA driver
+publishes, so a `nodeSelector` written against the class also selects the right
+device at claim time.
 
 [KEP-4381]: https://github.com/kubernetes/enhancements/tree/master/keps/sig-node/4381-dra-structured-parameters
 
@@ -230,30 +236,31 @@ spec:
       diskSizeGb: 200
       networking:
         gpuDirectTCPX: true
-  attributes:
-    # These match what the NVIDIA DRA driver publishes per device.
-    gpu.nvidia.com/architecture:
-      string: Hopper
-    gpu.nvidia.com/productName:
-      string: "NVIDIA H200 141GB HBM3e"
-    gpu.nvidia.com/cudaComputeCapability:
-      version: "9.0.0"
-    # These are fleet-scheduling attributes. They don't correspond to
-    # per-device DRA attributes and are filtered out of ResourceClaims.
-    modelplane.ai/interconnectIntraNode:
-      string: nvswitch
-    modelplane.ai/networkInterNode:
-      string: gpudirect-tcpx
-  capacity:
-    # Matches what the NVIDIA DRA driver publishes per device.
-    gpu.nvidia.com/memory:
-      value: "141Gi"
-    # Fleet-scheduling capacity. Filtered out of ResourceClaims.
-    modelplane.ai/gpuCount:
-      value: "8"
-    modelplane.ai/networkBandwidth:
-      value: "200Gi"           # bits per second
+  devices:
+  - name: gpu
+    claim: DRA                      # default; emitted as a request in the ResourceClaim
+    driver: gpu.nvidia.com
+    count: 8
+    attributes:
+      # These mirror what the NVIDIA DRA driver publishes per device.
+      architecture: { string: Hopper }
+      productName: { string: "NVIDIA H200 141GB HBM3e" }
+      cudaComputeCapability: { version: "9.0.0" }
+    capacity:
+      memory: { value: "141Gi" }
+  - name: nic
+    claim: Synthetic                # described for scheduling only; not claimed
+    driver: nic.nvidia.com          # no real DRA driver yet; we author it anyway
+    count: 8
+    attributes:
+      linkType: { string: gpudirect-tcpx }
+    capacity:
+      bandwidth: { value: "200Gi" }  # bits per second
 ```
+
+Keys are bare names (`architecture`, `memory`), not qualified ones. The domain
+comes from the device's `driver`, as in a real ResourceSlice: a `nodeSelector`
+reads them back as `device.attributes["gpu.nvidia.com"].architecture`.
 
 Different clouds and different networking imply different classes. A GKE H200
 pool with GPUDirect-TCPX is `gke-h200-8x-a3-ib`. A Coreweave H200 pool with
@@ -372,8 +379,11 @@ spec:
       modelplane.ai/tier: production
   replicas: 2
   nodeSelector:
-    cel: |
-      capacity["gpu.nvidia.com/memory"].compareTo(quantity("80Gi")) >= 0
+    devices:
+    - name: gpu
+      count: 2
+      selectors:
+      - cel: device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("80Gi")) >= 0
   workers:
     topology:
       tensor: 2
@@ -394,12 +404,26 @@ Cluster-level matching uses `clusterSelector.matchLabels` against standard
 Kubernetes labels on InferenceCluster. This is organizational metadata: tier,
 region, provider, compliance posture. String equality is sufficient.
 
-Node-level matching uses `nodeSelector.cel`, a CEL expression evaluated against
-the pool's `InferenceClass` attributes and capacity. The attribute schema
-follows DRA's typed format (`{string: "Hopper"}`, `{version: "9.0.0"}`) with
-qualified keys (`gpu.nvidia.com/*`, `modelplane.ai/*`). Capacity uses
-Kubernetes Quantity values. Keys matching real DRA device attributes pass
-through to ResourceClaim selectors; `modelplane.ai/*` keys are filtered out.
+Node-level matching uses `nodeSelector.devices`, a list of device requests
+mirroring a DRA `ResourceClaim`. Each request has a `name`, a `count`, and a
+list of `selectors`. A pool matches a request when it has a device whose `count`
+covers the request and whose `driver`, `attributes`, and `capacity` satisfy
+every selector, and matches the deployment when it satisfies every request.
+
+`nodeSelector` is required. GPUs bind to pods only through DRA: each `claim: DRA`
+request becomes a `DeviceRequest` in the `ResourceClaim` the serving pods claim
+GPUs through, so a deployment with no device requests gets no GPU. Modelplane
+won't infer one. A request's selectors are how the ML team says what the model
+needs. A 0.5B model and a 70B model want very different GPUs, and inferring an
+empty "any GPU" request would schedule a model onto whatever pool has a free
+device and hope it fits. Declaring the request makes the requirement explicit
+and binds the matching device at admission.
+
+The CEL is real DRA CEL: `device.driver`,
+`device.attributes["gpu.nvidia.com"].architecture` for a typed attribute under
+the driver's domain, `device.capacity["gpu.nvidia.com"].memory` for a Quantity,
+with `quantity()` and `semver()` to construct comparable values. Someone who
+knows DRA writes the same expressions they'd write in a `ResourceClaim`.
 
 #### Workers and topology
 
@@ -419,11 +443,12 @@ derivation formula is the same regardless of which axes are active:
 | Total GPUs per worker | `tensor * data * pipeline` |
 
 
-The scheduler derives the physical shape from the topology. No separate node
-count or GPU count fields; the topology fully determines the resource
-requirements. The scheduler checks: does the matched pool's InferenceClass have
-`modelplane.ai/gpuCount` >= GPUs-per-node, and does the pool have enough
-available nodes?
+Topology drives provisioning: it shapes how the workload is laid out into pods
+and a LeaderWorkerSet. The scheduler reads only one number from it,
+nodes-per-replica (`pipeline * data / dataLocal`), which it gates against the
+pool's available nodes. Per-node GPU count is a `nodeSelector` concern: a GPU
+request with `count: 8` selects a pool whose GPU device has a count of at least
+8.
 
 #### Disaggregated prefill/decode
 
@@ -452,9 +477,15 @@ spec:
 
   # Top-level = decode. 3 decode workers, each TP=8 PP=2.
   nodeSelector:
-    cel: |
-      capacity["gpu.nvidia.com/memory"].compareTo(quantity("141Gi")) >= 0 &&
-      attributes["modelplane.ai/networkInterNode"].string == "infiniband"
+    devices:
+    - name: gpu
+      count: 8
+      selectors:
+      - cel: device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("141Gi")) >= 0
+    - name: nic
+      count: 8
+      selectors:
+      - cel: device.attributes["nic.nvidia.com"].linkType == "infiniband"
   workers:
     count: 3
     topology:
@@ -472,9 +503,15 @@ spec:
   # Prefill: 5 workers, each single-GPU. Self-contained.
   prefill:
     nodeSelector:
-      cel: |
-        capacity["gpu.nvidia.com/memory"].compareTo(quantity("80Gi")) >= 0 &&
-        attributes["modelplane.ai/networkInterNode"].string == "infiniband"
+      devices:
+      - name: gpu
+        count: 1
+        selectors:
+        - cel: device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("80Gi")) >= 0
+      - name: nic
+        count: 1
+        selectors:
+        - cel: device.attributes["nic.nvidia.com"].linkType == "infiniband"
     workers:
       count: 5
       topology:
@@ -650,24 +687,25 @@ The fleet scheduler picks `(InferenceCluster, pool)` for each ModelReplica:
 
 1. **Filter clusters** by `clusterSelector.matchLabels` against InferenceCluster
    labels.
-2. **Filter pools** by evaluating `nodeSelector.cel` against each pool's
-   InferenceClass attributes and capacity.
-3. **Derive physical shape** from `workers.topology`: nodes per worker, GPUs per
-   node.
-4. **Check capacity.** Does the pool have enough available nodes? Available =
+2. **Filter pools** by evaluating each `nodeSelector.devices` request against the
+   pool's InferenceClass devices. A pool matches a request when it has a device
+   whose `count` covers the request and whose `driver`, `attributes`, and
+   `capacity` satisfy every selector. A pool matches the deployment when it
+   satisfies every request.
+3. **Check capacity.** Does the pool have enough available nodes for one replica
+   (`pipeline * data / dataLocal` from `workers.topology`)? Available =
    `maxNodeCount` minus nodes consumed by existing ModelReplicas on that
    cluster.
 
 Modelplane will support affinity and anti-affinity in a future version.
 
-DRA is the device binding mechanism on every InferenceCluster. The composition
-function forms `ResourceClaim`s from the matched pool's InferenceClass. It
-references the driver's DeviceClass (e.g. `gpu.nvidia.com`) and adds CEL
-selectors derived from the InferenceClass's attributes and capacity, filtering
-out `modelplane.ai/*` keys. Because the remaining keys use the same qualified
-names the DRA driver publishes, the translation is a straightforward split of
-`domain/name` into `device.attributes["domain"].name`. DRA handles actual
-device-to-node binding at pod admission time.
+DRA binds devices on every InferenceCluster. Because `nodeSelector` is already a
+list of DRA device requests, forming the `ResourceClaim` is mechanical: each
+request whose matched device is `claim: DRA` becomes one `DeviceRequest`,
+carrying the request's `count` and CEL selectors verbatim, referencing the
+driver's DeviceClass. Requests matching a `claim: Synthetic` device are dropped;
+the fleet scheduler already enforced them by pool selection. DRA binds
+device-to-node at pod admission time.
 
 ## Autoscaling
 
@@ -682,6 +720,17 @@ Autoscaling is opt-in via a separate KEDA `ScaledObject` (or similar), the same
 pattern as Kubernetes Deployment + HPA.
 
 ## Alternatives considered
+
+### A single flat CEL expression for nodeSelector
+
+`nodeSelector` could be one CEL expression over a pool's merged attributes and
+capacity, rather than a list of device requests. It's simpler for the common
+case of one GPU kind. But it can't describe a node with a GPU *and* a NIC as
+distinct devices: everything flattens onto one synthetic device, so an ML team
+can't filter on "a GPU like X and a NIC like Y," and the `ResourceClaim`
+translation isn't mechanical for multi-device requirements. The device list
+costs a little verbosity in the common case to make the multi-device case
+expressible and the DRA translation one-to-one.
 
 ### Model catalog (ClusterModel / Model)
 
