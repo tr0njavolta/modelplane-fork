@@ -181,17 +181,14 @@ spec:
                             type: string
                             description: Semantic version (e.g. "9.0.0").
                             maxLength: 32
-                          # TODO(negz): rename boolean/integer back to DRA's
-                          # bool/int once
-                          # https://github.com/crossplane/cli/issues/63 is fixed.
-                          boolean:
+                          bool:
                             type: boolean
-                          integer:
+                          int:
                             type: integer
                             format: int64
                         x-kubernetes-validations:
-                        - rule: "[has(self.string), has(self.version), has(self.boolean), has(self.integer)].filter(x, x).size() == 1"
-                          message: "exactly one of string, version, boolean, integer must be set"
+                        - rule: "[has(self.string), has(self.version), has(self.bool), has(self.int)].filter(x, x).size() == 1"
+                          message: "exactly one of string, version, bool, int must be set"
                     capacity:
                       type: object
                       description: >-

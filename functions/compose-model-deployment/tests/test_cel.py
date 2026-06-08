@@ -152,25 +152,25 @@ class TestMatches(unittest.TestCase):
             Case(
                 name="bool attribute true",
                 expr=f"{_ATTR}.x",
-                device=_device(attributes={"x": {"boolean": True}}),
+                device=_device(attributes={"x": {"bool": True}}),
                 want=True,
             ),
             Case(
                 name="bool attribute false",
                 expr=f"{_ATTR}.x",
-                device=_device(attributes={"x": {"boolean": False}}),
+                device=_device(attributes={"x": {"bool": False}}),
                 want=False,
             ),
             Case(
                 name="int attribute",
                 expr=f"{_ATTR}.x >= 8",
-                device=_device(attributes={"x": {"integer": 8}}),
+                device=_device(attributes={"x": {"int": 8}}),
                 want=True,
             ),
             Case(
                 name="int attribute below",
                 expr=f"{_ATTR}.x >= 8",
-                device=_device(attributes={"x": {"integer": 4}}),
+                device=_device(attributes={"x": {"int": 4}}),
                 want=False,
             ),
             # Qualified names split into their own domain.
@@ -203,7 +203,7 @@ class TestMatches(unittest.TestCase):
             Case(
                 name="non-bool int selector is non-match",
                 expr=f"{_ATTR}.x",
-                device=_device(attributes={"x": {"integer": 5}}),
+                device=_device(attributes={"x": {"int": 5}}),
                 want=False,
             ),
             # Unknown domain resolves to an empty map (not an error).

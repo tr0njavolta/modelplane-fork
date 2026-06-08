@@ -288,13 +288,9 @@ spec:
                                     version:
                                       type: string
                                       maxLength: 32
-                                    # TODO(negz): rename boolean/integer back to
-                                    # DRA's bool/int once
-                                    # https://github.com/crossplane/cli/issues/63
-                                    # is fixed.
-                                    boolean:
+                                    bool:
                                       type: boolean
-                                    integer:
+                                    int:
                                       type: integer
                                       format: int64
                               capacity:

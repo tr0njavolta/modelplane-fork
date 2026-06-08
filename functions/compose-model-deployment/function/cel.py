@@ -234,7 +234,7 @@ def _attribute_value(entry: dict):
     """
     if entry.get("version") is not None:
         return semver.semver(entry["version"])
-    for field in ("string", "boolean", "integer"):
+    for field in ("string", "bool", "int"):
         if entry.get(field) is not None:
             return celpy.json_to_cel(entry[field])
     # No supported value: upstream returns "unsupported attribute value" error.

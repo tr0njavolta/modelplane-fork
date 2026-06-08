@@ -43,8 +43,8 @@ class Crossplane(BaseModel):
 
 
 class Attributes(BaseModel):
-    boolean: bool | None = None
-    integer: int | None = None
+    bool_: bool | None = Field(None, alias='bool')
+    int_: int | None = Field(None, alias='int')
     string: constr(max_length=253) | None = None
     version: constr(max_length=32) | None = None
     """

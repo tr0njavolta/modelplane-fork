@@ -185,7 +185,10 @@ def compile_requests(deployment: mdv1alpha1.ModelDeployment) -> "list[_CompiledR
 
 def _device_satisfies(device, programs: list[cel.Program]) -> bool:
     """Whether a pool device satisfies every selector (all ANDed)."""
-    raw = device.model_dump(exclude_none=True)
+    # by_alias keeps the DRA wire names (bool/int, not the generated bool_/int_
+    # Python attribute names) so the CEL activation sees device.attributes the
+    # way DRA selectors expect.
+    raw = device.model_dump(by_alias=True, exclude_none=True)
     return all(p.matches(raw) for p in programs)
 
 

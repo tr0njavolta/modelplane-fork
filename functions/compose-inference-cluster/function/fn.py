@@ -638,8 +638,10 @@ class Composer:
                 continue
             # Copy the class's devices verbatim. model_dump drops None fields,
             # keeping the typed attribute value objects
-            # (string/version/boolean/integer) one-of clean.
-            devices = [d.model_dump(exclude_none=True) for d in cls.spec.devices]
+            # (string/version/bool/int) one-of clean. by_alias keeps DRA's wire
+            # names (bool/int) rather than the generated bool_/int_ attributes,
+            # so the published status matches the InferenceClass schema.
+            devices = [d.model_dump(by_alias=True, exclude_none=True) for d in cls.spec.devices]
             gpu_pools.append(
                 {
                     "name": pool.name,
