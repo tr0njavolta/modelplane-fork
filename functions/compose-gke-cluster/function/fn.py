@@ -394,23 +394,38 @@ class Composer:
         )
 
     def write_status(self):
-        resource.update_status(
-            self.rsp.desired.composite,
-            v1alpha1.Status(
-                secrets=[
-                    v1alpha1.Secret(
-                        type=_SECRET_TYPE_KUBECONFIG,
-                        name=_kubeconfig_secret_name(self.xr),
-                        key=_SECRET_KEY_KUBECONFIG,
-                    ),
-                    v1alpha1.Secret(
-                        type=_SECRET_TYPE_GCP_SA_KEY,
-                        name=_sa_key_secret_name(self.xr),
-                        key=_SECRET_KEY_GCP_SA,
-                    ),
-                ],
-            ),
+        status = v1alpha1.Status(
+            secrets=[
+                v1alpha1.Secret(
+                    type=_SECRET_TYPE_KUBECONFIG,
+                    name=_kubeconfig_secret_name(self.xr),
+                    key=_SECRET_KEY_KUBECONFIG,
+                ),
+                v1alpha1.Secret(
+                    type=_SECRET_TYPE_GCP_SA_KEY,
+                    name=_sa_key_secret_name(self.xr),
+                    key=_SECRET_KEY_GCP_SA,
+                ),
+            ],
         )
+        # Surface the composed VPC's real name so network-scoped consumers (the
+        # ModelCache Filestore StorageClass) can pin to it. The provider-assigned
+        # name carries a generated suffix, so it can't be derived from the XR name.
+        network_name = self._observed_network_name()
+        if network_name:
+            status.network = v1alpha1.Network(name=network_name)
+        resource.update_status(self.rsp.desired.composite, status)
+
+    def _observed_network_name(self):
+        """The composed VPC network's GCP name, from the observed Network MR's
+        external-name annotation (set by the provider once the network exists).
+        None on early reconciles before the network is created."""
+        observed = self.req.observed.resources.get("network")
+        if not observed:
+            return None
+        manifest = resource.struct_to_dict(observed.resource)
+        annotations = manifest.get("metadata", {}).get("annotations", {}) or {}
+        return annotations.get("crossplane.io/external-name") or None
 
     def mark_readiness(self):
         """Mark composed resources as ready based on their observed conditions."""
