@@ -117,18 +117,19 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     resource=resource.dict_to_struct({"status": {"replicas": {"total": 1, "ready": 0}}}),
                 ),
                 resources={
-                    "replica-cluster-a": fnv1.Resource(
+                    "replica-cluster-a-0": fnv1.Resource(
                         resource=resource.dict_to_struct(
                             {
                                 "apiVersion": "modelplane.ai/v1alpha1",
                                 "kind": "ModelReplica",
                                 "metadata": {
-                                    "name": "my-model-cluster-a-bc3c4",
+                                    "name": "my-model-cluster-a-0-5ab63",
                                     "namespace": "ml-team",
                                     "labels": {
                                         "modelplane.ai/replica": "true",
                                         "modelplane.ai/deployment": "my-model",
                                         "modelplane.ai/cluster": "cluster-a",
+                                        "modelplane.ai/replica-index": "0",
                                     },
                                 },
                                 "spec": {
@@ -153,22 +154,23 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                             }
                         ),
                     ),
-                    "endpoint-cluster-a": fnv1.Resource(
+                    "endpoint-cluster-a-0": fnv1.Resource(
                         resource=resource.dict_to_struct(
                             {
                                 "apiVersion": "modelplane.ai/v1alpha1",
                                 "kind": "ModelEndpoint",
                                 "metadata": {
-                                    "name": "my-model-cluster-a-bc3c4",
+                                    "name": "my-model-cluster-a-0-5ab63",
                                     "namespace": "ml-team",
                                     "labels": {
                                         "modelplane.ai/deployment": "my-model",
                                         "modelplane.ai/cluster": "cluster-a",
+                                        "modelplane.ai/replica-index": "0",
                                     },
                                 },
                                 "spec": {
-                                    "url": "http://10.0.0.1/ml-team/my-model-cluster-a-bc3c4/v1",
-                                    "rewritePath": "/ml-team/my-model-cluster-a-bc3c4/",
+                                    "url": "http://10.0.0.1/ml-team/my-model-cluster-a-0-5ab63/v1",
+                                    "rewritePath": "/ml-team/my-model-cluster-a-0-5ab63/",
                                 },
                             }
                         ),
@@ -189,7 +191,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 ),
             ],
             results=[
-                fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="Matched 1 clusters: cluster-a"),
+                fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="Scheduled 1 replicas across 1 clusters: cluster-a"),
             ],
             context=structpb.Struct(),
         )
@@ -287,7 +289,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     type="ReplicasScheduled",
                     status=fnv1.STATUS_CONDITION_FALSE,
                     reason="InsufficientCapacity",
-                    message="0 of 1 clusters matched (checked 1)",
+                    message="0 of 1 replicas scheduled (checked 1 clusters)",
                 ),
                 fnv1.Condition(
                     type="ReplicasReady",
@@ -305,29 +307,30 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             observed=fnv1.State(
                 composite=fnv1.Resource(resource=resource.dict_to_struct(xr)),
                 resources={
-                    "replica-cluster-a": fnv1.Resource(
+                    "replica-cluster-a-0": fnv1.Resource(
                         resource=resource.dict_to_struct(
                             {
                                 "apiVersion": "modelplane.ai/v1alpha1",
                                 "kind": "ModelReplica",
                                 "metadata": {
-                                    "name": "my-model-cluster-a-bc3c4",
+                                    "name": "my-model-cluster-a-0-5ab63",
                                     "namespace": "ml-team",
                                     "labels": {
                                         "modelplane.ai/replica": "true",
                                         "modelplane.ai/deployment": "my-model",
                                         "modelplane.ai/cluster": "cluster-a",
+                                        "modelplane.ai/replica-index": "0",
                                     },
                                 },
                             }
                         ),
                     ),
-                    "endpoint-cluster-a": fnv1.Resource(
+                    "endpoint-cluster-a-0": fnv1.Resource(
                         resource=resource.dict_to_struct(
                             {
                                 "apiVersion": "modelplane.ai/v1alpha1",
                                 "kind": "ModelEndpoint",
-                                "metadata": {"name": "my-model-cluster-a-bc3c4", "namespace": "ml-team"},
+                                "metadata": {"name": "my-model-cluster-a-0-5ab63", "namespace": "ml-team"},
                             }
                         ),
                     ),
@@ -342,12 +345,13 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                         "apiVersion": "modelplane.ai/v1alpha1",
                         "kind": "ModelReplica",
                         "metadata": {
-                            "name": "my-model-cluster-a-bc3c4",
+                            "name": "my-model-cluster-a-0-5ab63",
                             "namespace": "ml-team",
                             "labels": {
                                 "modelplane.ai/replica": "true",
                                 "modelplane.ai/deployment": "my-model",
                                 "modelplane.ai/cluster": "cluster-a",
+                                "modelplane.ai/replica-index": "0",
                             },
                         },
                         "spec": {
@@ -376,18 +380,19 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     resource=resource.dict_to_struct({"status": {"replicas": {"total": 1, "ready": 0}}}),
                 ),
                 resources={
-                    "replica-cluster-a": fnv1.Resource(
+                    "replica-cluster-a-0": fnv1.Resource(
                         resource=resource.dict_to_struct(
                             {
                                 "apiVersion": "modelplane.ai/v1alpha1",
                                 "kind": "ModelReplica",
                                 "metadata": {
-                                    "name": "my-model-cluster-a-bc3c4",
+                                    "name": "my-model-cluster-a-0-5ab63",
                                     "namespace": "ml-team",
                                     "labels": {
                                         "modelplane.ai/replica": "true",
                                         "modelplane.ai/deployment": "my-model",
                                         "modelplane.ai/cluster": "cluster-a",
+                                        "modelplane.ai/replica-index": "0",
                                     },
                                 },
                                 "spec": {
@@ -411,22 +416,23 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                             }
                         ),
                     ),
-                    "endpoint-cluster-a": fnv1.Resource(
+                    "endpoint-cluster-a-0": fnv1.Resource(
                         resource=resource.dict_to_struct(
                             {
                                 "apiVersion": "modelplane.ai/v1alpha1",
                                 "kind": "ModelEndpoint",
                                 "metadata": {
-                                    "name": "my-model-cluster-a-bc3c4",
+                                    "name": "my-model-cluster-a-0-5ab63",
                                     "namespace": "ml-team",
                                     "labels": {
                                         "modelplane.ai/deployment": "my-model",
                                         "modelplane.ai/cluster": "cluster-a",
+                                        "modelplane.ai/replica-index": "0",
                                     },
                                 },
                                 "spec": {
-                                    "url": "http://10.0.0.1/ml-team/my-model-cluster-a-bc3c4/v1",
-                                    "rewritePath": "/ml-team/my-model-cluster-a-bc3c4/",
+                                    "url": "http://10.0.0.1/ml-team/my-model-cluster-a-0-5ab63/v1",
+                                    "rewritePath": "/ml-team/my-model-cluster-a-0-5ab63/",
                                 },
                             }
                         ),
@@ -438,7 +444,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     type="ReplicasScheduled",
                     status=fnv1.STATUS_CONDITION_TRUE,
                     reason="ReplicasCreated",
-                    message="Matched 1 clusters",
+                    message="Scheduled 1 of 1 replicas",
                 ),
                 fnv1.Condition(
                     type="ReplicasReady",
@@ -495,12 +501,13 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             "apiVersion": "modelplane.ai/v1alpha1",
             "kind": "ModelReplica",
             "metadata": {
-                "name": "my-model-cluster-a-bc3c4",
+                "name": "my-model-cluster-a-0-5ab63",
                 "namespace": "ml-team",
                 "labels": {
                     "modelplane.ai/replica": "true",
                     "modelplane.ai/deployment": "my-model",
                     "modelplane.ai/cluster": "cluster-a",
+                    "modelplane.ai/replica-index": "0",
                 },
             },
             "spec": {
@@ -522,7 +529,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             observed=fnv1.State(
                 composite=fnv1.Resource(resource=resource.dict_to_struct(xr)),
                 resources={
-                    "replica-cluster-a": fnv1.Resource(resource=resource.dict_to_struct(existing_replica)),
+                    "replica-cluster-a-0": fnv1.Resource(resource=resource.dict_to_struct(existing_replica)),
                 },
             ),
         )
@@ -540,18 +547,19 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     resource=resource.dict_to_struct({"status": {"replicas": {"total": 1, "ready": 0}}}),
                 ),
                 resources={
-                    "replica-cluster-a": fnv1.Resource(
+                    "replica-cluster-a-0": fnv1.Resource(
                         resource=resource.dict_to_struct(
                             {
                                 "apiVersion": "modelplane.ai/v1alpha1",
                                 "kind": "ModelReplica",
                                 "metadata": {
-                                    "name": "my-model-cluster-a-bc3c4",
+                                    "name": "my-model-cluster-a-0-5ab63",
                                     "namespace": "ml-team",
                                     "labels": {
                                         "modelplane.ai/replica": "true",
                                         "modelplane.ai/deployment": "my-model",
                                         "modelplane.ai/cluster": "cluster-a",
+                                        "modelplane.ai/replica-index": "0",
                                     },
                                 },
                                 "spec": {
@@ -582,7 +590,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     type="ReplicasScheduled",
                     status=fnv1.STATUS_CONDITION_TRUE,
                     reason="ReplicasCreated",
-                    message="Matched 1 clusters",
+                    message="Scheduled 1 of 1 replicas",
                 ),
                 fnv1.Condition(
                     type="ReplicasReady",
@@ -640,7 +648,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             observed=fnv1.State(
                 composite=fnv1.Resource(resource=resource.dict_to_struct(xr)),
                 resources={
-                    "replica-cluster-a": fnv1.Resource(resource=resource.dict_to_struct(existing_replica)),
+                    "replica-cluster-a-0": fnv1.Resource(resource=resource.dict_to_struct(existing_replica)),
                 },
             ),
         )
@@ -658,18 +666,19 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     resource=resource.dict_to_struct({"status": {"replicas": {"total": 1, "ready": 0}}}),
                 ),
                 resources={
-                    "replica-cluster-b": fnv1.Resource(
+                    "replica-cluster-b-0": fnv1.Resource(
                         resource=resource.dict_to_struct(
                             {
                                 "apiVersion": "modelplane.ai/v1alpha1",
                                 "kind": "ModelReplica",
                                 "metadata": {
-                                    "name": "my-model-cluster-b-a9d2c",
+                                    "name": "my-model-cluster-b-0-f0b76",
                                     "namespace": "ml-team",
                                     "labels": {
                                         "modelplane.ai/replica": "true",
                                         "modelplane.ai/deployment": "my-model",
                                         "modelplane.ai/cluster": "cluster-b",
+                                        "modelplane.ai/replica-index": "0",
                                     },
                                 },
                                 "spec": {
@@ -694,22 +703,23 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                             }
                         ),
                     ),
-                    "endpoint-cluster-b": fnv1.Resource(
+                    "endpoint-cluster-b-0": fnv1.Resource(
                         resource=resource.dict_to_struct(
                             {
                                 "apiVersion": "modelplane.ai/v1alpha1",
                                 "kind": "ModelEndpoint",
                                 "metadata": {
-                                    "name": "my-model-cluster-b-a9d2c",
+                                    "name": "my-model-cluster-b-0-f0b76",
                                     "namespace": "ml-team",
                                     "labels": {
                                         "modelplane.ai/deployment": "my-model",
                                         "modelplane.ai/cluster": "cluster-b",
+                                        "modelplane.ai/replica-index": "0",
                                     },
                                 },
                                 "spec": {
-                                    "url": "http://10.0.0.2/ml-team/my-model-cluster-b-a9d2c/v1",
-                                    "rewritePath": "/ml-team/my-model-cluster-b-a9d2c/",
+                                    "url": "http://10.0.0.2/ml-team/my-model-cluster-b-0-f0b76/v1",
+                                    "rewritePath": "/ml-team/my-model-cluster-b-0-f0b76/",
                                 },
                             }
                         ),
@@ -730,7 +740,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 ),
             ],
             results=[
-                fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="Matched 1 clusters: cluster-b"),
+                fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="Scheduled 1 replicas across 1 clusters: cluster-b"),
             ],
             context=structpb.Struct(),
         )
@@ -777,18 +787,19 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     resource=resource.dict_to_struct({"status": {"replicas": {"total": 1, "ready": 0}}}),
                 ),
                 resources={
-                    "replica-cluster-a": fnv1.Resource(
+                    "replica-cluster-a-0": fnv1.Resource(
                         resource=resource.dict_to_struct(
                             {
                                 "apiVersion": "modelplane.ai/v1alpha1",
                                 "kind": "ModelReplica",
                                 "metadata": {
-                                    "name": "my-model-cluster-a-bc3c4",
+                                    "name": "my-model-cluster-a-0-5ab63",
                                     "namespace": "ml-team",
                                     "labels": {
                                         "modelplane.ai/replica": "true",
                                         "modelplane.ai/deployment": "my-model",
                                         "modelplane.ai/cluster": "cluster-a",
+                                        "modelplane.ai/replica-index": "0",
                                     },
                                 },
                                 "spec": {
@@ -814,22 +825,23 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                             }
                         ),
                     ),
-                    "endpoint-cluster-a": fnv1.Resource(
+                    "endpoint-cluster-a-0": fnv1.Resource(
                         resource=resource.dict_to_struct(
                             {
                                 "apiVersion": "modelplane.ai/v1alpha1",
                                 "kind": "ModelEndpoint",
                                 "metadata": {
-                                    "name": "my-model-cluster-a-bc3c4",
+                                    "name": "my-model-cluster-a-0-5ab63",
                                     "namespace": "ml-team",
                                     "labels": {
                                         "modelplane.ai/deployment": "my-model",
                                         "modelplane.ai/cluster": "cluster-a",
+                                        "modelplane.ai/replica-index": "0",
                                     },
                                 },
                                 "spec": {
-                                    "url": "http://10.0.0.1/ml-team/my-model-cluster-a-bc3c4/v1",
-                                    "rewritePath": "/ml-team/my-model-cluster-a-bc3c4/",
+                                    "url": "http://10.0.0.1/ml-team/my-model-cluster-a-0-5ab63/v1",
+                                    "rewritePath": "/ml-team/my-model-cluster-a-0-5ab63/",
                                 },
                             }
                         ),
@@ -850,7 +862,10 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 ),
             ],
             results=[
-                fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="Matched 1 clusters: cluster-a"),
+                fnv1.Result(
+                    severity=fnv1.SEVERITY_NORMAL,
+                    message="Scheduled 1 replicas across 1 clusters: cluster-a",
+                ),
             ],
             context=structpb.Struct(),
         )
@@ -875,3 +890,89 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     json_format.MessageToDict(got),
                     "-want, +got",
                 )
+
+    async def test_compose_co_located_replicas(self) -> None:
+        """Two replicas can land on one cluster as distinct desired resources.
+
+        Exercises the end-to-end fan-out for co-located replicas: a deployment
+        wanting two replicas, with only one (two-node) cluster, packs both onto
+        it. Each gets a distinct desired-resource key (replica-{cluster}-{index}),
+        a distinct opaque name, and its own replica-index label, and each
+        ModelEndpoint's name equals its ModelReplica's name (routing depends on
+        it).
+        """
+        xr = v1alpha1.ModelDeployment(
+            metadata=metav1.ObjectMeta(name="my-model", namespace="ml-team"),
+            spec=v1alpha1.SpecModel(
+                replicas=2,
+                workers=v1alpha1.Workers(
+                    topology=v1alpha1.Topology(tensor=1),
+                    template=v1alpha1.Template(
+                        spec=v1alpha1.Spec(
+                            containers=[v1alpha1.Container(name="engine", image="vllm/vllm-openai:latest")],
+                        ),
+                    ),
+                ),
+            ),
+        ).model_dump(exclude_none=True, mode="json")
+
+        cluster_a = {
+            "apiVersion": "modelplane.ai/v1alpha1",
+            "kind": "InferenceCluster",
+            "metadata": {"name": "cluster-a"},
+            "spec": {"cluster": {"source": "Existing", "existing": {"secretRef": {"name": "k"}}}},
+            "status": {
+                "conditions": [
+                    {
+                        "type": "Ready",
+                        "status": "True",
+                        "reason": "Available",
+                        "lastTransitionTime": "2025-01-01T00:00:00Z",
+                    }
+                ],
+                "gateway": {"address": "10.0.0.1"},
+                "providerConfigRef": {"name": "cluster-a"},
+                "capacity": {"gpuPools": [{"name": "default", "nodes": 2}]},
+            },
+        }
+
+        req = fnv1.RunFunctionRequest(
+            observed=fnv1.State(composite=fnv1.Resource(resource=resource.dict_to_struct(xr))),
+        )
+        req.required_resources["clusters"].items.append(fnv1.Resource(resource=resource.dict_to_struct(cluster_a)))
+        req.required_resources["all-replicas"].SetInParent()
+
+        got = await self.runner.RunFunction(req, None)
+        resources = got.desired.resources
+
+        # Both replicas and both endpoints are composed, keyed by (cluster, index).
+        self.assertEqual(
+            {"replica-cluster-a-0", "replica-cluster-a-1", "endpoint-cluster-a-0", "endpoint-cluster-a-1"},
+            set(resources.keys()),
+        )
+
+        for index, replica_key, endpoint_key in [
+            (0, "replica-cluster-a-0", "endpoint-cluster-a-0"),
+            (1, "replica-cluster-a-1", "endpoint-cluster-a-1"),
+        ]:
+            replica = json_format.MessageToDict(resources[replica_key].resource)
+            endpoint = json_format.MessageToDict(resources[endpoint_key].resource)
+
+            # Opaque name hashed from (deployment, cluster, index).
+            want_name = resource.child_name("my-model", "cluster-a", str(index))
+            self.assertEqual(want_name, replica["metadata"]["name"])
+            self.assertEqual(str(index), replica["metadata"]["labels"]["modelplane.ai/replica-index"])
+            self.assertEqual("cluster-a", replica["spec"]["clusterName"])
+
+            # Endpoint name must equal the replica name so routing lands on it.
+            self.assertEqual(want_name, endpoint["metadata"]["name"])
+            self.assertEqual(str(index), endpoint["metadata"]["labels"]["modelplane.ai/replica-index"])
+
+        # The two replicas have distinct names (no collision on one cluster).
+        name0 = json_format.MessageToDict(resources["replica-cluster-a-0"].resource)["metadata"]["name"]
+        name1 = json_format.MessageToDict(resources["replica-cluster-a-1"].resource)["metadata"]["name"]
+        self.assertNotEqual(name0, name1)
+
+        # Status reflects two scheduled replicas.
+        composite = json_format.MessageToDict(got.desired.composite.resource)
+        self.assertEqual(2, composite["status"]["replicas"]["total"])

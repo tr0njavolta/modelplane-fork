@@ -163,19 +163,21 @@ def _replica(
     deployment_name: str,
     cluster_name: str,
     *,
+    index: int = 0,
     tensor: int = 1,
     pipeline: int = 1,
     count: int = 1,
 ) -> mrv1alpha1.ModelReplica:
-    """Construct an observed ModelReplica pinned to a cluster."""
+    """Construct an observed ModelReplica pinned to a (cluster, index)."""
     return mrv1alpha1.ModelReplica(
         metadata=metav1.ObjectMeta(
-            name=f"{deployment_name}-{cluster_name}",
+            name=f"{deployment_name}-{cluster_name}-{index}",
             namespace="ml-team",
             labels={
                 "modelplane.ai/replica": "true",
                 "modelplane.ai/deployment": deployment_name,
                 "modelplane.ai/cluster": cluster_name,
+                "modelplane.ai/replica-index": str(index),
             },
         ),
         spec=mrv1alpha1.SpecModel(
@@ -198,14 +200,21 @@ def _replica_with_pool(
     cluster_name: str,
     *,
     pool: str,
+    index: int = 0,
     tensor: int = 1,
     pipeline: int = 1,
     count: int = 1,
 ) -> mrv1alpha1.ModelReplica:
     """An observed ModelReplica pinned to a cluster AND a node pool."""
-    r = _replica(deployment_name, cluster_name, tensor=tensor, pipeline=pipeline, count=count)
+    r = _replica(deployment_name, cluster_name, index=index, tensor=tensor, pipeline=pipeline, count=count)
     r.spec.nodePoolName = pool
     return r
+
+
+# Convenience: build an expected Candidate defaulting to index 0, so the many
+# single-replica-per-cluster cases stay terse. Multi-replica cases pass index=.
+def _cand(name: str, *, index: int = 0, **kwargs) -> Candidate:
+    return Candidate(name=name, index=index, **kwargs)
 
 
 # Convenience: the resolved DeviceRequest for a default GPU request matching a
@@ -238,7 +247,7 @@ class TestSchedule(unittest.TestCase):
                 deployment=_deployment(),
                 clusters=[_cluster("cluster-a")],
                 all_replicas=[],
-                want=[Candidate(name="cluster-a", gateway_address="10.0.0.1", pool="default")],
+                want=[_cand(name="cluster-a", gateway_address="10.0.0.1", pool="default")],
             ),
             Case(
                 name="not-ready cluster is not picked for a new replica",
@@ -268,21 +277,21 @@ class TestSchedule(unittest.TestCase):
                 all_replicas=[_replica("my-model", "cluster-a")],
                 # cluster-a wins even though cluster-b is also viable. No
                 # nodeSelector, so pool/device_requests stay empty on retain.
-                want=[Candidate(name="cluster-a", gateway_address="10.0.0.1")],
+                want=[_cand(name="cluster-a", gateway_address="10.0.0.1")],
             ),
             Case(
                 name="degraded pinned cluster is retained with empty gateway",
                 deployment=_deployment(),
                 clusters=[_cluster("cluster-a", ready=False, gateway_address="")],
                 all_replicas=[_replica("my-model", "cluster-a")],
-                want=[Candidate(name="cluster-a", gateway_address="")],
+                want=[_cand(name="cluster-a", gateway_address="")],
             ),
             Case(
                 name="deleted pinned cluster triggers re-placement",
                 deployment=_deployment(),
                 clusters=[_cluster("cluster-b", gateway_address="10.0.0.2")],
                 all_replicas=[_replica("my-model", "cluster-a")],
-                want=[Candidate(name="cluster-b", gateway_address="10.0.0.2", pool="default")],
+                want=[_cand(name="cluster-b", gateway_address="10.0.0.2", pool="default")],
             ),
             Case(
                 name="scale up places new replicas on additional clusters",
@@ -290,26 +299,191 @@ class TestSchedule(unittest.TestCase):
                 clusters=[_cluster("cluster-a"), _cluster("cluster-b", gateway_address="10.0.0.2")],
                 all_replicas=[_replica("my-model", "cluster-a")],
                 want=[
-                    Candidate(name="cluster-a", gateway_address="10.0.0.1"),
-                    Candidate(name="cluster-b", gateway_address="10.0.0.2", pool="default"),
+                    _cand(name="cluster-a", gateway_address="10.0.0.1"),
+                    _cand(name="cluster-b", gateway_address="10.0.0.2", pool="default"),
                 ],
             ),
             Case(
                 name="scale up with no extra capacity returns only retained",
                 deployment=_deployment(replicas=2),
-                clusters=[_cluster("cluster-a")],
-                all_replicas=[_replica("my-model", "cluster-a")],
-                want=[Candidate(name="cluster-a", gateway_address="10.0.0.1")],
+                # Single-node pool, already filled by the retained replica, so no
+                # second replica can be placed - not even on the same cluster.
+                clusters=[_cluster("cluster-a", pools=[_pool("default", nodes=1)])],
+                all_replicas=[_replica_with_pool("my-model", "cluster-a", pool="default")],
+                want=[_cand(name="cluster-a", gateway_address="10.0.0.1", pool="default")],
             ),
             Case(
-                name="scale down keeps lexicographically earliest pins",
+                name="two replicas pack onto one cluster when it is the only option",
+                deployment=_deployment(replicas=2),
+                # One cluster, a 2-node pool, two 1-node replicas. With nowhere
+                # to spread, both pack onto cluster-a at indices 0 and 1.
+                clusters=[_cluster("cluster-a", pools=[_pool("default", nodes=2)])],
+                all_replicas=[],
+                want=[
+                    _cand(name="cluster-a", index=0, gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-a", index=1, gateway_address="10.0.0.1", pool="default"),
+                ],
+            ),
+            Case(
+                name="two replicas spread across two clusters before packing",
+                deployment=_deployment(replicas=2),
+                # Both clusters can hold two replicas, but we prefer one each.
+                clusters=[
+                    _cluster("cluster-a", pools=[_pool("default", nodes=2)]),
+                    _cluster("cluster-b", gateway_address="10.0.0.2", pools=[_pool("default", nodes=2)]),
+                ],
+                all_replicas=[],
+                want=[
+                    _cand(name="cluster-a", index=0, gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-b", index=0, gateway_address="10.0.0.2", pool="default"),
+                ],
+            ),
+            Case(
+                name="three replicas spread first then pack the remainder",
+                deployment=_deployment(replicas=3),
+                # Two clusters, plenty of room. Spread gives a, b one each, then
+                # the third lands back on cluster-a (lowest load, name tiebreak).
+                clusters=[
+                    _cluster("cluster-a", pools=[_pool("default", nodes=4)]),
+                    _cluster("cluster-b", gateway_address="10.0.0.2", pools=[_pool("default", nodes=4)]),
+                ],
+                all_replicas=[],
+                want=[
+                    _cand(name="cluster-a", index=0, gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-a", index=1, gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-b", index=0, gateway_address="10.0.0.2", pool="default"),
+                ],
+            ),
+            Case(
+                name="capacity forces packing past the spread preference",
+                deployment=_deployment(replicas=3),
+                # cluster-b holds one replica; cluster-a has room for the rest.
+                # Spread puts one on each, then the third can't fit on b (full),
+                # so it packs onto a.
+                clusters=[
+                    _cluster("cluster-a", pools=[_pool("default", nodes=4)]),
+                    _cluster("cluster-b", gateway_address="10.0.0.2", pools=[_pool("default", nodes=1)]),
+                ],
+                all_replicas=[],
+                want=[
+                    _cand(name="cluster-a", index=0, gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-a", index=1, gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-b", index=0, gateway_address="10.0.0.2", pool="default"),
+                ],
+            ),
+            Case(
+                name="new replica spreads onto an empty cluster before doubling up",
+                deployment=_deployment(replicas=2),
+                # cluster-a already hosts a replica; cluster-b is empty. The new
+                # replica prefers empty cluster-b over packing onto a.
+                clusters=[
+                    _cluster("cluster-a", pools=[_pool("default", nodes=4)]),
+                    _cluster("cluster-b", gateway_address="10.0.0.2", pools=[_pool("default", nodes=4)]),
+                ],
+                all_replicas=[_replica_with_pool("my-model", "cluster-a", pool="default")],
+                want=[
+                    _cand(name="cluster-a", index=0, gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-b", index=0, gateway_address="10.0.0.2", pool="default"),
+                ],
+            ),
+            Case(
+                name="new replica takes the lowest free index on a packed cluster",
+                deployment=_deployment(replicas=3),
+                # Only cluster-a exists, already hosting indices 0 and 2 (1 was
+                # deleted). The new replica fills the gap at index 1.
+                clusters=[_cluster("cluster-a", pools=[_pool("default", nodes=4)])],
+                all_replicas=[
+                    _replica_with_pool("my-model", "cluster-a", pool="default", index=0),
+                    _replica_with_pool("my-model", "cluster-a", pool="default", index=2),
+                ],
+                want=[
+                    _cand(name="cluster-a", index=0, gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-a", index=1, gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-a", index=2, gateway_address="10.0.0.1", pool="default"),
+                ],
+            ),
+            Case(
+                name="scale down packs off by dropping the highest index first",
+                deployment=_deployment(replicas=2),
+                # cluster-a hosts indices 0 and 1; cluster-b hosts index 0. Three
+                # replicas, want two. Highest index (a/1) is dropped, keeping the
+                # spread across a/0 and b/0.
+                clusters=[
+                    _cluster("cluster-a", pools=[_pool("default", nodes=4)]),
+                    _cluster("cluster-b", gateway_address="10.0.0.2", pools=[_pool("default", nodes=4)]),
+                ],
+                all_replicas=[
+                    _replica_with_pool("my-model", "cluster-a", pool="default", index=0),
+                    _replica_with_pool("my-model", "cluster-a", pool="default", index=1),
+                    _replica_with_pool("my-model", "cluster-b", pool="default", index=0),
+                ],
+                want=[
+                    _cand(name="cluster-a", index=0, gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-b", index=0, gateway_address="10.0.0.2", pool="default"),
+                ],
+            ),
+            Case(
+                name="retained replica is charged at its own node cost, not the new shape",
+                # The deployment's workers grew to pipeline=4 (4 nodes/replica),
+                # but the existing replica was created at pipeline=2 and is
+                # retained (no nodeSelector change rolls it). It still consumes
+                # only its original 2 nodes. The pool has 6, so a second replica
+                # at the new 4-node cost must still fit (6 - 2 = 4). Regression:
+                # charging the retained replica at the new shape (4) would leave
+                # 2 free and wrongly refuse the placement.
+                deployment=_deployment(replicas=2, pipeline=4),
+                clusters=[_cluster("cluster-a", pools=[_pool("default", nodes=6)])],
+                all_replicas=[_replica_with_pool("my-model", "cluster-a", pool="default", pipeline=2)],
+                want=[
+                    _cand(name="cluster-a", index=0, gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-a", index=1, gateway_address="10.0.0.1", pool="default"),
+                ],
+            ),
+            Case(
+                name="scale down drops from the most-loaded cluster to preserve spread",
+                deployment=_deployment(replicas=2),
+                # cluster-a hosts two replicas, cluster-b one. Scaling 3->2 must
+                # drop a's extra (a/1), NOT b's sole replica - otherwise we'd
+                # leave a packed and b empty, the opposite of spread. b's index
+                # is 3 (higher than a/1) to prove we drop by cluster load, not by
+                # a global index comparison.
+                clusters=[
+                    _cluster("cluster-a", pools=[_pool("default", nodes=4)]),
+                    _cluster("cluster-b", gateway_address="10.0.0.2", pools=[_pool("default", nodes=4)]),
+                ],
+                all_replicas=[
+                    _replica_with_pool("my-model", "cluster-a", pool="default", index=0),
+                    _replica_with_pool("my-model", "cluster-a", pool="default", index=1),
+                    _replica_with_pool("my-model", "cluster-b", pool="default", index=3),
+                ],
+                want=[
+                    _cand(name="cluster-a", index=0, gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-b", index=3, gateway_address="10.0.0.2", pool="default"),
+                ],
+            ),
+            Case(
+                name="co-located replicas are both retained across a reconcile",
+                deployment=_deployment(replicas=2),
+                clusters=[_cluster("cluster-a", pools=[_pool("default", nodes=4)])],
+                all_replicas=[
+                    _replica_with_pool("my-model", "cluster-a", pool="default", index=0),
+                    _replica_with_pool("my-model", "cluster-a", pool="default", index=1),
+                ],
+                want=[
+                    _cand(name="cluster-a", index=0, gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-a", index=1, gateway_address="10.0.0.1", pool="default"),
+                ],
+            ),
+            Case(
+                name="scale down across clusters drops higher cluster name at equal index",
                 deployment=_deployment(replicas=1),
                 clusters=[_cluster("cluster-a"), _cluster("cluster-b", gateway_address="10.0.0.2")],
                 all_replicas=[
                     _replica("my-model", "cluster-b"),
                     _replica("my-model", "cluster-a"),
                 ],
-                want=[Candidate(name="cluster-a", gateway_address="10.0.0.1")],
+                # Both at index 0, so the (index, name) tiebreak keeps cluster-a.
+                want=[_cand(name="cluster-a", gateway_address="10.0.0.1")],
             ),
             Case(
                 name="new placement is alphabetical for determinism",
@@ -321,8 +495,8 @@ class TestSchedule(unittest.TestCase):
                 ],
                 all_replicas=[],
                 want=[
-                    Candidate(name="cluster-a", gateway_address="10.0.0.1", pool="default"),
-                    Candidate(name="cluster-b", gateway_address="10.0.0.2", pool="default"),
+                    _cand(name="cluster-a", gateway_address="10.0.0.1", pool="default"),
+                    _cand(name="cluster-b", gateway_address="10.0.0.2", pool="default"),
                 ],
             ),
             Case(
@@ -340,14 +514,14 @@ class TestSchedule(unittest.TestCase):
                 all_replicas=[_replica("my-model", "cluster-a")],
                 # Retained: keeps the replica's own (empty) pool pin, since
                 # this deployment has no nodeSelector.
-                want=[Candidate(name="cluster-a", gateway_address="10.0.0.1", pool="")],
+                want=[_cand(name="cluster-a", gateway_address="10.0.0.1", pool="")],
             ),
             Case(
                 name="replica labeled for our deployment but pinned to unknown cluster is ignored",
                 deployment=_deployment(),
                 clusters=[_cluster("cluster-b", gateway_address="10.0.0.2")],
                 all_replicas=[_replica("my-model", "cluster-a")],
-                want=[Candidate(name="cluster-b", gateway_address="10.0.0.2", pool="default")],
+                want=[_cand(name="cluster-b", gateway_address="10.0.0.2", pool="default")],
             ),
         ]
 
@@ -368,7 +542,7 @@ class TestScheduleNodeSelector(unittest.TestCase):
                 clusters=[_cluster("cluster-a", pools=[_pool("frontier")])],
                 all_replicas=[],
                 want=[
-                    Candidate(
+                    _cand(
                         name="cluster-a",
                         gateway_address="10.0.0.1",
                         pool="frontier",
@@ -409,7 +583,7 @@ class TestScheduleNodeSelector(unittest.TestCase):
                 # Only the claim: DRA gpu request is resolved; the synthetic nic
                 # matched for scheduling but isn't claimed.
                 want=[
-                    Candidate(
+                    _cand(
                         name="cluster-a",
                         gateway_address="10.0.0.1",
                         pool="frontier",
@@ -472,7 +646,7 @@ class TestScheduleNodeSelector(unittest.TestCase):
                 clusters=[_cluster("cluster-a", pools=[_pool("frontier", devices=[_gpu_device(count=8)])])],
                 all_replicas=[],
                 want=[
-                    Candidate(
+                    _cand(
                         name="cluster-a",
                         gateway_address="10.0.0.1",
                         pool="frontier",
@@ -498,7 +672,7 @@ class TestScheduleNodeSelector(unittest.TestCase):
                 all_replicas=[],
                 # nic is synthetic, so resolved requests is empty, but the pool
                 # is still recorded.
-                want=[Candidate(name="cluster-a", gateway_address="10.0.0.1", pool="frontier")],
+                want=[_cand(name="cluster-a", gateway_address="10.0.0.1", pool="frontier")],
             ),
             Case(
                 name="retained replica keeps its pinned pool",
@@ -506,7 +680,7 @@ class TestScheduleNodeSelector(unittest.TestCase):
                 clusters=[_cluster("cluster-a", pools=[_pool("frontier")])],
                 all_replicas=[_replica_with_pool("my-model", "cluster-a", pool="frontier")],
                 want=[
-                    Candidate(
+                    _cand(
                         name="cluster-a",
                         gateway_address="10.0.0.1",
                         pool="frontier",
@@ -527,7 +701,7 @@ class TestScheduleNodeSelector(unittest.TestCase):
                     )
                 ],
                 all_replicas=[_replica_with_pool("my-model", "cluster-a", pool="a")],
-                want=[Candidate(name="cluster-a", gateway_address="10.0.0.1", pool="b")],
+                want=[_cand(name="cluster-a", gateway_address="10.0.0.1", pool="b")],
             ),
             Case(
                 name="pinned pool that still matches stays pinned (attribute drift is sticky)",
@@ -542,7 +716,7 @@ class TestScheduleNodeSelector(unittest.TestCase):
                     )
                 ],
                 all_replicas=[_replica_with_pool("my-model", "cluster-a", pool="a")],
-                want=[Candidate(name="cluster-a", gateway_address="10.0.0.1", pool="a")],
+                want=[_cand(name="cluster-a", gateway_address="10.0.0.1", pool="a")],
             ),
             Case(
                 name="no matching pool anywhere drops the replica entirely",
@@ -558,7 +732,38 @@ class TestScheduleNodeSelector(unittest.TestCase):
                     _cluster("cluster-a", pools=[_pool("frontier", devices=[_nic_device(link_type="infiniband")])])
                 ],
                 all_replicas=[_replica("my-model", "cluster-a")],
-                want=[Candidate(name="cluster-a", gateway_address="10.0.0.1", pool="frontier")],
+                want=[_cand(name="cluster-a", gateway_address="10.0.0.1", pool="frontier")],
+            ),
+            Case(
+                name="dropping a non-matching replica frees its node for the refill",
+                # a/0 is pinned to a pool that still matches (retained). a/1 is
+                # pinned to a pool no longer published, so it's dropped and will
+                # be re-placed. The pool has just 2 nodes; both are notionally in
+                # use by a/0 and a/1. The refill must see a/1's node freeing up
+                # (it's being deleted) and re-place onto frontier at index 1.
+                # Regression: the ledger must not charge dropped replicas.
+                deployment=_deployment(replicas=2, requests=[_request(name="gpu", cel_exprs=[_MEM_141])]),
+                clusters=[_cluster("cluster-a", pools=[_pool("frontier", nodes=2)])],
+                all_replicas=[
+                    _replica_with_pool("my-model", "cluster-a", pool="frontier", index=0),
+                    _replica_with_pool("my-model", "cluster-a", pool="gone", index=1),
+                ],
+                want=[
+                    _cand(
+                        name="cluster-a",
+                        index=0,
+                        gateway_address="10.0.0.1",
+                        pool="frontier",
+                        device_requests=[_resolved()],
+                    ),
+                    _cand(
+                        name="cluster-a",
+                        index=1,
+                        gateway_address="10.0.0.1",
+                        pool="frontier",
+                        device_requests=[_resolved()],
+                    ),
+                ],
             ),
             Case(
                 name="device count is checked against the pinned pool, not a cluster-wide sum",
@@ -576,7 +781,7 @@ class TestScheduleNodeSelector(unittest.TestCase):
                 ],
                 all_replicas=[],
                 want=[
-                    Candidate(
+                    _cand(
                         name="cluster-a",
                         gateway_address="10.0.0.1",
                         pool="b",
