@@ -317,20 +317,97 @@ class Composer:
             },
         }
 
-    # Stubs — each is replaced by its real implementation in a later task, so
-    # the Composer is complete and importable from Task 1 onward and every
-    # task's tests run against a whole object (no AttributeError mid-pipeline).
-    def derive_cluster_phase(self, cluster_name: str) -> str:  # Task 4  # noqa: ARG002 (stub)
+    def derive_cluster_phase(self, cluster_name: str) -> str:
+        pvc_bound = self._observed_status(self._pvc_key(cluster_name)).get("phase") == "Bound"
+        job_status = self._observed_status(self._job_key(cluster_name))
+        if any(c.get("type") == "Failed" and c.get("status") == "True" for c in job_status.get("conditions", [])):
+            return PHASE_FAILED
+        if int(job_status.get("succeeded", 0) or 0) >= 1 and pvc_bound:
+            return PHASE_READY
+        if pvc_bound:
+            return PHASE_HYDRATING
         return PHASE_PENDING
 
-    def mark_ready_resources(self, per_cluster_phase) -> None:  # Task 4
-        pass
+    def _observed_status(self, key: str) -> dict:
+        """Remote resource status echoed back under Object.status.atProvider.manifest.status."""
+        observed = self.req.observed.resources.get(key)
+        if not observed:
+            return {}
+        d = resource.struct_to_dict(observed.resource)
+        return d.get("status", {}).get("atProvider", {}).get("manifest", {}).get("status", {}) or {}
 
-    def write_status(self, matched, per_cluster_phase) -> None:  # Task 4
-        pass
+    def mark_ready_resources(self, per_cluster_phase) -> None:
+        """Mark PVC + Job Objects ready once their cluster reaches Ready.
+        Must run AFTER resource.update() — update() resets the ready flag."""
+        for name, phase in per_cluster_phase:
+            if phase != PHASE_READY:
+                continue
+            self.rsp.desired.resources[self._pvc_key(name)].ready = fnv1.READY_TRUE
+            self.rsp.desired.resources[self._job_key(name)].ready = fnv1.READY_TRUE
 
-    def derive_conditions(self, matched, per_cluster_phase) -> None:  # Task 4
-        pass
+    def write_status(self, matched, per_cluster_phase) -> None:
+        ready_count = sum(1 for _, p in per_cluster_phase if p == PHASE_READY)
+        status = v1alpha1.Status(
+            summary=v1alpha1.Summary(ready=f"{ready_count}/{len(matched)}"),
+            clusters=[v1alpha1.Cluster(name=n, phase=p) for n, p in per_cluster_phase],
+        )
+        resource.update_status(self.rsp.desired.composite, status)
 
-    def emit_events(self, matched, per_cluster_phase) -> None:  # Task 4
-        pass
+    def derive_conditions(self, matched, per_cluster_phase) -> None:
+        if not matched:
+            response.set_conditions(
+                self.rsp,
+                resource.Condition(
+                    typ=CONDITION_TYPE_CLUSTERS_MATCHED,
+                    status="False",
+                    reason=CONDITION_REASON_NO_CLUSTERS,
+                ),
+                resource.Condition(
+                    typ=CONDITION_TYPE_ARTIFACT_READY,
+                    status="False",
+                    reason=CONDITION_REASON_NO_CLUSTERS,
+                ),
+            )
+            return
+        response.set_conditions(
+            self.rsp,
+            resource.Condition(
+                typ=CONDITION_TYPE_CLUSTERS_MATCHED,
+                status="True",
+                reason=CONDITION_REASON_MATCHED,
+            ),
+        )
+        ready_count = sum(1 for _, p in per_cluster_phase if p == PHASE_READY)
+        if ready_count == len(matched):
+            response.set_conditions(
+                self.rsp,
+                resource.Condition(typ=CONDITION_TYPE_ARTIFACT_READY, status="True", reason=CONDITION_REASON_STAGED),
+            )
+            self.rsp.desired.composite.ready = fnv1.READY_TRUE
+        elif ready_count > 0:
+            response.set_conditions(
+                self.rsp,
+                resource.Condition(typ=CONDITION_TYPE_ARTIFACT_READY, status="False", reason=CONDITION_REASON_PARTIAL),
+            )
+        else:
+            response.set_conditions(
+                self.rsp,
+                resource.Condition(
+                    typ=CONDITION_TYPE_ARTIFACT_READY, status="False", reason=CONDITION_REASON_HYDRATING
+                ),
+            )
+
+    def emit_events(self, matched, per_cluster_phase) -> None:
+        """One-time transition events only (keep `kubectl describe` quiet)."""
+        was_ready = resource.get_condition(self.req.observed.composite.resource, "Ready").status == "True"
+        now_ready = bool(matched) and all(p == PHASE_READY for _, p in per_cluster_phase)
+        observed_keys = self.req.observed.resources.keys()
+        first_compose = matched and all(self._pvc_key(c.metadata.name) not in observed_keys for c in matched)
+        if first_compose:
+            names = ", ".join(c.metadata.name for c in matched)
+            response.normal(
+                self.rsp,
+                f"Staging {self.xr.spec.source.huggingFace.repo} to {len(matched)} clusters: {names}",
+            )
+        if now_ready and not was_ready:
+            response.normal(self.rsp, f"Artifact staged on all {len(matched)} clusters")

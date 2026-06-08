@@ -128,3 +128,40 @@ class TestModelCache(unittest.IsolatedAsyncioTestCase):
         env = {e["name"]: e for e in container["env"]}
         self.assertEqual(env["HF_TOKEN"]["valueFrom"]["secretKeyRef"]["name"], "hf-token")
         self.assertEqual(env["HF_TOKEN"]["valueFrom"]["secretKeyRef"]["key"], "HF_TOKEN")
+
+    async def test_status_ready_when_job_complete_and_pvc_bound(self) -> None:
+        # Observed remote state: PVC Bound, Job succeeded.
+        observed = {"pvc-cluster-a": {"phase": "Bound"}, "hydrate-cluster-a": {"succeeded": 1}}
+        rsp = await self.runner.RunFunction(
+            _req(_cache_xr(), [_cluster_dict("cluster-a", "cluster-a-pc")], observed),
+            None,
+        )
+        status = json_format.MessageToDict(rsp.desired.composite.resource)["status"]
+        self.assertEqual(status["summary"]["ready"], "1/1")
+        self.assertEqual(status["clusters"][0]["phase"], "Ready")
+        self.assertEqual(rsp.desired.composite.ready, fnv1.READY_TRUE)
+        conds = {c.type: c for c in rsp.conditions}
+        self.assertEqual(conds["ArtifactReady"].status, fnv1.STATUS_CONDITION_TRUE)
+
+    async def test_status_hydrating_when_pvc_bound_job_running(self) -> None:
+        observed = {"pvc-cluster-a": {"phase": "Bound"}}
+        rsp = await self.runner.RunFunction(
+            _req(_cache_xr(), [_cluster_dict("cluster-a", "cluster-a-pc")], observed),
+            None,
+        )
+        status = json_format.MessageToDict(rsp.desired.composite.resource)["status"]
+        self.assertEqual(status["clusters"][0]["phase"], "Hydrating")
+        self.assertEqual(status["summary"]["ready"], "0/1")
+        self.assertNotEqual(rsp.desired.composite.ready, fnv1.READY_TRUE)
+
+    async def test_no_source_set_warns_and_composes_nothing(self) -> None:
+        # The XRD can't enforce "exactly one source" yet (#28), so an empty
+        # source must be handled gracefully, not crash the function.
+        xr = v1alpha1.ModelCache(
+            metadata=metav1.ObjectMeta(name="qwen", namespace="ml-team"),
+            spec=v1alpha1.Spec(source=v1alpha1.Source()),
+        )
+        rsp = await self.runner.RunFunction(_req(xr, [_cluster_dict("cluster-a", "cluster-a-pc")]), None)
+        self.assertEqual(len(rsp.desired.resources), 0)
+        conds = {c.type: c for c in rsp.conditions}
+        self.assertEqual(conds["SourceValid"].status, fnv1.STATUS_CONDITION_FALSE)
