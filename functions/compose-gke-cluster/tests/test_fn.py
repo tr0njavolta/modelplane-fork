@@ -105,6 +105,21 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                     }
                                 ),
                             ),
+                            "projectservice-filestore": fnv1.Resource(
+                                resource=resource.dict_to_struct(
+                                    {
+                                        "apiVersion": "cloudplatform.gcp.m.upbound.io/v1beta1",
+                                        "kind": "ProjectService",
+                                        "spec": {
+                                            "forProvider": {
+                                                "project": "my-gcp-project",
+                                                "service": "file.googleapis.com",
+                                                "disableOnDestroy": False,
+                                            },
+                                        },
+                                    }
+                                ),
+                            ),
                             "subnet": fnv1.Resource(
                                 resource=resource.dict_to_struct(
                                     {
@@ -431,6 +446,21 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                     }
                                 ),
                                 ready=fnv1.READY_TRUE,
+                            ),
+                            "projectservice-filestore": fnv1.Resource(
+                                resource=resource.dict_to_struct(
+                                    {
+                                        "apiVersion": "cloudplatform.gcp.m.upbound.io/v1beta1",
+                                        "kind": "ProjectService",
+                                        "spec": {
+                                            "forProvider": {
+                                                "project": "my-gcp-project",
+                                                "service": "file.googleapis.com",
+                                                "disableOnDestroy": False,
+                                            },
+                                        },
+                                    }
+                                ),
                             ),
                             "subnet": fnv1.Resource(
                                 resource=resource.dict_to_struct(

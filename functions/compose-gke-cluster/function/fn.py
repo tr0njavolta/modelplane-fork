@@ -15,6 +15,9 @@ from models.io.crossplane.m.helm.providerconfig import v1beta1 as helmpcv1beta1
 from models.io.crossplane.m.kubernetes.providerconfig import v1alpha1 as k8spcv1alpha1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 from models.io.upbound.m.gcp.cloudplatform.projectiammember import v1beta1 as iamv1beta1
+from models.io.upbound.m.gcp.cloudplatform.projectservice import (
+    v1beta1 as projectsvcv1beta1,
+)
 from models.io.upbound.m.gcp.cloudplatform.serviceaccount import v1beta1 as sav1beta1
 from models.io.upbound.m.gcp.cloudplatform.serviceaccountkey import (
     v1beta1 as sakeyv1beta1,
@@ -96,6 +99,7 @@ class Composer:
 
     def compose(self):
         self.compose_network()
+        self.compose_filestore_api()
         self.compose_subnet()
         self.compose_cluster()
         self.compose_node_pools()
@@ -113,6 +117,23 @@ class Composer:
                     forProvider=networkv1beta1.ForProvider(
                         project=self.xr.spec.project,
                         autoCreateSubnetworks=False,
+                    ),
+                ),
+            ),
+        )
+
+    def compose_filestore_api(self):
+        """Enable file.googleapis.com so the Filestore CSI addon can provision
+        RWX volumes (fresh projects have it disabled → PVCs Pending with
+        SERVICE_DISABLED)."""
+        resource.update(
+            self.rsp.desired.resources["projectservice-filestore"],
+            projectsvcv1beta1.ProjectService(
+                spec=projectsvcv1beta1.Spec(
+                    forProvider=projectsvcv1beta1.ForProvider(
+                        project=self.xr.spec.project,
+                        service="file.googleapis.com",
+                        disableOnDestroy=False,
                     ),
                 ),
             ),
@@ -395,6 +416,7 @@ class Composer:
         """Mark composed resources as ready based on their observed conditions."""
         managed_resources = [
             "network",
+            "projectservice-filestore",
             "subnet",
             "cluster",
             "service-account",
