@@ -75,23 +75,21 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 ],
                 "gateway": {"address": "10.0.0.1"},
                 "providerConfigRef": {"name": "cluster-a"},
-                "capacity": {
-                    "gpuPools": [
-                        {
-                            "name": "default",
-                            "nodes": 2,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                }
-                            ],
-                        }
-                    ]
-                },
+                "gpuPools": [
+                    {
+                        "name": "default",
+                        "nodes": 2,
+                        "devices": [
+                            {
+                                "name": "gpu",
+                                "claim": "DRA",
+                                "driver": "gpu.nvidia.com",
+                                "deviceClassName": "gpu.nvidia.com",
+                                "count": 1,
+                            }
+                        ],
+                    }
+                ],
             },
         }
 
@@ -252,23 +250,21 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                             ],
                             "gateway": {"address": "10.0.0.1"},
                             "providerConfigRef": {"name": "cluster-a"},
-                            "capacity": {
-                                "gpuPools": [
-                                    {
-                                        "name": "default",
-                                        "nodes": 0,
-                                        "devices": [
-                                            {
-                                                "name": "gpu",
-                                                "claim": "DRA",
-                                                "driver": "gpu.nvidia.com",
-                                                "deviceClassName": "gpu.nvidia.com",
-                                                "count": 1,
-                                            }
-                                        ],
-                                    }
-                                ]
-                            },
+                            "gpuPools": [
+                                {
+                                    "name": "default",
+                                    "nodes": 0,
+                                    "devices": [
+                                        {
+                                            "name": "gpu",
+                                            "claim": "DRA",
+                                            "driver": "gpu.nvidia.com",
+                                            "deviceClassName": "gpu.nvidia.com",
+                                            "count": 1,
+                                        }
+                                    ],
+                                }
+                            ],
                         },
                     }
                 )
@@ -478,23 +474,21 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     }
                 ],
                 "providerConfigRef": {"name": "cluster-a"},
-                "capacity": {
-                    "gpuPools": [
-                        {
-                            "name": "default",
-                            "nodes": 2,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                }
-                            ],
-                        }
-                    ]
-                },
+                "gpuPools": [
+                    {
+                        "name": "default",
+                        "nodes": 2,
+                        "devices": [
+                            {
+                                "name": "gpu",
+                                "claim": "DRA",
+                                "driver": "gpu.nvidia.com",
+                                "deviceClassName": "gpu.nvidia.com",
+                                "count": 1,
+                            }
+                        ],
+                    }
+                ],
             },
         }
         existing_replica = {
@@ -625,23 +619,21 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 ],
                 "gateway": {"address": "10.0.0.2"},
                 "providerConfigRef": {"name": "cluster-b"},
-                "capacity": {
-                    "gpuPools": [
-                        {
-                            "name": "default",
-                            "nodes": 2,
-                            "devices": [
-                                {
-                                    "name": "gpu",
-                                    "claim": "DRA",
-                                    "driver": "gpu.nvidia.com",
-                                    "deviceClassName": "gpu.nvidia.com",
-                                    "count": 1,
-                                }
-                            ],
-                        }
-                    ]
-                },
+                "gpuPools": [
+                    {
+                        "name": "default",
+                        "nodes": 2,
+                        "devices": [
+                            {
+                                "name": "gpu",
+                                "claim": "DRA",
+                                "driver": "gpu.nvidia.com",
+                                "deviceClassName": "gpu.nvidia.com",
+                                "count": 1,
+                            }
+                        ],
+                    }
+                ],
             },
         }
         req6 = fnv1.RunFunctionRequest(
@@ -932,7 +924,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 ],
                 "gateway": {"address": "10.0.0.1"},
                 "providerConfigRef": {"name": "cluster-a"},
-                "capacity": {"gpuPools": [{"name": "default", "nodes": 2}]},
+                "gpuPools": [{"name": "default", "nodes": 2}],
             },
         }
 

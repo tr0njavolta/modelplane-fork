@@ -8,7 +8,7 @@ GPU node pools reference InferenceClasses. For provisioned (GKE)
 clusters the class's provisioning block describes how to build the pool;
 for BYO (Existing) clusters the class is a pure description of pools
 that already exist. Either way, the class's resources block populates
-status.capacity.gpuPools so the scheduler can match models.
+status.gpuPools so the scheduler can match models.
 
 For provisioned clusters, a system node pool is injected automatically
 to host control-plane components (Envoy Gateway, Prometheus, etc.).
@@ -366,9 +366,7 @@ class Composer:
                 name=resource.child_name(self.xr.metadata.name, "cluster-kubeconfig"),
             ),
             namespace=_NAMESPACE_SYSTEM,
-            capacity=v1alpha1.CapacityModel(
-                gpuPools=gpu_pools,
-            ),
+            gpuPools=gpu_pools,
         )
         gateway_address = self.observed_gateway_address()
         if gateway_address:
@@ -624,7 +622,7 @@ class Composer:
         return None
 
     def gpu_pools(self):
-        """Derive status.capacity.gpuPools from each node pool's class.
+        """Derive status.gpuPools from each node pool's class.
 
         The class declares the node's devices (DRA-style); the pool declares how
         many nodes. We copy the class's devices verbatim so

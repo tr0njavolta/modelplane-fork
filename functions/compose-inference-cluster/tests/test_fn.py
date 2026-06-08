@@ -120,24 +120,22 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                     "name": "test-cluster-cluster-kubeconfig-d0f89",
                                 },
                                 "namespace": "modelplane-system",
-                                "capacity": {
-                                    "gpuPools": [
-                                        {
-                                            "name": "l4-pool",
-                                            "nodes": 4,
-                                            "devices": [
-                                                {
-                                                    "name": "gpu",
-                                                    "claim": "DRA",
-                                                    "driver": "gpu.nvidia.com",
-                                                    "deviceClassName": "gpu.nvidia.com",
-                                                    "count": 1,
-                                                    "capacity": {"memory": {"value": "24Gi"}},
-                                                },
-                                            ],
-                                        },
-                                    ],
-                                },
+                                "gpuPools": [
+                                    {
+                                        "name": "l4-pool",
+                                        "nodes": 4,
+                                        "devices": [
+                                            {
+                                                "name": "gpu",
+                                                "claim": "DRA",
+                                                "driver": "gpu.nvidia.com",
+                                                "deviceClassName": "gpu.nvidia.com",
+                                                "count": 1,
+                                                "capacity": {"memory": {"value": "24Gi"}},
+                                            },
+                                        ],
+                                    },
+                                ],
                             },
                         }
                     ),
@@ -250,24 +248,22 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                     "name": "test-cluster-cluster-kubeconfig-d0f89",
                                 },
                                 "namespace": "modelplane-system",
-                                "capacity": {
-                                    "gpuPools": [
-                                        {
-                                            "name": "l4-pool",
-                                            "nodes": 4,
-                                            "devices": [
-                                                {
-                                                    "name": "gpu",
-                                                    "claim": "DRA",
-                                                    "driver": "gpu.nvidia.com",
-                                                    "deviceClassName": "gpu.nvidia.com",
-                                                    "count": 1,
-                                                    "capacity": {"memory": {"value": "24Gi"}},
-                                                },
-                                            ],
-                                        },
-                                    ],
-                                },
+                                "gpuPools": [
+                                    {
+                                        "name": "l4-pool",
+                                        "nodes": 4,
+                                        "devices": [
+                                            {
+                                                "name": "gpu",
+                                                "claim": "DRA",
+                                                "driver": "gpu.nvidia.com",
+                                                "deviceClassName": "gpu.nvidia.com",
+                                                "count": 1,
+                                                "capacity": {"memory": {"value": "24Gi"}},
+                                            },
+                                        ],
+                                    },
+                                ],
                             },
                         }
                     ),
@@ -385,24 +381,22 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                     "name": "test-cluster-cluster-kubeconfig-d0f89",
                                 },
                                 "namespace": "modelplane-system",
-                                "capacity": {
-                                    "gpuPools": [
-                                        {
-                                            "name": "l4-pool",
-                                            "nodes": 4,
-                                            "devices": [
-                                                {
-                                                    "name": "gpu",
-                                                    "claim": "DRA",
-                                                    "driver": "gpu.nvidia.com",
-                                                    "deviceClassName": "gpu.nvidia.com",
-                                                    "count": 1,
-                                                    "capacity": {"memory": {"value": "24Gi"}},
-                                                },
-                                            ],
-                                        },
-                                    ],
-                                },
+                                "gpuPools": [
+                                    {
+                                        "name": "l4-pool",
+                                        "nodes": 4,
+                                        "devices": [
+                                            {
+                                                "name": "gpu",
+                                                "claim": "DRA",
+                                                "driver": "gpu.nvidia.com",
+                                                "deviceClassName": "gpu.nvidia.com",
+                                                "count": 1,
+                                                "capacity": {"memory": {"value": "24Gi"}},
+                                            },
+                                        ],
+                                    },
+                                ],
                                 "gateway": {"address": "34.55.100.10"},
                             },
                         }
@@ -545,24 +539,22 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                     "name": "test-cluster-cluster-kubeconfig-d0f89",
                                 },
                                 "namespace": "modelplane-system",
-                                "capacity": {
-                                    "gpuPools": [
-                                        {
-                                            "name": "l4-pool",
-                                            "nodes": 4,
-                                            "devices": [
-                                                {
-                                                    "name": "gpu",
-                                                    "claim": "DRA",
-                                                    "driver": "gpu.nvidia.com",
-                                                    "deviceClassName": "gpu.nvidia.com",
-                                                    "count": 1,
-                                                    "capacity": {"memory": {"value": "24Gi"}},
-                                                },
-                                            ],
-                                        },
-                                    ],
-                                },
+                                "gpuPools": [
+                                    {
+                                        "name": "l4-pool",
+                                        "nodes": 4,
+                                        "devices": [
+                                            {
+                                                "name": "gpu",
+                                                "claim": "DRA",
+                                                "driver": "gpu.nvidia.com",
+                                                "deviceClassName": "gpu.nvidia.com",
+                                                "count": 1,
+                                                "capacity": {"memory": {"value": "24Gi"}},
+                                            },
+                                        ],
+                                    },
+                                ],
                             },
                         },
                     ),
@@ -727,24 +719,22 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                     "name": "test-cluster-cluster-kubeconfig-d0f89",
                                 },
                                 "namespace": "modelplane-system",
-                                "capacity": {
-                                    "gpuPools": [
-                                        {
-                                            "name": "l4-pool",
-                                            "nodes": 4,
-                                            "devices": [
-                                                {
-                                                    "name": "gpu",
-                                                    "claim": "DRA",
-                                                    "driver": "gpu.nvidia.com",
-                                                    "deviceClassName": "gpu.nvidia.com",
-                                                    "count": 1,
-                                                    "capacity": {"memory": {"value": "24Gi"}},
-                                                }
-                                            ],
-                                        },
-                                    ],
-                                },
+                                "gpuPools": [
+                                    {
+                                        "name": "l4-pool",
+                                        "nodes": 4,
+                                        "devices": [
+                                            {
+                                                "name": "gpu",
+                                                "claim": "DRA",
+                                                "driver": "gpu.nvidia.com",
+                                                "deviceClassName": "gpu.nvidia.com",
+                                                "count": 1,
+                                                "capacity": {"memory": {"value": "24Gi"}},
+                                            }
+                                        ],
+                                    },
+                                ],
                             },
                         }
                     ),

@@ -243,7 +243,7 @@ def _match_pool(pool, requests: "list[_CompiledRequest] | None") -> "list[Device
 
 def _pool_by_name(cluster: icv1alpha1.InferenceCluster, pool_name: str):
     """The cluster's published pool with this name, or None."""
-    for pool in cluster.status.capacity.gpuPools or []:
+    for pool in cluster.status.gpuPools or []:
         if (pool.name or "") == pool_name:
             return pool
     return None
@@ -325,7 +325,7 @@ def _build_ledger(
     for cluster in clusters:
         name = cluster.metadata.name
         pools_by_cluster[name] = []
-        for pool in cluster.status.capacity.gpuPools or []:
+        for pool in cluster.status.gpuPools or []:
             free[(name, pool.name or "")] = int(pool.nodes or 0)
             pools_by_cluster[name].append(pool.name or "")
 
@@ -465,7 +465,7 @@ def _eligible_pool(
     order, which is deterministic. Returns (pool_name, resolved_requests) or
     None if no pool on the cluster is eligible.
     """
-    for pool in cluster.status.capacity.gpuPools or []:
+    for pool in cluster.status.gpuPools or []:
         name = pool.name or ""
         if ledger.available(cluster.metadata.name, name) < shape.nodes_per_replica:
             continue

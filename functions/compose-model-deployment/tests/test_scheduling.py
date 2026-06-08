@@ -154,7 +154,7 @@ def _cluster(
             conditions=conditions,
             gateway=icv1alpha1.Gateway(address=gateway_address) if gateway_address else icv1alpha1.Gateway(),
             providerConfigRef=icv1alpha1.ProviderConfigRef(name=name),
-            capacity=icv1alpha1.CapacityModel(gpuPools=[icv1alpha1.GpuPool(**p) for p in pools]),
+            gpuPools=[icv1alpha1.GpuPool(**p) for p in pools],
         ),
     )
 

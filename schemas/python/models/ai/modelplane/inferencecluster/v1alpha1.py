@@ -159,6 +159,22 @@ class Spec(BaseModel):
     """
 
 
+class Condition(BaseModel):
+    lastTransitionTime: AwareDatetime
+    message: str | None = None
+    observedGeneration: int | None = None
+    reason: str
+    status: str
+    type: str
+
+
+class Gateway(BaseModel):
+    address: str | None = None
+    """
+    External IP of the inference gateway on the remote cluster. Used by ModelDeployment for unified endpoint routing.
+    """
+
+
 class Attributes(BaseModel):
     bool_: bool | None = Field(None, alias='bool')
     int_: int | None = Field(None, alias='int')
@@ -195,26 +211,6 @@ class GpuPool(BaseModel):
     """
 
 
-class CapacityModel(BaseModel):
-    gpuPools: list[GpuPool] | None = Field(None, max_length=8)
-
-
-class Condition(BaseModel):
-    lastTransitionTime: AwareDatetime
-    message: str | None = None
-    observedGeneration: int | None = None
-    reason: str
-    status: str
-    type: str
-
-
-class Gateway(BaseModel):
-    address: str | None = None
-    """
-    External IP of the inference gateway on the remote cluster. Used by ModelDeployment for unified endpoint routing.
-    """
-
-
 class ProviderConfigRef(BaseModel):
     name: str | None = None
     """
@@ -223,15 +219,15 @@ class ProviderConfigRef(BaseModel):
 
 
 class Status(BaseModel):
-    capacity: CapacityModel | None = None
-    """
-    Declared capacity derived from the referenced classes and the per-pool node counts.
-    """
     conditions: list[Condition] | None = None
     """
     Conditions of the resource.
     """
     gateway: Gateway | None = None
+    gpuPools: list[GpuPool] | None = Field(None, max_length=8)
+    """
+    Schedulable GPU node pools on this cluster, derived from the referenced classes and the per-pool node counts. ModelDeployment scheduling matches against these.
+    """
     namespace: str | None = None
     """
     Namespace where the internal XRs (cluster, backend) were created.
