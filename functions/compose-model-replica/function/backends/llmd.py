@@ -124,8 +124,7 @@ class LLMDBackend:
                 "name": "engine",
                 "image": engine.image,
                 # GPUs PER POD (one tensor-parallel shard runs per pod in the
-                # gang). Bound via DRA when the replica has device requests, else
-                # via the nvidia.com/gpu device-plugin limit.
+                # gang), bound via DRA when the replica has device requests.
                 "resources": base.engine_resources(replica),
                 # vLLM tensor parallelism needs a large /dev/shm.
                 "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}, *cache_volume_mounts],
@@ -228,7 +227,7 @@ class LLMDBackend:
         }
 
         out = {
-            "model-serving": base.wrap_object(pc, leader_worker_set),
+            "model-serving": base.wrap_object(pc, leader_worker_set, cel_query=base.AVAILABLE_CEL),
             "model-service": base.wrap_object(pc, service),
             "model-route": base.wrap_object(pc, http_route),
         }

@@ -43,8 +43,8 @@ class NativeBackend:
             "image": engine.image,
             "args": args,
             "ports": [{"containerPort": _ENGINE_PORT}],
-            # GPUs bind via DRA when the replica has device requests, else via the
-            # nvidia.com/gpu device-plugin limit.
+            # GPUs bind via DRA: when the replica has device requests the engine
+            # references the pod claim; with none it claims nothing.
             "resources": base.engine_resources(replica),
             # vLLM tensor parallelism needs a large /dev/shm.
             "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}, *cache_volume_mounts],
@@ -120,7 +120,7 @@ class NativeBackend:
         }
 
         out = {
-            "model-serving": base.wrap_object(pc, deployment),
+            "model-serving": base.wrap_object(pc, deployment, cel_query=base.AVAILABLE_CEL),
             "model-service": base.wrap_object(pc, service),
             "model-route": base.wrap_object(pc, http_route),
         }

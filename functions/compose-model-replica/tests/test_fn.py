@@ -109,7 +109,14 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                         "kind": "ClusterProviderConfig",
                                         "name": "cluster-a-pc",
                                     },
-                                    "readiness": {"policy": "DeriveFromObject"},
+                                    "readiness": {
+                                        "policy": "DeriveFromCelQuery",
+                                        "celQuery": (
+                                            "has(object.status.conditions) && "
+                                            "object.status.conditions.exists("
+                                            'c, c.type == "Available" && c.status == "True")'
+                                        ),
+                                    },
                                     "forProvider": {
                                         "manifest": {
                                             "apiVersion": "apps/v1",
@@ -138,9 +145,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                                 "image": "vllm/vllm-openai:latest",
                                                                 "args": ["--model=Qwen/Qwen3-0.6B"],
                                                                 "ports": [{"containerPort": 8000}],
-                                                                "resources": {
-                                                                    "limits": {"nvidia.com/gpu": "1"},
-                                                                },
+                                                                "resources": {},
                                                                 "volumeMounts": [
                                                                     {"name": "dshm", "mountPath": "/dev/shm"},
                                                                 ],
@@ -173,7 +178,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                         "kind": "ClusterProviderConfig",
                                         "name": "cluster-a-pc",
                                     },
-                                    "readiness": {"policy": "DeriveFromObject"},
+                                    "readiness": {"policy": "SuccessfulCreate"},
                                     "forProvider": {
                                         "manifest": {
                                             "apiVersion": "v1",
@@ -202,7 +207,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                         "kind": "ClusterProviderConfig",
                                         "name": "cluster-a-pc",
                                     },
-                                    "readiness": {"policy": "DeriveFromObject"},
+                                    "readiness": {"policy": "SuccessfulCreate"},
                                     "forProvider": {
                                         "manifest": {
                                             "apiVersion": "gateway.networking.k8s.io/v1",

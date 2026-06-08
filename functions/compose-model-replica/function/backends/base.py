@@ -97,22 +97,43 @@ _DRA_API_VERSION = "resource.k8s.io/v1"
 # reference individual requests within the claim.
 _POD_CLAIM_NAME = "devices"
 
+# CEL readiness query matching workloads whose all-replicas-available signal is
+# an Available=True condition. Both a Deployment and a LeaderWorkerSet publish
+# this condition when their desired replicas are up; neither publishes a Ready
+# condition, so provider-kubernetes' DeriveFromObject policy (which only checks
+# a Ready condition) can never mark them ready. The has() guard keeps the query
+# false (not erroring) before the workload first writes status.conditions.
+AVAILABLE_CEL = (
+    'has(object.status.conditions) && object.status.conditions.exists(c, c.type == "Available" && c.status == "True")'
+)
 
-def wrap_object(provider_config: str, manifest: dict, *, readiness: str = "DeriveFromObject") -> k8sobjv1alpha1.Object:
+
+def wrap_object(
+    provider_config: str,
+    manifest: dict,
+    *,
+    cel_query: str | None = None,
+) -> k8sobjv1alpha1.Object:
     """Wrap a raw manifest in a provider-kubernetes Object for a remote cluster.
 
-    readiness defaults to DeriveFromObject (the workload resources report their
-    own status). Pass SuccessfulCreate for resources that have no runtime status
-    to derive from - a ResourceClaimTemplate is a template, never reconciled, so
-    DeriveFromObject would leave its Object permanently not-ready.
+    Readiness defaults to SuccessfulCreate: the Object is ready once applied.
+    That's right for resources with no meaningful runtime readiness (a Service,
+    an HTTPRoute, or a ResourceClaimTemplate that's never reconciled). Pass
+    cel_query for a workload whose readiness must reflect its observed status -
+    it selects the DeriveFromCelQuery policy with that query (see AVAILABLE_CEL).
     """
+    readiness = (
+        k8sobjv1alpha1.Readiness(policy="DeriveFromCelQuery", celQuery=cel_query)
+        if cel_query is not None
+        else k8sobjv1alpha1.Readiness(policy="SuccessfulCreate")
+    )
     return k8sobjv1alpha1.Object(
         spec=k8sobjv1alpha1.Spec(
             providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
                 kind="ClusterProviderConfig",
                 name=provider_config,
             ),
-            readiness=k8sobjv1alpha1.Readiness(policy=readiness),
+            readiness=readiness,
             forProvider=k8sobjv1alpha1.ForProvider(manifest=manifest),
         ),
     )
@@ -177,11 +198,10 @@ def claim_template_name(replica: v1alpha1.ModelReplica) -> str:
 def engine_resources(replica: v1alpha1.ModelReplica) -> dict:
     """Container resources for the engine.
 
-    When the replica carries DRA device requests, GPUs are bound via a
-    ResourceClaim, so the container references the whole claim and sets no
-    device-plugin limit. When it has none (the deployment had no nodeSelector),
-    fall back to the legacy nvidia.com/gpu limit derived from the topology so the
-    engine still gets GPUs.
+    GPUs bind only via DRA. When the replica carries device requests the engine
+    references the pod-level claim backed by the replica's ResourceClaimTemplate;
+    it never sets a device-plugin extended-resource limit. With no device requests
+    the engine claims nothing - GPU binding is DRA's job, not the device plugin's.
 
     We emit one container claim entry referencing the pod-level claim, with no
     `request` field, so the entire claim (all of its device requests) is made
@@ -190,21 +210,19 @@ def engine_resources(replica: v1alpha1.ModelReplica) -> dict:
     uses every device anyway, so referencing the whole claim is both correct and
     simplest.
     """
-    requests = _device_requests(replica)
-    if not requests:
-        return {"limits": {"nvidia.com/gpu": str(replica.spec.workers.topology.tensor)}}
+    if not _device_requests(replica):
+        return {}
     return {"claims": [{"name": _POD_CLAIM_NAME}]}
 
 
 def attach_device_claims(pod_spec: dict, replica: v1alpha1.ModelReplica) -> None:
     """Wire a pod spec to the per-replica ResourceClaimTemplate.
 
-    Adds a pod-level resourceClaims entry pointing at the template. No-op when
-    there are no device requests (GPU binding then falls back to the device-plugin
-    limit set by engine_resources). Every pod that shares this spec - a native
-    Deployment pod, or an llm-d LWS leader and worker - gets its own
-    template-backed claim, which is why we use a ResourceClaimTemplate rather than
-    a shared ResourceClaim.
+    Adds a pod-level resourceClaims entry pointing at the template. No-op when the
+    replica has no device requests (then there's no ResourceClaimTemplate to
+    reference). Every pod that shares this spec - a native Deployment pod, or an
+    llm-d LWS leader and worker - gets its own template-backed claim, which is why
+    we use a ResourceClaimTemplate rather than a shared ResourceClaim.
     """
     if not _device_requests(replica):
         return
@@ -239,8 +257,6 @@ def resource_claim_template(replica: v1alpha1.ModelReplica, provider_config: str
             "metadata": {"name": claim_template_name(replica), "namespace": REMOTE_NAMESPACE},
             "spec": {"spec": {"devices": {"requests": device_requests}}},
         },
-        # A ResourceClaimTemplate has no runtime status; it's ready once applied.
-        readiness="SuccessfulCreate",
     )
 
 

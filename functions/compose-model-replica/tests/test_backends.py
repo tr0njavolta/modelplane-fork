@@ -131,7 +131,7 @@ _NATIVE_WANT = {
                             "image": "vllm/vllm-openai:latest",
                             "args": ["--model=Qwen/Qwen3-0.6B"],
                             "ports": [{"containerPort": 8000}],
-                            "resources": {"limits": {"nvidia.com/gpu": "2"}},
+                            "resources": {},
                             "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}],
                             "readinessProbe": {
                                 "httpGet": {"path": "/health", "port": 8000},
@@ -187,7 +187,7 @@ def _engine(command, *, serving, args=None):
     c = {
         "name": "engine",
         "image": "vllm/vllm-openai:latest",
-        "resources": {"limits": {"nvidia.com/gpu": "8"}},
+        "resources": {},
         "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}],
         "command": command,
     }
@@ -410,6 +410,34 @@ class TestBackendManifests(unittest.TestCase):
         b = native.NativeBackend().build(_replica("dep-clusterB"), _CLUSTER)
         self.assertEqual(self._names(a), {"dep-clusterA"})
         self.assertEqual(self._names(b), {"dep-clusterB"})
+
+    def test_workload_readiness_policies(self):
+        # The serving workload (Deployment or LWS) reports readiness from its
+        # Available condition via a CEL query: provider-kubernetes'
+        # DeriveFromObject only checks a Ready condition, which neither kind
+        # publishes, so it would never report ready. The Service and HTTPRoute
+        # have no runtime readiness worth waiting on, so they're ready on create.
+        for name, backend, replica in (
+            ("native", native.NativeBackend(), _replica(tensor=2)),
+            ("llm-d", llmd.LLMDBackend(), _replica(tensor=8, pipeline=2, args=["--model=m"])),
+        ):
+            with self.subTest(name):
+                out = backend.build(replica, _CLUSTER)
+                serving = out["model-serving"].spec.readiness
+                self.assertEqual(serving.policy, "DeriveFromCelQuery")
+                self.assertEqual(serving.celQuery, base.AVAILABLE_CEL)
+                self.assertEqual(out["model-service"].spec.readiness.policy, "SuccessfulCreate")
+                self.assertEqual(out["model-route"].spec.readiness.policy, "SuccessfulCreate")
+
+    def test_no_device_requests_claims_nothing(self):
+        # DRA-only: a replica without device requests gets no GPU. The engine
+        # claims nothing (no nvidia.com/gpu device-plugin limit), the pod
+        # references no ResourceClaimTemplate, and none is composed.
+        out = native.NativeBackend().build(_replica(tensor=2), _CLUSTER)
+        pod = out["model-serving"].spec.forProvider.manifest["spec"]["template"]["spec"]
+        self.assertEqual(pod["containers"][0]["resources"], {})
+        self.assertNotIn("resourceClaims", pod)
+        self.assertNotIn("resource-claim", out)
 
     def test_multiple_device_requests_single_container_claim(self):
         # resources.claims is a list-map keyed on name alone, so N device
