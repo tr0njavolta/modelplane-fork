@@ -586,7 +586,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                             "forProvider": {
                                                 "project": "my-gcp-project",
                                                 "role": "roles/container.admin",
-                                                "member": "serviceAccount:test-sa@my-gcp-project.iam.gserviceaccount.com",  # noqa: E501
+                                                "member": "serviceAccount:test-sa@my-gcp-project.iam.gserviceaccount.com",
                                             },
                                         },
                                     }
