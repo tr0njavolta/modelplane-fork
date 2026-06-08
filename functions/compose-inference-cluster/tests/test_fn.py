@@ -907,6 +907,147 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         )
         want6.requirements.resources["class-gpu-l4"].CopyFrom(class_selector)
 
+        # --- Case 7: EKS cluster ready - kubeconfig observed on the EKSCluster
+        # status. The function wires the ClusterProviderConfig, composes the
+        # ServingStack backend, and emits the Usage that blocks EKSCluster
+        # deletion until the ServingStack is gone. ---
+        req7 = fnv1.RunFunctionRequest()
+        req7.CopyFrom(req4)
+        req7.observed.resources["eks-cluster"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                        "kind": "EKSCluster",
+                        "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
+                        "spec": {
+                            "region": "us-west-2",
+                            "nodePools": [
+                                {
+                                    "name": "l4-pool",
+                                    "role": "GPU",
+                                    "instanceType": "g6.xlarge",
+                                    "nodeCount": 2,
+                                },
+                            ],
+                        },
+                        "status": {
+                            "conditions": [
+                                {
+                                    "type": "Ready",
+                                    "status": "True",
+                                    "reason": "Available",
+                                    "lastTransitionTime": "2024-01-01T00:00:00Z",
+                                },
+                            ],
+                            "secrets": [
+                                {
+                                    "type": "Kubeconfig",
+                                    "name": "test-cluster-kubeconfig-abcde",
+                                    "key": "kubeconfig",
+                                },
+                            ],
+                        },
+                    }
+                ),
+            ),
+        )
+
+        want7 = fnv1.RunFunctionResponse()
+        want7.CopyFrom(want4)
+        want7.desired.resources["eks-cluster"].ready = fnv1.READY_TRUE
+        want7.desired.resources["cluster-provider-config-kubernetes"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                        "kind": "ClusterProviderConfig",
+                        "metadata": {"name": "test-cluster-cluster-kubeconfig-d0f89"},
+                        "spec": {
+                            "credentials": {
+                                "source": "Secret",
+                                "secretRef": {
+                                    "namespace": "modelplane-system",
+                                    "name": "test-cluster-kubeconfig-abcde",
+                                    "key": "kubeconfig",
+                                },
+                            },
+                        },
+                    }
+                ),
+                ready=fnv1.READY_TRUE,
+            ),
+        )
+        want7.desired.resources["serving-stack"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                        "kind": "ServingStack",
+                        "metadata": {
+                            "name": "test-cluster-serving-stack-fd00b",
+                            "namespace": "modelplane-system",
+                        },
+                        "spec": {
+                            "secrets": [
+                                {
+                                    "type": "Kubeconfig",
+                                    "name": "test-cluster-kubeconfig-abcde",
+                                    "key": "kubeconfig",
+                                },
+                            ],
+                        },
+                    }
+                ),
+            ),
+        )
+        want7.desired.resources["usage-eks-by-backend"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "protection.crossplane.io/v1beta1",
+                        "kind": "Usage",
+                        "metadata": {"namespace": "modelplane-system"},
+                        "spec": {
+                            "of": {
+                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                                "kind": "EKSCluster",
+                                "resourceSelector": {"matchControllerRef": True},
+                            },
+                            "by": {
+                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                                "kind": "ServingStack",
+                                "resourceSelector": {"matchControllerRef": True},
+                            },
+                            "replayDeletion": True,
+                        },
+                    }
+                ),
+                ready=fnv1.READY_TRUE,
+            ),
+        )
+        del want7.conditions[:]
+        want7.conditions.extend(
+            [
+                fnv1.Condition(
+                    type="ClusterReady",
+                    status=fnv1.STATUS_CONDITION_TRUE,
+                    reason="ClusterRunning",
+                ),
+                fnv1.Condition(
+                    type="BackendReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="Installing",
+                ),
+            ]
+        )
+        want7.results.append(
+            fnv1.Result(
+                severity=fnv1.SEVERITY_NORMAL,
+                message="EKS cluster ready, composing backend",
+            )
+        )
+
         cases = [
             Case(name="existing cluster with secrets composes backend and CPC", req=req1, want=want1),
             Case(name="GKE cluster first pass composes GKECluster XR only", req=req2, want=want2),
@@ -914,6 +1055,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             Case(name="EKS cluster first pass composes EKSCluster XR only", req=req4, want=want4),
             Case(name="EKS cluster not ready re-emits existing CPC unchanged", req=req5, want=want5),
             Case(name="GKE cluster ready composes CPC, backend, usage, and RWX StorageClass", req=req6, want=want6),
+            Case(name="EKS cluster ready composes ServingStack and Usage", req=req7, want=want7),
         ]
 
         for case in cases:

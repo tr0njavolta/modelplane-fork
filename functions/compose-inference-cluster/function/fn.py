@@ -216,7 +216,7 @@ class Composer:
         backend_secrets = self.resolve_eks_backend_secrets(eks_ready, backend_exists)
         if backend_secrets or backend_exists:
             if backend_secrets:
-                self.compose_kserve_backend(backend_secrets)
+                self.compose_serving_stack(backend_secrets)
             self.compose_eks_usage()
 
         if eks_ready:
@@ -534,7 +534,7 @@ class Composer:
                     ),
                     by=usagev1beta1.By(
                         apiVersion="infrastructure.modelplane.ai/v1alpha1",
-                        kind="KServeBackend",
+                        kind="ServingStack",
                         resourceSelector=usagev1beta1.ResourceSelector(matchControllerRef=True),
                     ),
                     replayDeletion=True,
