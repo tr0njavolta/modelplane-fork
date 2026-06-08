@@ -1,8 +1,4 @@
 # Kimi K2 multi-node deployment with a managed cache.
-#
-# NOTE: this example targets the design in design/design.md. The composition
-# function (compose-model-cache) lands in a follow-up MR; applying this YAML
-# before that ships will fail with "no composition found for kind ModelCache."
 apiVersion: modelplane.ai/v1alpha1
 kind: ModelCache
 metadata:

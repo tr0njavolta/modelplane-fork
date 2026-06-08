@@ -135,9 +135,16 @@ Multi-node deployments require a [ModelCache](#modelcache) referenced via
 
 A ModelCache stages a model artifact on workload-cluster storage as a
 first-class resource. Modelplane composes a ReadWriteMany PVC on each matched
-cluster and hydrates it from the configured source. ModelDeployments reference
-a cache via `spec.modelCacheRef.name`; the cache's PVC is mounted into every
-worker pod automatically.
+cluster and hydrates it once with a Job that fetches the artifact from the
+configured source. ModelDeployments reference a cache via
+`spec.modelCacheRef.name`; the cache's PVC is mounted at `/mnt/models`
+read-write into every serving pod automatically, shared across the LWS gang of
+a multi-node worker. The engine reads weights locally from the mount instead of
+fetching them at boot.
+
+Without a cache, the engine fetches the model at pod startup, so the
+ModelDeployment must supply any required credentials (e.g. `HF_TOKEN` via the
+engine container's `env`).
 
 Each cache has:
 
@@ -154,6 +161,23 @@ args should reference this path (e.g. `--model=/mnt/models` for vLLM).
 
 ModelCache is required for multi-node deployments and optional for single-node
 cold-start optimization.
+
+### Storage prerequisites
+
+The cache PVC needs an RWX StorageClass on the workload cluster. What the
+platform admin must set up depends on the cloud:
+
+- **GKE:** auto-provisioned. Modelplane composes the `modelplane-rwx` Filestore
+  StorageClass and enables `file.googleapis.com`. Nothing for the admin to do.
+- **EKS:** bring-your-own for v0.1. On the workload cluster the admin must
+  install the `aws-efs-csi-driver` EKS add-on (with an IRSA role bound to
+  `AmazonEFSCSIDriverPolicy`); create an EFS file system with a mount target in
+  each node subnet and a security group allowing inbound NFS (2049) from the
+  node security group; and create a StorageClass named `modelplane-rwx-efs`
+  with `provisioner: efs.csi.aws.com`, `provisioningMode: efs-ap`, and
+  `fileSystemId: <fs-id>`. Set `eks.cache.storageClassName` if the admin's
+  class has a different name. EFS is elastic, so the cache's `sizeGiB` is
+  informational on EKS — the PVC API still requires a size, but EFS ignores it.
 
 ## ModelReplica
 
