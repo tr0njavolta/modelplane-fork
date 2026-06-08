@@ -278,3 +278,60 @@ class TestDynamoStub(unittest.TestCase):
     def test_build_raises(self):
         with self.assertRaises(NotImplementedError):
             dynamo.DynamoBackend().build(_replica(tensor=8, pipeline=2), _CLUSTER)
+
+
+class TestCacheMounts(unittest.TestCase):
+    def _replica(self, *, cache=None, args=None, command=None):
+        spec = v1alpha1.SpecModel(
+            clusterName="c",
+            workers=v1alpha1.Workers(
+                topology=v1alpha1.Topology(tensor=1, pipeline=1),
+                template=v1alpha1.Template(
+                    spec=v1alpha1.Spec(
+                        containers=[v1alpha1.Container(name="engine", image="img", args=args or [], command=command)]
+                    )
+                ),
+            ),
+        )
+        if cache:
+            spec.modelCacheRef = v1alpha1.ModelCacheRef(name=cache)
+        return v1alpha1.ModelReplica(metadata=metav1.ObjectMeta(namespace="ml-team"), spec=spec)
+
+    @staticmethod
+    def _engine(replica):
+        return replica.spec.workers.template.spec.containers[0]
+
+    def test_no_cache_no_mounts(self):
+        volumes, mounts = base.cache_mounts(self._replica())
+        self.assertEqual((volumes, mounts), ([], []))
+
+    def test_cache_adds_volume_and_mount(self):
+        volumes, mounts = base.cache_mounts(self._replica(cache="qwen"))
+        self.assertEqual(
+            volumes,
+            [{"name": "model-cache", "persistentVolumeClaim": {"claimName": "modelcache-ml-team-qwen"}}],
+        )
+        self.assertEqual(mounts, [{"name": "model-cache", "mountPath": "/mnt/models"}])
+
+    def test_apply_cache_injects_model_when_absent(self):
+        r = self._replica(cache="qwen")
+        args = base.apply_cache_args(["--trust-remote-code"], r, self._engine(r))
+        self.assertIn("--model=/mnt/models", args)
+
+    def test_apply_cache_respects_user_model(self):
+        r = self._replica(cache="qwen", args=["--model=/mnt/models"])
+        args = base.apply_cache_args(["--model=/mnt/models"], r, self._engine(r))
+        self.assertEqual(args.count("--model=/mnt/models"), 1)
+
+    def test_apply_cache_noop_without_cache(self):
+        r = self._replica()
+        args = base.apply_cache_args(["--trust-remote-code"], r, self._engine(r))
+        self.assertEqual(args, ["--trust-remote-code"])
+
+    def test_apply_cache_skips_when_engine_has_command(self):
+        # Non-vLLM engine (e.g. SGLang) owns its args via a command and uses
+        # --model-path, not --model: we must not inject --model.
+        r = self._replica(cache="qwen", args=["--model-path=/mnt/models"], command=["/bin/sh", "-c", "..."])
+        args = base.apply_cache_args(["--model-path=/mnt/models"], r, self._engine(r))
+        self.assertNotIn("--model=/mnt/models", args)
+        self.assertEqual(args, ["--model-path=/mnt/models"])
