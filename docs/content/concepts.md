@@ -1,7 +1,7 @@
 ---
 title: Concepts 
 weight: 20
-description: Get started with Crossplane.
+description: Learn about Modelplane concepts.
 ---
 
 
