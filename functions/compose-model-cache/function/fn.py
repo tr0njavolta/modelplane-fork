@@ -5,9 +5,6 @@ InferenceCluster via a one-shot hydration Job. Pods that reference the
 cache (ModelDeployment.spec.modelCacheRef -> ModelReplica) mount the PVC
 at /mnt/models, so weights are downloaded once per cluster and read N
 times by every pod in an LWS gang.
-
-v0.1 surface (locked to the merged XRD): source `huggingFace` only,
-Modelplane-managed RWX PVC, replication to all matching clusters.
 """
 
 import grpc
@@ -19,7 +16,6 @@ from models.ai.modelplane.modelcache import v1alpha1
 from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 
 # Condition types/reasons for the ModelCache XR.
-CONDITION_TYPE_SOURCE_VALID = "SourceValid"
 CONDITION_TYPE_CLUSTERS_MATCHED = "ClustersMatched"
 CONDITION_TYPE_ARTIFACT_READY = "ArtifactReady"
 
@@ -28,8 +24,13 @@ CONDITION_REASON_NO_CLUSTERS = "NoClusters"
 CONDITION_REASON_HYDRATING = "Hydrating"
 CONDITION_REASON_STAGED = "Staged"
 CONDITION_REASON_PARTIAL = "Partial"
-CONDITION_REASON_NO_SOURCE = "NoSource"
-CONDITION_REASON_SUPPORTED = "Supported"
+CONDITION_REASON_FAILED = "Failed"
+
+# CEL readiness queries: each wrapped Object derives its own Ready condition
+# from the remote resource's status (DeriveFromCelQuery), so mark_ready_resources
+# can lean on the Object Ready condition instead of re-parsing status.
+_PVC_READY_CEL = 'object.status.phase == "Bound"'
+_JOB_READY_CEL = 'object.status.conditions.exists(c, c.type == "Complete" && c.status == "True")'
 
 # Per-cluster phases reported in status.clusters[].phase.
 PHASE_PENDING = "Pending"
@@ -37,26 +38,21 @@ PHASE_HYDRATING = "Hydrating"
 PHASE_READY = "Ready"
 PHASE_FAILED = "Failed"
 
-# Namespace on the workload cluster where the PVC + Job land. This MUST match
-# the namespace the serving pods land in (native.py/llmd.py `_REMOTE_NAMESPACE`,
-# also "default") — a pod can only mount a PVC in its own namespace. The two
-# functions hardcode this independently (no shared lib); they are a contract and
-# must change together. If serving moves to per-deployment namespaces (negz's
-# musing on #99), the cache PVC namespace moves with it.
+# Namespace on the workload cluster where the PVC + Job land. Must match the
+# namespace the serving pods mount from (native.py/llmd.py `_REMOTE_NAMESPACE`,
+# also "default"): a pod can only mount a PVC in its own namespace. The two
+# functions set this independently, so they are a contract — change together.
 REMOTE_NS = "default"
 
-# The cluster-presence label every InferenceCluster carries; the matcher
-# always includes it (match_labels={} is dropped by protobuf). This mirrors
-# compose-model-deployment's cluster matching exactly. negz's PR #51 removes
-# this workaround (bare ResourceSelector once `up` ships Crossplane >=2.2.1 and
-# function-sdk-python grows a require_all helper) — when it lands, migrate this
-# matcher alongside compose-model-deployment's, not separately.
+# The cluster-presence label every InferenceCluster carries; the matcher always
+# includes it (an empty match_labels is dropped by protobuf). Mirrors
+# compose-model-deployment's cluster matching.
 LABEL_KEY_CLUSTER = "modelplane.ai/cluster"
 LABEL_VALUE_CLUSTER = "true"
 
 # Hydration container. python:3.11-slim has pip; we install huggingface_hub
 # at runtime. A Modelplane-owned image with the tool preinstalled is a
-# follow-up.
+# follow-up (#115).
 HYDRATION_IMAGE = "python:3.11-slim"
 HYDRATION_MOUNT = "/mnt/artifact"
 
@@ -85,15 +81,13 @@ def _storage_class(cluster: icv1alpha1.InferenceCluster) -> str:
 
 
 # A completion marker written only after a fully successful download. The Job
-# skips when the marker is present, so a re-run (eviction, replay, backoff)
-# doesn't redownload a complete cache. Checking for the marker — not for a
-# non-empty directory — is what makes a re-run SAFE: a download interrupted
-# mid-pull leaves files but no marker, so the retry resumes (`hf download` is
-# resumable) instead of seeing a non-empty dir and falsely concluding "already
-# hydrated", which would serve truncated weights. Using the marker also
-# sidesteps the Filestore `lost+found` directory that broke a bare emptiness
-# check (it sits at the mount root of ext4-backed PVCs). Supersedes PR #78's
-# emptiness check, which had the partial-download false-skip bug.
+# A completion marker, checked instead of directory emptiness. A re-run
+# (eviction, replay, backoff) skips when the marker is present. Checking the
+# marker — not a non-empty dir — keeps re-runs safe: an interrupted download
+# leaves files but no marker, so the retry resumes (`hf download` is resumable)
+# instead of concluding "already hydrated" and serving truncated weights. It
+# also avoids the Filestore `lost+found` dir at the ext4 mount root tripping an
+# emptiness check.
 _HYDRATED_MARKER = f"{HYDRATION_MOUNT}/.modelplane-hydrated"
 _SKIP_IF_HYDRATED = f"if [ -f {_HYDRATED_MARKER} ]; then echo 'already hydrated, skipping'; exit 0; fi; "
 
@@ -101,8 +95,7 @@ _SKIP_IF_HYDRATED = f"if [ -f {_HYDRATED_MARKER} ]; then echo 'already hydrated,
 def _hf_hydration(hf) -> tuple[list[dict], str]:
     """Return (env, shell command) for a HuggingFace source.
 
-    huggingface-hub 1.x deprecated `huggingface-cli` (and dropped the `[cli]`
-    extra), so the Job previously died at install. Use `hf download` directly.
+    Uses `hf download` (huggingface_hub 1.x; `huggingface-cli` is removed).
     The marker is touched only after a successful download (set -e aborts the
     chain on failure, so a failed pull never marks the cache complete).
     """
@@ -152,27 +145,6 @@ class Composer:
         self.clusters: list[icv1alpha1.InferenceCluster] = []
 
     def compose(self):
-        # The XRD can't yet enforce "exactly one source" (no CEL union rule —
-        # issue #28), so a ModelCache with an empty/unknown source reaches us.
-        # Fail fast with a clear condition rather than NPE in _hf_hydration.
-        # This is also the seam where future sources (s3/http/inline) plug in:
-        # extend _source_supported() and dispatch in _job_manifest().
-        if not self._source_supported():
-            response.set_conditions(
-                self.rsp,
-                resource.Condition(
-                    typ=CONDITION_TYPE_SOURCE_VALID,
-                    status="False",
-                    reason=CONDITION_REASON_NO_SOURCE,
-                    message="spec.source.huggingFace is required (the only v0.1 source)",
-                ),
-            )
-            response.warning(self.rsp, "ModelCache has no supported source set")
-            return
-        response.set_conditions(
-            self.rsp,
-            resource.Condition(typ=CONDITION_TYPE_SOURCE_VALID, status="True", reason=CONDITION_REASON_SUPPORTED),
-        )
         if not self.resolve_inputs():
             return
         matched = self.match_clusters()
@@ -183,13 +155,6 @@ class Composer:
         self.write_status(matched, per_cluster_phase)
         self.derive_conditions(matched, per_cluster_phase)
         self.emit_events(matched, per_cluster_phase)
-
-    def _source_supported(self) -> bool:
-        """True when the cache declares a source this version implements.
-
-        v0.1 implements only huggingFace. New sources extend this and the
-        dispatch in _job_manifest()."""
-        return self.xr.spec.source.huggingFace is not None
 
     def resolve_inputs(self) -> bool:
         """Require all InferenceClusters matching the (optional) selector.
@@ -232,15 +197,15 @@ class Composer:
         name = cluster.metadata.name
         resource.update(
             self.rsp.desired.resources[self._pvc_key(name)],
-            self._wrap_remote(pc, self._pvc_manifest(cluster)),
+            self._wrap_remote(pc, self._pvc_manifest(cluster), _PVC_READY_CEL),
         )
         resource.update(
             self.rsp.desired.resources[self._job_key(name)],
-            self._wrap_remote(pc, self._job_manifest()),
+            self._wrap_remote(pc, self._job_manifest(), _JOB_READY_CEL),
         )
 
     def _pvc_manifest(self, cluster: icv1alpha1.InferenceCluster) -> dict:
-        hf = self.xr.spec.source.huggingFace
+        hf = self.xr.spec.huggingFace
         size_gib = int(hf.sizeGiB)  # protobuf delivers XRD ints as float
         return {
             "apiVersion": "v1",
@@ -253,27 +218,27 @@ class Composer:
             },
         }
 
-    def _wrap_remote(self, provider_config: str, manifest: dict) -> k8sobjv1alpha1.Object:
+    def _wrap_remote(self, provider_config: str, manifest: dict, cel_query: str) -> k8sobjv1alpha1.Object:
         return k8sobjv1alpha1.Object(
             spec=k8sobjv1alpha1.Spec(
                 providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
                     kind="ClusterProviderConfig",
                     name=provider_config,
                 ),
-                readiness=k8sobjv1alpha1.Readiness(policy="DeriveFromObject"),
+                readiness=k8sobjv1alpha1.Readiness(policy="DeriveFromCelQuery", celQuery=cel_query),
                 forProvider=k8sobjv1alpha1.ForProvider(manifest=manifest),
             ),
         )
 
     # --- naming (must stay in sync with backends/base.cache_pvc_name) ---
-    # Namespace-qualified so caches of the same name from different Modelplane
-    # namespaces don't collide in the workload cluster's `default` namespace
-    # (Nic's recurring #99 collision concern).
+    # Both sides share resource.child_name("modelcache", namespace, name).
+    # Namespace-qualified so same-named caches from different Modelplane
+    # namespaces don't collide in the workload cluster's `default` namespace.
     def _pvc_name(self) -> str:
-        return f"modelcache-{self.xr.metadata.namespace}-{self.xr.metadata.name}"[:63]
+        return resource.child_name("modelcache", self.xr.metadata.namespace, self.xr.metadata.name)
 
     def _job_name(self) -> str:
-        return f"{self._pvc_name()}-hydrate"[:63]
+        return resource.child_name("modelcache", self.xr.metadata.namespace, self.xr.metadata.name, "hydrate")
 
     def _pvc_key(self, cluster_name: str) -> str:
         return f"pvc-{cluster_name}"
@@ -285,7 +250,7 @@ class Composer:
         return {"modelplane.ai/modelcache": self.xr.metadata.name}
 
     def _job_manifest(self) -> dict:
-        env, command = _hf_hydration(self.xr.spec.source.huggingFace)
+        env, command = _hf_hydration(self.xr.spec.huggingFace)
         return {
             "apiVersion": "batch/v1",
             "kind": "Job",
@@ -333,17 +298,22 @@ class Composer:
         observed = self.req.observed.resources.get(key)
         if not observed:
             return {}
-        d = resource.struct_to_dict(observed.resource)
-        return d.get("status", {}).get("atProvider", {}).get("manifest", {}).get("status", {}) or {}
+        obj = k8sobjv1alpha1.Object.model_validate(resource.struct_to_dict(observed.resource))
+        manifest = (obj.status.atProvider.manifest if obj.status and obj.status.atProvider else None) or {}
+        return manifest.get("status", {}) or {}
 
     def mark_ready_resources(self, per_cluster_phase) -> None:
-        """Mark PVC + Job Objects ready once their cluster reaches Ready.
-        Runs after compose_cluster_resources() so the desired entries exist."""
-        for name, phase in per_cluster_phase:
-            if phase != PHASE_READY:
-                continue
-            self.rsp.desired.resources[self._pvc_key(name)].ready = fnv1.READY_TRUE
-            self.rsp.desired.resources[self._job_key(name)].ready = fnv1.READY_TRUE
+        """Mark PVC + Job Objects ready from each Object's own Ready condition.
+
+        The Objects carry a DeriveFromCelQuery readiness policy, so the wrapped
+        PVC/Job's Ready condition (PVC Bound, Job Complete) is reflected onto the
+        observed Object. Runs after compose_cluster_resources() so the desired
+        entries exist."""
+        for name, _ in per_cluster_phase:
+            for key in (self._pvc_key(name), self._job_key(name)):
+                observed = self.req.observed.resources.get(key)
+                if observed and resource.get_condition(observed.resource, "Ready").status == "True":
+                    self.rsp.desired.resources[key].ready = fnv1.READY_TRUE
 
     def write_status(self, matched, per_cluster_phase) -> None:
         ready_count = sum(1 for _, p in per_cluster_phase if p == PHASE_READY)
@@ -378,7 +348,12 @@ class Composer:
             ),
         )
         ready_count = sum(1 for _, p in per_cluster_phase if p == PHASE_READY)
-        if ready_count == len(matched):
+        if any(p == PHASE_FAILED for _, p in per_cluster_phase):
+            response.set_conditions(
+                self.rsp,
+                resource.Condition(typ=CONDITION_TYPE_ARTIFACT_READY, status="False", reason=CONDITION_REASON_FAILED),
+            )
+        elif ready_count == len(matched):
             response.set_conditions(
                 self.rsp,
                 resource.Condition(typ=CONDITION_TYPE_ARTIFACT_READY, status="True", reason=CONDITION_REASON_STAGED),
@@ -407,7 +382,7 @@ class Composer:
             names = ", ".join(c.metadata.name for c in matched)
             response.normal(
                 self.rsp,
-                f"Staging {self.xr.spec.source.huggingFace.repo} to {len(matched)} clusters: {names}",
+                f"Staging {self.xr.spec.huggingFace.repo} to {len(matched)} clusters: {names}",
             )
         if now_ready and not was_ready:
             response.normal(self.rsp, f"Artifact staged on all {len(matched)} clusters")

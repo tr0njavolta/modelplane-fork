@@ -309,7 +309,7 @@ class TestCacheMounts(unittest.TestCase):
         volumes, mounts = base.cache_mounts(self._replica(cache="qwen"))
         self.assertEqual(
             volumes,
-            [{"name": "model-cache", "persistentVolumeClaim": {"claimName": "modelcache-ml-team-qwen"}}],
+            [{"name": "model-cache", "persistentVolumeClaim": {"claimName": "modelcache-ml-team-qwen-17db2"}}],
         )
         self.assertEqual(mounts, [{"name": "model-cache", "mountPath": "/mnt/models"}])
 

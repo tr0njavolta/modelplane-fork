@@ -153,8 +153,9 @@ Each cache has:
   today). Future types (`dragonfly` for P2P distribution, `oci` for NIM-style
   bundled artifacts) will declare different fields under their own
   discriminator.
-- An optional **clusterSelector** to scope replication. If omitted, the cache
-  replicates to every InferenceCluster.
+- An optional **clusterSelector** to scope replication. Omitting
+  `spec.clusterSelector` stages the cache on every matched cluster; setting
+  `matchLabels` restricts it to clusters carrying those labels.
 
 The cache mounts at `/mnt/models` on every consuming pod; engine container
 args should reference this path (e.g. `--model=/mnt/models` for vLLM).
@@ -178,6 +179,8 @@ platform admin must set up depends on the cloud:
   `fileSystemId: <fs-id>`. Set `eks.cache.storageClassName` if the admin's
   class has a different name. EFS is elastic, so the cache's `sizeGiB` is
   informational on EKS — the PVC API still requires a size, but EFS ignores it.
+  Auto-provisioning EFS is tracked in
+  [#114](https://github.com/modelplaneai/modelplane/issues/114).
 
 ## ModelReplica
 

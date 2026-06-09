@@ -5,16 +5,16 @@ metadata:
   name: kimi-k2
   namespace: ml-team
 spec:
-  source:
-    huggingFace:
-      repo: moonshotai/Kimi-K2-Instruct
-      # Secret holding an HF token (Kimi K2 is a gated repo). The Secret
-      # must exist on every matched workload cluster.
-      authSecret:
-        name: hf-token
-      # ~1 TB of weights plus headroom. Modelplane sizes the underlying
-      # storage to absorb this (Filestore Enterprise multishare on GKE).
-      sizeGiB: 1500
+  source: HuggingFace
+  huggingFace:
+    repo: moonshotai/Kimi-K2-Instruct
+    # Secret holding an HF token (Kimi K2 is a gated repo). The Secret
+    # must exist on every matched workload cluster.
+    authSecret:
+      name: hf-token
+    # ~1 TB of weights plus headroom. Modelplane sizes the underlying
+    # storage to absorb this (Filestore Enterprise multishare on GKE).
+    sizeGiB: 1500
 ---
 apiVersion: modelplane.ai/v1alpha1
 kind: ModelDeployment

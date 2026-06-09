@@ -8,11 +8,16 @@ metadata:
   name: qwen
   namespace: ml-team
 spec:
-  source:
-    huggingFace:
-      repo: Qwen/Qwen3-0.6B
-      # Qwen3-0.6B is a public repo, so no authSecret is needed.
-      sizeGiB: 20
+  source: HuggingFace
+  huggingFace:
+    repo: Qwen/Qwen3-0.6B
+    # Qwen3-0.6B is a public repo, so no authSecret is needed.
+    sizeGiB: 20
+  # Optional: stage only on clusters matching these labels. Omit to stage on
+  # every matched cluster.
+  # clusterSelector:
+  #   matchLabels:
+  #     modelplane.ai/tier: frontier
 ---
 apiVersion: modelplane.ai/v1alpha1
 kind: ModelDeployment

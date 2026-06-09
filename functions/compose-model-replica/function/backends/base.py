@@ -7,6 +7,7 @@ provider-helm Releases; the dispatcher (fn.py) applies them to the response.
 
 from typing import Protocol
 
+from crossplane.function import resource
 from models.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from models.ai.modelplane.modelreplica import v1alpha1
 from models.io.crossplane.m.helm.release import v1beta1 as helmv1beta1
@@ -28,16 +29,14 @@ CACHE_MOUNT_PATH = "/mnt/models"
 # Volume name shared by the PVC volume and its mount.
 _CACHE_VOLUME = "model-cache"
 
-# PVC name prefix. MUST stay in sync with compose-model-cache's _pvc_name()
-# (functions/compose-model-cache/function/fn.py) — both derive the workload
-# PVC name as f"modelcache-{namespace}-{name}"[:63]. The namespace qualifier
-# keeps caches of the same name from different Modelplane namespaces from
-# colliding in the workload cluster's `default` namespace.
-PVC_NAME_PREFIX = "modelcache-"
-
 
 def cache_pvc_name(namespace: str, cache_name: str) -> str:
-    return f"{PVC_NAME_PREFIX}{namespace}-{cache_name}"[:63]
+    # MUST stay in sync with compose-model-cache's _pvc_name()
+    # (functions/compose-model-cache/function/fn.py) — both sides share
+    # resource.child_name("modelcache", namespace, name). The namespace
+    # qualifier keeps caches of the same name from different Modelplane
+    # namespaces from colliding in the workload cluster's `default` namespace.
+    return resource.child_name("modelcache", namespace, cache_name)
 
 
 def cache_mounts(replica: v1alpha1.ModelReplica) -> tuple[list[dict], list[dict]]:
