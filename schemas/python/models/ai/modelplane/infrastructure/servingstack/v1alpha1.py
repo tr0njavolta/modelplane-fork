@@ -99,6 +99,14 @@ class Versions(BaseModel):
     """
     LeaderWorkerSet chart version.
     """
+    nodeFeatureDiscovery: constr(min_length=1, max_length=32) | None = '0.18.3'
+    """
+    Node Feature Discovery chart version. NFD labels GPU nodes so the NVIDIA DRA driver targets its kubelet plugin to them.
+    """
+    nvidiaDraDriver: constr(min_length=1, max_length=32) | None = '0.4.0'
+    """
+    NVIDIA DRA driver chart version. Publishes GPUs as DRA ResourceSlices and the gpu.nvidia.com DeviceClass that ModelReplica ResourceClaims bind through.
+    """
     prometheus: constr(min_length=1, max_length=32) | None = '72.6.2'
     """
     kube-prometheus-stack chart version.

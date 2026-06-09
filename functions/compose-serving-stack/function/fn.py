@@ -210,6 +210,8 @@ class Composer:
         self.compose_envoy_gateway()
         self.compose_prometheus()
         self.compose_leader_worker_set()
+        self.compose_node_feature_discovery()
+        self.compose_dra_driver()
         self.compose_gateway()
         self.write_status()
         self.mark_readiness()
@@ -482,6 +484,54 @@ class Composer:
             ),
         )
 
+    def compose_node_feature_discovery(self):
+        """Compose Node Feature Discovery. Gated on ProviderConfigs being
+        observed. NFD labels GPU nodes (e.g. feature.node.kubernetes.io/pci-10de
+        for NVIDIA) so the DRA driver can target its kubelet plugin to them."""
+        pc_observed = self.provider_configs_observed()
+        if not (pc_observed or "node-feature-discovery" in self.req.observed.resources):
+            return
+
+        v = self.xr.spec.versions or v1alpha1.Versions()
+        resource.update(
+            self.rsp.desired.resources["node-feature-discovery"],
+            _helm_release(
+                chart="node-feature-discovery",
+                repo="oci://registry.k8s.io/nfd/charts",
+                version=v.nodeFeatureDiscovery,
+                namespace="node-feature-discovery",
+                provider_config=_pc_name(self.xr),
+            ),
+        )
+
+    def compose_dra_driver(self):
+        """Compose the NVIDIA DRA driver. Gated on ProviderConfigs being
+        observed. The driver publishes each GPU node's devices as DRA
+        ResourceSlices and registers the gpu.nvidia.com DeviceClass that
+        ModelReplica ResourceClaims request through, replacing the legacy
+        device plugin. GPU allocation is opt-in (gpuResourcesEnabledOverride);
+        ComputeDomains (Multi-Node NVLink) is disabled - we don't use it, and
+        it would pull in extra prerequisites (GPU Feature Discovery)."""
+        pc_observed = self.provider_configs_observed()
+        if not (pc_observed or "dra-driver" in self.req.observed.resources):
+            return
+
+        v = self.xr.spec.versions or v1alpha1.Versions()
+        resource.update(
+            self.rsp.desired.resources["dra-driver"],
+            _helm_release(
+                chart="dra-driver-nvidia-gpu",
+                repo="oci://registry.k8s.io/dra-driver-nvidia/charts",
+                version=v.nvidiaDraDriver,
+                namespace="dra-driver-nvidia-gpu",
+                provider_config=_pc_name(self.xr),
+                values={
+                    "gpuResourcesEnabledOverride": True,
+                    "resources": {"computeDomains": {"enabled": False}},
+                },
+            ),
+        )
+
     def compose_gateway(self):
         """Compose the GatewayClass and Gateway on the remote cluster. Gated on
         ProviderConfigs being observed."""
@@ -597,6 +647,8 @@ class Composer:
             "envoy-gateway",
             "prometheus",
             "leader-worker-set",
+            "node-feature-discovery",
+            "dra-driver",
             "gateway-namespace",
             "gateway-class",
             "gateway",
