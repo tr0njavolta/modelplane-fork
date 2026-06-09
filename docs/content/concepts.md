@@ -181,11 +181,11 @@ engine container's `env`).
 
 Each cache has:
 
-- A **source**: a discriminated union of where to fetch the artifact, with
-  source-specific fields (e.g. `huggingFace.repo` and `huggingFace.sizeGiB`
-  today). Future types (`dragonfly` for P2P distribution, `oci` for NIM-style
-  bundled artifacts) will declare different fields under their own
-  discriminator.
+- A **source**: a required `source` enum naming the kind, with the matching
+  source object set alongside it (e.g. `source: HuggingFace` selects
+  `spec.huggingFace`, which carries `repo` and `sizeGiB`). `HuggingFace` is the
+  only value today; future sources add an enum value and a sibling object
+  (`Dragonfly` for P2P distribution, `OCI` for NIM-style bundled artifacts).
 - An optional **clusterSelector** to scope replication. Omitting
   `spec.clusterSelector` stages the cache on every matched cluster; setting
   `matchLabels` restricts it to clusters carrying those labels.
