@@ -195,8 +195,16 @@ class Composer:
             ),
         )
 
-        # Per-resource readiness. Only the workload (model-serving) gates XR
-        # readiness; the Service/HTTPRoute (and llm-d's pool/EPP) Objects derive
-        # their own readiness via provider-kubernetes DeriveFromObject.
-        if MODEL_RESOURCE_KEY in self.rsp.desired.resources and serving_ready:
-            self.rsp.desired.resources[MODEL_RESOURCE_KEY].ready = fnv1.READY_TRUE
+        # Per-resource readiness. Crossplane gates the XR's Ready on every
+        # composed resource being ready, so the function must mark each one - a
+        # composed resource isn't ready just because provider-kubernetes set its
+        # Object's own Ready condition. Only the workload (model-serving) gates on
+        # the model actually serving; the Service, HTTPRoute, and
+        # ResourceClaimTemplate have no runtime readiness to wait on (they exist
+        # or they don't), so they're ready as soon as they're composed.
+        for key in self.rsp.desired.resources:
+            if key == MODEL_RESOURCE_KEY:
+                if serving_ready:
+                    self.rsp.desired.resources[key].ready = fnv1.READY_TRUE
+            else:
+                self.rsp.desired.resources[key].ready = fnv1.READY_TRUE

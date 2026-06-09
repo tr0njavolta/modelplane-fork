@@ -196,6 +196,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                 },
                             }
                         ),
+                        ready=fnv1.READY_TRUE,
                     ),
                     "model-route": fnv1.Resource(
                         resource=resource.dict_to_struct(
@@ -255,6 +256,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                 },
                             }
                         ),
+                        ready=fnv1.READY_TRUE,
                     ),
                 },
             ),
