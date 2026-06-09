@@ -22,7 +22,10 @@ class Eks(BaseModel):
     """
     ModelCache configuration for this cluster.
     """
-    kubernetesVersion: str | None = '1.31'
+    kubernetesVersion: str | None = '1.36'
+    """
+    EKS cluster Kubernetes version. Defaults to a version where Dynamic Resource Allocation (how GPUs bind to pods) is generally available.
+    """
     region: constr(min_length=1, max_length=32)
     """
     AWS region for the cluster (e.g. us-west-2).

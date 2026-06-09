@@ -116,9 +116,9 @@ class Spec(BaseModel):
     """
     Configures how Crossplane will reconcile this composite resource
     """
-    kubernetesVersion: constr(min_length=1, max_length=16) | None = '1.31'
+    kubernetesVersion: constr(min_length=1, max_length=16) | None = '1.36'
     """
-    EKS cluster Kubernetes version. Must be a version EKS currently supports.
+    EKS cluster Kubernetes version. Must be a version EKS currently supports. Defaults to a version where Dynamic Resource Allocation (how GPUs bind to pods) is generally available.
     """
     networking: Networking | None = None
     """

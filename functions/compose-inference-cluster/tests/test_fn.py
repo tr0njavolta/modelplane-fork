@@ -571,7 +571,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                 },
                                 "spec": {
                                     "region": "us-west-2",
-                                    "kubernetesVersion": "1.31",
+                                    "kubernetesVersion": "1.36",
                                     "nodePools": [
                                         {
                                             "name": "l4-pool",

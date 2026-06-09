@@ -201,7 +201,7 @@ def _eks_cluster() -> dict:
         "spec": {
             "forProvider": {
                 "region": "us-west-2",
-                "version": "1.31",
+                "version": "1.36",
                 "roleArnSelector": {
                     "matchControllerRef": True,
                     "matchLabels": {"modelplane.ai/iam-role": "cluster"},
