@@ -215,18 +215,36 @@ def engine_resources() -> dict:
 # nvidia.com/gpu resource requests, which DRA pods don't make.
 _GPU_TOLERATION = {"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
 
+# Node label identifying the pool a node belongs to. compose-eks-cluster and
+# compose-gke-cluster stamp it on every node group they provision; the scheduler
+# pins a replica to a pool by name, and we steer the pod onto that pool by
+# selecting this label. For BYO (Existing) clusters Modelplane doesn't provision
+# the nodes, so the operator must label their pool's nodes with this key for the
+# pod to schedule (documented on the InferenceClass XRD).
+_LABEL_POOL = "modelplane.ai/pool"
 
-def attach_device_claims(pod_spec: dict, replica: v1alpha1.ModelReplica) -> None:
-    """Wire a pod spec to claim its GPUs via DRA.
 
-    Adds a pod-level resourceClaims entry pointing at the per-replica
-    ResourceClaimTemplate, and a toleration for the GPU node taint so the pod can
-    land on a GPU node. Every replica carries device requests (the XRD requires
-    them), so every serving pod claims through DRA. Every pod that shares this
-    spec - a native Deployment pod, or an llm-d LWS leader and worker - gets its
-    own template-backed claim, which is why we use a ResourceClaimTemplate rather
-    than a shared ResourceClaim.
+def place_pod(pod_spec: dict, replica: v1alpha1.ModelReplica) -> None:
+    """Constrain a serving pod to the placement the scheduler chose.
+
+    Pins the pod to its scheduled node pool, wires it to claim its GPUs via DRA,
+    and tolerates the GPU node taint. Every pod that shares this spec - a native
+    Deployment pod, or an llm-d LWS leader and worker - is placed identically.
+
+    The pool nodeSelector is what makes the scheduler's pool choice real: the
+    control-plane scheduler matched a pool and stamped spec.nodePoolName, but DRA
+    would otherwise place the pod on any pool whose devices satisfy the claim.
+    Without the pin the control plane's per-pool capacity accounting drifts from
+    where pods actually run, and a claim: Synthetic device (matched for placement
+    but never claimed) isn't enforced at all, since pool selection is its only
+    enforcement. nodePoolName is XRD-required, so it's always set.
+
+    The DRA claim references the per-replica ResourceClaimTemplate; every replica
+    carries device requests (the XRD requires them), so every serving pod claims
+    through DRA. A template-backed claim (not a shared ResourceClaim) gives each
+    pod in a gang its own claim.
     """
+    pod_spec["nodeSelector"] = {_LABEL_POOL: replica.spec.nodePoolName}
     pod_spec["resourceClaims"] = [{"name": _POD_CLAIM_NAME, "resourceClaimTemplateName": claim_template_name(replica)}]
     pod_spec.setdefault("tolerations", []).append(_GPU_TOLERATION)
 

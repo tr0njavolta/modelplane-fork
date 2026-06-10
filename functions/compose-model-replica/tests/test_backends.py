@@ -144,6 +144,7 @@ _NATIVE_WANT = {
                         }
                     ],
                     "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
+                    "nodeSelector": {"modelplane.ai/pool": "frontier"},
                     "resourceClaims": [
                         {"name": "devices", "resourceClaimTemplateName": resource.child_name("r", "devices")}
                     ],
@@ -164,6 +165,7 @@ _NATIVE_WANT = {
 
 
 def _lws(leader_container, worker_container):
+    node_selector = {"modelplane.ai/pool": "frontier"}
     claims = [{"name": "devices", "resourceClaimTemplateName": resource.child_name("r", "devices")}]
     tolerations = [{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}]
     return {
@@ -179,6 +181,7 @@ def _lws(leader_container, worker_container):
                     "spec": {
                         "containers": [leader_container],
                         "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
+                        "nodeSelector": node_selector,
                         "resourceClaims": claims,
                         "tolerations": tolerations,
                     },
@@ -188,6 +191,7 @@ def _lws(leader_container, worker_container):
                     "spec": {
                         "containers": [worker_container],
                         "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
+                        "nodeSelector": node_selector,
                         "resourceClaims": claims,
                         "tolerations": tolerations,
                     },

@@ -150,9 +150,9 @@ class LLMDBackend:
                 "containers": [c],
                 "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}, *cache_volumes],
             }
-            # Both the leader and worker pods reference the per-replica
-            # ResourceClaimTemplate (no-op without DRA).
-            base.attach_device_claims(spec, replica)
+            # Both the leader and worker pods pin to the scheduled pool and
+            # claim GPUs via DRA.
+            base.place_pod(spec, replica)
             if pull_secrets:
                 spec["imagePullSecrets"] = pull_secrets
             return spec

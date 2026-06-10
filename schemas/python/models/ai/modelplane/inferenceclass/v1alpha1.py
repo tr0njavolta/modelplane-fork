@@ -145,6 +145,7 @@ class Spec(BaseModel):
     devices: list[Device] = Field(..., max_length=16, min_length=1)
     """
     Devices a node of this class has, following DRA's model (KEP-4381). Each entry describes one kind of device with a count, mirroring what a DRA driver publishes in a ResourceSlice (one entry per kind rather than per physical device). ModelDeployment.nodeSelector matches against these, and claim: DRA devices are emitted as requests in a DRA ResourceClaim when scheduling a worker to this pool.
+    A scheduled worker pod is pinned to its pool with a nodeSelector on the modelplane.ai/pool node label. Modelplane-provisioned (EKS, GKE) pools carry this label automatically. On a BYO (Existing) cluster Modelplane doesn't provision the nodes, so the operator must label the pool's nodes modelplane.ai/pool=<nodePools[].name> themselves, or worker pods for this class will stay Pending.
     """
     provisioning: Provisioning | None = None
     """

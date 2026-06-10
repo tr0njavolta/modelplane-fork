@@ -63,8 +63,8 @@ class NativeBackend:
             "containers": [container],
             "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}, *cache_volumes],
         }
-        # Reference the per-replica ResourceClaimTemplate (no-op without DRA).
-        base.attach_device_claims(pod_spec, replica)
+        # Pin to the scheduled pool and claim GPUs via DRA.
+        base.place_pod(pod_spec, replica)
         tmpl = replica.spec.workers.template
         if tmpl.spec.imagePullSecrets:
             pod_spec["imagePullSecrets"] = [s.model_dump(exclude_none=True) for s in tmpl.spec.imagePullSecrets]

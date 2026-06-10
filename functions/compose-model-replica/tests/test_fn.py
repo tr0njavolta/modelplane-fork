@@ -174,6 +174,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                         "volumes": [
                                                             {"name": "dshm", "emptyDir": {"medium": "Memory"}},
                                                         ],
+                                                        "nodeSelector": {"modelplane.ai/pool": "frontier"},
                                                         "resourceClaims": [
                                                             {
                                                                 "name": "devices",

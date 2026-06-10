@@ -115,6 +115,14 @@ spec:
                   device). ModelDeployment.nodeSelector matches against these,
                   and claim: DRA devices are emitted as requests in a DRA
                   ResourceClaim when scheduling a worker to this pool.
+
+                  A scheduled worker pod is pinned to its pool with a
+                  nodeSelector on the modelplane.ai/pool node label.
+                  Modelplane-provisioned (EKS, GKE) pools carry this label
+                  automatically. On a BYO (Existing) cluster Modelplane doesn't
+                  provision the nodes, so the operator must label the pool's
+                  nodes modelplane.ai/pool=<nodePools[].name> themselves, or
+                  worker pods for this class will stay Pending.
                 minItems: 1
                 maxItems: 16
                 x-kubernetes-list-type: map
