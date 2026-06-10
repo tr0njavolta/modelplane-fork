@@ -190,7 +190,7 @@ def _device_satisfies(device, programs: list[cel.Program]) -> bool:
     return all(p.matches(raw) for p in programs)
 
 
-def _match_pool(pool, requests: list[_CompiledRequest]) -> "list[DeviceRequest] | None":
+def _match_pool(pool, requests: list[_CompiledRequest]) -> list[DeviceRequest] | None:
     """Match a pool against the device requests.
 
     Returns the resolved claim: DRA DeviceRequests when the pool satisfies every
@@ -454,7 +454,7 @@ def _eligible_pool(
     shape: Shape,
     requests: list[_CompiledRequest],
     ledger: _Ledger,
-) -> "tuple[str, list[DeviceRequest]] | None":
+) -> tuple[str, list[DeviceRequest]] | None:
     """Pick the first pool on a cluster that can host one more replica.
 
     A pool is eligible when it satisfies the nodeSelector requests AND has at
@@ -535,7 +535,7 @@ def _pick_cluster(
     load: dict[str, int],
     ledger: _Ledger,
     requests: list[_CompiledRequest],
-) -> "tuple[icv1alpha1.InferenceCluster, str, list[DeviceRequest]] | None":
+) -> tuple[icv1alpha1.InferenceCluster, str, list[DeviceRequest]] | None:
     """Pick the eligible cluster hosting the fewest of this deployment's replicas.
 
     Eligible means Ready, with a nodeSelector-matching pool that has free
