@@ -43,10 +43,12 @@ spec:
                 maxLength: 32
               kubernetesVersion:
                 type: string
-                default: "1.31"
+                default: "1.36"
                 description: >-
                   EKS cluster Kubernetes version. Must be a version EKS
-                  currently supports.
+                  currently supports. Defaults to a version where Dynamic
+                  Resource Allocation (how GPUs bind to pods) is generally
+                  available.
                 minLength: 1
                 maxLength: 16
               networking:

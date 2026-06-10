@@ -306,6 +306,48 @@ _LEADER_WORKER_SET = {
     },
 }
 
+_NODE_FEATURE_DISCOVERY = {
+    "apiVersion": "helm.m.crossplane.io/v1beta1",
+    "kind": "Release",
+    "spec": {
+        "forProvider": {
+            "chart": {
+                "name": "node-feature-discovery",
+                "repository": "oci://registry.k8s.io/nfd/charts",
+                "version": "0.18.3",
+            },
+            "namespace": "node-feature-discovery",
+        },
+        "providerConfigRef": {
+            "kind": "ProviderConfig",
+            "name": _PC_NAME,
+        },
+    },
+}
+
+_DRA_DRIVER = {
+    "apiVersion": "helm.m.crossplane.io/v1beta1",
+    "kind": "Release",
+    "spec": {
+        "forProvider": {
+            "chart": {
+                "name": "dra-driver-nvidia-gpu",
+                "repository": "oci://registry.k8s.io/dra-driver-nvidia/charts",
+                "version": "0.4.0",
+            },
+            "namespace": "dra-driver-nvidia-gpu",
+            "values": {
+                "gpuResourcesEnabledOverride": True,
+                "resources": {"computeDomains": {"enabled": False}},
+            },
+        },
+        "providerConfigRef": {
+            "kind": "ProviderConfig",
+            "name": _PC_NAME,
+        },
+    },
+}
+
 _PROMETHEUS = {
     "apiVersion": "helm.m.crossplane.io/v1beta1",
     "kind": "Release",
@@ -488,6 +530,12 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     "leader-worker-set": fnv1.Resource(
                         resource=resource.dict_to_struct(_LEADER_WORKER_SET),
                     ),
+                    "node-feature-discovery": fnv1.Resource(
+                        resource=resource.dict_to_struct(_NODE_FEATURE_DISCOVERY),
+                    ),
+                    "dra-driver": fnv1.Resource(
+                        resource=resource.dict_to_struct(_DRA_DRIVER),
+                    ),
                     "prometheus": fnv1.Resource(
                         resource=resource.dict_to_struct(_PROMETHEUS),
                     ),
@@ -598,6 +646,12 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     ),
                     "leader-worker-set": fnv1.Resource(
                         resource=resource.dict_to_struct(_LEADER_WORKER_SET),
+                    ),
+                    "node-feature-discovery": fnv1.Resource(
+                        resource=resource.dict_to_struct(_NODE_FEATURE_DISCOVERY),
+                    ),
+                    "dra-driver": fnv1.Resource(
+                        resource=resource.dict_to_struct(_DRA_DRIVER),
                     ),
                     "prometheus": fnv1.Resource(
                         resource=resource.dict_to_struct(_PROMETHEUS),

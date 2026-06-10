@@ -201,7 +201,7 @@ def _eks_cluster() -> dict:
         "spec": {
             "forProvider": {
                 "region": "us-west-2",
-                "version": "1.31",
+                "version": "1.36",
                 "roleArnSelector": {
                     "matchControllerRef": True,
                     "matchLabels": {"modelplane.ai/iam-role": "cluster"},
@@ -338,46 +338,6 @@ def _expected_status() -> dict:
     }
 
 
-def _device_plugin() -> dict:
-    # The DaemonSet manifest is built by the function; assert on the wrapper
-    # Object and reuse the function's manifest builder so the two can't drift.
-    return {
-        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
-        "kind": "Object",
-        "metadata": {"labels": {"modelplane.ai/resource": "device-plugin"}},
-        "spec": {
-            "providerConfigRef": {"kind": "ProviderConfig", "name": _KUBECONFIG_SECRET},
-            "forProvider": {"manifest": fn.Composer._device_plugin_manifest(None)},
-        },
-    }
-
-
-def _device_plugin_usage(of_kind: str) -> dict:
-    # Deletion-ordering Usage: holds the EKS Cluster / ClusterAuth until the
-    # device-plugin Object is deleted, so its DaemonSet uninstall can reach
-    # the cluster.
-    return {
-        "apiVersion": "protection.crossplane.io/v1beta1",
-        "kind": "Usage",
-        "spec": {
-            "of": {
-                "apiVersion": "eks.aws.m.upbound.io/v1beta1",
-                "kind": of_kind,
-                "resourceSelector": {"matchControllerRef": True},
-            },
-            "by": {
-                "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
-                "kind": "Object",
-                "resourceSelector": {
-                    "matchControllerRef": True,
-                    "matchLabels": {"modelplane.ai/resource": "device-plugin"},
-                },
-            },
-            "replayDeletion": True,
-        },
-    }
-
-
 def _expected_resources() -> dict:
     return {
         "vpc": fnv1.Resource(resource=resource.dict_to_struct(_vpc())),
@@ -464,22 +424,6 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         )
         ready_resources["cluster-auth"] = fnv1.Resource(
             resource=ready_resources["cluster-auth"].resource,
-            ready=fnv1.READY_TRUE,
-        )
-        # ClusterAuth is observed Ready in the second pass, so the device
-        # plugin is composed (it targets the cluster via the kubeconfig
-        # ClusterAuth writes). It has no observed Ready condition yet, so
-        # it stays not-ready. Its deletion-ordering Usages are marked ready
-        # immediately by the function.
-        ready_resources["device-plugin"] = fnv1.Resource(
-            resource=resource.dict_to_struct(_device_plugin()),
-        )
-        ready_resources["usage-cluster-by-device-plugin"] = fnv1.Resource(
-            resource=resource.dict_to_struct(_device_plugin_usage("Cluster")),
-            ready=fnv1.READY_TRUE,
-        )
-        ready_resources["usage-cluster-auth-by-device-plugin"] = fnv1.Resource(
-            resource=resource.dict_to_struct(_device_plugin_usage("ClusterAuth")),
             ready=fnv1.READY_TRUE,
         )
 

@@ -56,8 +56,7 @@ def _inference_cluster(
     ic.status = ic.status or icv1alpha1.Status()
     ic.status.providerConfigRef = ic.status.providerConfigRef or icv1alpha1.ProviderConfigRef()
     ic.status.gateway = ic.status.gateway or icv1alpha1.Gateway()
-    ic.status.capacity = ic.status.capacity or icv1alpha1.Capacity()
-    ic.status.capacity.gpuPools = ic.status.capacity.gpuPools or []
+    ic.status.gpuPools = ic.status.gpuPools or []
     return ic
 
 
@@ -196,8 +195,22 @@ class Composer:
             ),
         )
 
-        # Per-resource readiness. Only the workload (model-serving) gates XR
-        # readiness; the Service/HTTPRoute (and llm-d's pool/EPP) Objects derive
-        # their own readiness via provider-kubernetes DeriveFromObject.
-        if MODEL_RESOURCE_KEY in self.rsp.desired.resources and serving_ready:
-            self.rsp.desired.resources[MODEL_RESOURCE_KEY].ready = fnv1.READY_TRUE
+        # Per-resource readiness. Crossplane gates the XR's Ready on every
+        # composed resource being ready, so the function must mark each one - a
+        # composed resource isn't ready just because provider-kubernetes set its
+        # Object's own Ready condition. Marking a resource ready asserts the
+        # function observed it ready, so we only ever mark a resource we can see
+        # in observed state. The workload (model-serving) additionally gates on
+        # the model actually serving; the Service, HTTPRoute, and
+        # ResourceClaimTemplate have no runtime readiness to wait on (existing is
+        # being ready), so observing them is enough. A freshly composed resource
+        # isn't in observed yet, so it stays unready until the next reconcile
+        # sees it applied.
+        for key in self.rsp.desired.resources:
+            if key not in self.req.observed.resources:
+                continue
+            if key == MODEL_RESOURCE_KEY:
+                if serving_ready:
+                    self.rsp.desired.resources[key].ready = fnv1.READY_TRUE
+            else:
+                self.rsp.desired.resources[key].ready = fnv1.READY_TRUE

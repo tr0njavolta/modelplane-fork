@@ -3,10 +3,9 @@
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Dict, List, Literal, Optional
+from typing import Literal
 
-from pydantic import BaseModel, conint, constr
+from pydantic import AwareDatetime, BaseModel, Field, conint, constr
 
 from ....io.k8s.apimachinery.pkg.apis.meta import v1
 
@@ -20,27 +19,75 @@ class CompositionRevisionRef(BaseModel):
 
 
 class CompositionRevisionSelector(BaseModel):
-    matchLabels: Dict[str, str]
+    matchLabels: dict[str, str]
 
 
 class CompositionSelector(BaseModel):
-    matchLabels: Dict[str, str]
+    matchLabels: dict[str, str]
 
 
 class ResourceRef(BaseModel):
     apiVersion: str
     kind: str
-    name: Optional[str] = None
-    namespace: Optional[str] = None
+    name: str | None = None
+    namespace: str | None = None
 
 
 class Crossplane(BaseModel):
-    compositionRef: Optional[CompositionRef] = None
-    compositionRevisionRef: Optional[CompositionRevisionRef] = None
-    compositionRevisionSelector: Optional[CompositionRevisionSelector] = None
-    compositionSelector: Optional[CompositionSelector] = None
-    compositionUpdatePolicy: Optional[Literal['Automatic', 'Manual']] = None
-    resourceRefs: Optional[List[ResourceRef]] = None
+    compositionRef: CompositionRef | None = None
+    compositionRevisionRef: CompositionRevisionRef | None = None
+    compositionRevisionSelector: CompositionRevisionSelector | None = None
+    compositionSelector: CompositionSelector | None = None
+    compositionUpdatePolicy: Literal['Automatic', 'Manual'] | None = None
+    resourceRefs: list[ResourceRef] | None = None
+
+
+class Attributes(BaseModel):
+    bool_: bool | None = Field(None, alias='bool')
+    int_: int | None = Field(None, alias='int')
+    string: constr(max_length=253) | None = None
+    version: constr(max_length=32) | None = None
+    """
+    Semantic version (e.g. "9.0.0").
+    """
+
+
+class Capacity(BaseModel):
+    value: constr(min_length=1, max_length=32)
+    """
+    A Kubernetes Quantity (e.g. "141Gi").
+    """
+
+
+class Device(BaseModel):
+    attributes: dict[str, Attributes] | None = Field(None, max_length=32)
+    """
+    DRA-style typed attributes for this device. Keys are bare names (e.g. architecture); the domain comes from the device's driver. Each value sets exactly one typed field.
+    """
+    capacity: dict[str, Capacity] | None = Field(None, max_length=32)
+    """
+    DRA-style capacity quantities for this device. Keys are bare names (e.g. memory); values are Kubernetes Quantities.
+    """
+    claim: Literal['DRA', 'Synthetic'] | None = 'DRA'
+    """
+    How Modelplane treats this device. DRA emits it as a request in a ResourceClaim, so DRA binds a matching device to the pod at admission time; use it for hardware a real DRA driver exposes. Synthetic describes the device for fleet scheduling only and never claims it; use it for hardware that matters for placement but has no DRA driver yet, like an InfiniBand fabric.
+    """
+    count: conint(ge=1, le=64) | None = 1
+    """
+    How many of this device a node has.
+    """
+    deviceClassName: constr(min_length=1, max_length=253) | None = None
+    """
+    Name of the cluster-scoped DRA DeviceClass to claim this device through. Required for claim: DRA devices; the DRA driver install creates the DeviceClass (e.g. gpu.nvidia.com). Ignored for Synthetic devices.
+    """
+    driver: constr(min_length=1, max_length=253)
+    """
+    DRA driver that owns this device (e.g. gpu.nvidia.com). Becomes the attribute/capacity domain a nodeSelector reads as device.attributes["<driver>"].<name>.
+    """
+    name: constr(min_length=1, max_length=63)
+    """
+    Name of this device within the class (e.g. gpu, nic).
+    """
 
 
 class Accelerator(BaseModel):
@@ -53,7 +100,10 @@ class Accelerator(BaseModel):
 
 class Eks(BaseModel):
     accelerator: Accelerator
-    diskSizeGb: Optional[conint(ge=10)] = 100
+    """
+    GPU accelerator to attach when provisioning the node group. Provisioning input only: the scheduler matches against spec.devices, not this block.
+    """
+    diskSizeGb: conint(ge=10) | None = 100
     instanceType: constr(min_length=1)
     """
     EC2 instance type (e.g. g6.xlarge, p4d.24xlarge). The instance family determines the GPU model; the accelerator block below is informational.
@@ -70,97 +120,86 @@ class AcceleratorModel(BaseModel):
 
 class Gke(BaseModel):
     accelerator: AcceleratorModel
-    diskSizeGb: Optional[conint(ge=10)] = 100
+    """
+    GPU accelerator to attach when provisioning the node pool. Provisioning input only: the scheduler matches against spec.devices, not this block, so count here is the GCP machine's GPU count and need not be restated in devices.
+    """
+    diskSizeGb: conint(ge=10) | None = 100
     machineType: constr(min_length=1)
 
 
 class Provisioning(BaseModel):
-    eks: Optional[Eks] = None
-    gke: Optional[Gke] = None
+    eks: Eks | None = None
+    gke: Gke | None = None
     provider: Literal['GKE', 'EKS']
 
 
-class Gpu(BaseModel):
-    count: conint(ge=1, le=16)
-    """
-    GPUs per node.
-    """
-    memory: constr(min_length=1, max_length=16)
-    """
-    Per-GPU VRAM (e.g. "24Gi", "80Gi").
-    """
-
-
-class Resources(BaseModel):
-    gpu: Gpu
-
-
 class Spec(BaseModel):
-    crossplane: Optional[Crossplane] = None
+    crossplane: Crossplane | None = None
     """
     Configures how Crossplane will reconcile this composite resource
     """
-    description: Optional[str] = None
+    description: str | None = None
     """
     Human-readable description of the class.
     """
-    provisioning: Optional[Provisioning] = None
+    devices: list[Device] = Field(..., max_length=16, min_length=1)
+    """
+    Devices a node of this class has, following DRA's model (KEP-4381). Each entry describes one kind of device with a count, mirroring what a DRA driver publishes in a ResourceSlice (one entry per kind rather than per physical device). ModelDeployment.nodeSelector matches against these, and claim: DRA devices are emitted as requests in a DRA ResourceClaim when scheduling a worker to this pool.
+    A scheduled worker pod is pinned to its pool with a nodeSelector on the modelplane.ai/pool node label. Modelplane-provisioned (EKS, GKE) pools carry this label automatically. On a BYO (Existing) cluster Modelplane doesn't provision the nodes, so the operator must label the pool's nodes modelplane.ai/pool=<nodePools[].name> themselves, or worker pods for this class will stay Pending.
+    """
+    provisioning: Provisioning | None = None
     """
     How to provision a node pool of this class. Omit for classes that describe BYO node pools that already exist.
-    """
-    resources: Resources
-    """
-    Hardware resources a node of this class exposes.
     """
 
 
 class Condition(BaseModel):
-    lastTransitionTime: datetime
-    message: Optional[str] = None
-    observedGeneration: Optional[int] = None
+    lastTransitionTime: AwareDatetime
+    message: str | None = None
+    observedGeneration: int | None = None
     reason: str
     status: str
     type: str
 
 
 class Status(BaseModel):
-    conditions: Optional[List[Condition]] = None
+    conditions: list[Condition] | None = None
     """
     Conditions of the resource.
     """
 
 
 class InferenceClass(BaseModel):
-    apiVersion: Optional[Literal['modelplane.ai/v1alpha1']] = 'modelplane.ai/v1alpha1'
+    apiVersion: Literal['modelplane.ai/v1alpha1'] | None = 'modelplane.ai/v1alpha1'
     """
     APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
     """
-    kind: Optional[Literal['InferenceClass']] = 'InferenceClass'
+    kind: Literal['InferenceClass'] | None = 'InferenceClass'
     """
     Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
     """
-    metadata: Optional[v1.ObjectMeta] = None
+    metadata: v1.ObjectMeta | None = None
     """
     Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
     """
     spec: Spec
-    status: Optional[Status] = None
+    status: Status | None = None
 
 
 class InferenceClassList(BaseModel):
-    apiVersion: Optional[str] = None
+    apiVersion: str | None = None
     """
     APIVersion defines the versioned schema of this representation of an object. Servers should convert recognized schemas to the latest internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
     """
-    items: List[InferenceClass]
+    items: list[InferenceClass]
     """
     List of inferenceclasses. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md
     """
-    kind: Optional[str] = None
+    kind: str | None = None
     """
     Kind is a string value representing the REST resource this object represents. Servers may infer this from the endpoint the client submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
     """
-    metadata: Optional[v1.ListMeta] = None
+    metadata: v1.ListMeta | None = None
     """
     Standard list metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
     """

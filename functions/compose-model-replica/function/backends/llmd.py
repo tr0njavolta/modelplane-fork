@@ -42,15 +42,6 @@ from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 
 from function.backends import base
 
-# Namespace for serving workloads on remote clusters.
-_REMOTE_NAMESPACE = "default"
-
-# Port the engine serves the OpenAI-compatible API on.
-_ENGINE_PORT = 8000
-
-# Label joining the LWS pods and the Service selector (mirrors native.py).
-_LABEL_SERVING = "modelplane.ai/serving"
-
 # Label set only on the LWS leader pod. The Service selects on it so traffic
 # reaches the gang leader (the only pod that serves the OpenAI API for vLLM
 # multi-node; for symmetric engines like SGLang the API server also runs on
@@ -64,19 +55,6 @@ _LABEL_ROLE = "modelplane.ai/lws-role"
 # only the local node and waits forever.
 _LEADER_BOOTSTRAP = 'set -e\nray start --head --port=6379\nexec python3 -m vllm.entrypoints.openai.api_server "$@"'
 _WORKER_BOOTSTRAP = 'exec ray start --address="$LWS_LEADER_ADDRESS:6379" --block'
-
-
-def _object(provider_config: str, manifest: dict) -> k8sobjv1alpha1.Object:
-    return k8sobjv1alpha1.Object(
-        spec=k8sobjv1alpha1.Spec(
-            providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
-                kind="ClusterProviderConfig",
-                name=provider_config,
-            ),
-            readiness=k8sobjv1alpha1.Readiness(policy="DeriveFromObject"),
-            forProvider=k8sobjv1alpha1.ForProvider(manifest=manifest),
-        ),
-    )
 
 
 def _engine_args(engine, tensor: int, pipeline: int) -> list[str]:
@@ -136,8 +114,9 @@ class LLMDBackend:
             c = {
                 "name": "engine",
                 "image": engine.image,
-                # GPUs PER POD (one tensor-parallel shard runs per pod in the gang).
-                "resources": {"limits": {"nvidia.com/gpu": str(tensor)}},
+                # GPUs PER POD (one tensor-parallel shard runs per pod in the
+                # gang), bound via DRA through the pod-level claim.
+                "resources": base.engine_resources(),
                 # vLLM tensor parallelism needs a large /dev/shm.
                 "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}, *cache_volume_mounts],
                 "command": command,
@@ -149,9 +128,9 @@ class LLMDBackend:
             if env:
                 c["env"] = env
             if serving:
-                c["ports"] = [{"containerPort": _ENGINE_PORT}]
+                c["ports"] = [{"containerPort": base.ENGINE_PORT}]
                 c["readinessProbe"] = {
-                    "httpGet": {"path": "/health", "port": _ENGINE_PORT},
+                    "httpGet": {"path": "/health", "port": base.ENGINE_PORT},
                     "initialDelaySeconds": 30,
                     "periodSeconds": 10,
                 }
@@ -162,6 +141,9 @@ class LLMDBackend:
                 "containers": [c],
                 "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}, *cache_volumes],
             }
+            # Both the leader and worker pods pin to the scheduled pool and
+            # claim GPUs via DRA.
+            base.place_pod(spec, replica)
             if pull_secrets:
                 spec["imagePullSecrets"] = pull_secrets
             return spec
@@ -169,11 +151,11 @@ class LLMDBackend:
         # Only the leader serves the OpenAI API → it carries the role label the
         # Service selects on, plus the serving port and readiness probe.
         leader_pod = {
-            "metadata": {"labels": {_LABEL_SERVING: name, _LABEL_ROLE: "leader"}},
+            "metadata": {"labels": {base.LABEL_SERVING: name, _LABEL_ROLE: "leader"}},
             "spec": pod_spec(container(leader_command, serving=True)),
         }
         worker_pod = {
-            "metadata": {"labels": {_LABEL_SERVING: name}},
+            "metadata": {"labels": {base.LABEL_SERVING: name}},
             "spec": pod_spec(container(worker_command, serving=False)),
         }
 
@@ -181,7 +163,7 @@ class LLMDBackend:
         leader_worker_set = {
             "apiVersion": "leaderworkerset.x-k8s.io/v1",
             "kind": "LeaderWorkerSet",
-            "metadata": {"name": name, "namespace": _REMOTE_NAMESPACE},
+            "metadata": {"name": name, "namespace": base.REMOTE_NAMESPACE},
             "spec": {
                 "replicas": int(replica.spec.workers.count or 1),
                 "leaderWorkerTemplate": {
@@ -196,10 +178,10 @@ class LLMDBackend:
         service = {
             "apiVersion": "v1",
             "kind": "Service",
-            "metadata": {"name": name, "namespace": _REMOTE_NAMESPACE},
+            "metadata": {"name": name, "namespace": base.REMOTE_NAMESPACE},
             "spec": {
-                "selector": {_LABEL_SERVING: name, _LABEL_ROLE: "leader"},
-                "ports": [{"port": 80, "targetPort": _ENGINE_PORT}],
+                "selector": {base.LABEL_SERVING: name, _LABEL_ROLE: "leader"},
+                "ports": [{"port": 80, "targetPort": base.ENGINE_PORT}],
             },
         }
 
@@ -207,7 +189,7 @@ class LLMDBackend:
         http_route = {
             "apiVersion": "gateway.networking.k8s.io/v1",
             "kind": "HTTPRoute",
-            "metadata": {"name": name, "namespace": _REMOTE_NAMESPACE},
+            "metadata": {"name": name, "namespace": base.REMOTE_NAMESPACE},
             "spec": {
                 "parentRefs": [{"name": "inference-gateway", "namespace": "modelplane-system"}],
                 "rules": [
@@ -235,8 +217,10 @@ class LLMDBackend:
             },
         }
 
-        return {
-            "model-serving": _object(pc, leader_worker_set),
-            "model-service": _object(pc, service),
-            "model-route": _object(pc, http_route),
+        out = {
+            "model-serving": base.wrap_object(pc, leader_worker_set, cel_query=base.AVAILABLE_CEL),
+            "model-service": base.wrap_object(pc, service),
+            "model-route": base.wrap_object(pc, http_route),
         }
+        out[base.RESOURCE_CLAIM_KEY] = base.resource_claim_template(replica, pc)
+        return out

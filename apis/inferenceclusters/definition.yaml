@@ -142,7 +142,11 @@ spec:
                         maxLength: 32
                       kubernetesVersion:
                         type: string
-                        default: "1.31"
+                        default: "1.36"
+                        description: >-
+                          EKS cluster Kubernetes version. Defaults to a
+                          version where Dynamic Resource Allocation (how GPUs
+                          bind to pods) is generally available.
                       cache:
                         type: object
                         description: >-
@@ -224,29 +228,83 @@ spec:
                     description: >-
                       External IP of the inference gateway on the remote cluster.
                       Used by ModelDeployment for unified endpoint routing.
-              capacity:
-                type: object
+              gpuPools:
+                type: array
                 description: >-
-                  Declared capacity derived from the referenced classes
-                  and the per-pool node counts.
-                properties:
-                  gpuPools:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        acceleratorType:
-                          type: string
-                        memory:
-                          type: string
-                          description: Per-GPU VRAM (e.g. "24Gi").
-                        countPerNode:
-                          type: integer
-                        nodes:
-                          type: integer
-                          description: >-
-                            Number of nodes in this pool. Derived from
-                            maxNodeCount (if autoscaling) or nodeCount.
+                  Schedulable GPU node pools on this cluster, derived from the
+                  referenced classes and the per-pool node counts.
+                  ModelDeployment scheduling matches against these.
+                maxItems: 8
+                x-kubernetes-list-type: map
+                x-kubernetes-list-map-keys: [name]
+                items:
+                  type: object
+                  required: [name]
+                  properties:
+                    name:
+                      type: string
+                      description: >-
+                        Node pool name, matching spec.nodePools[].name.
+                        Used to pin a ModelReplica to a specific pool via
+                        spec.nodePoolName.
+                    nodes:
+                      type: integer
+                      description: >-
+                        Number of nodes in this pool. Derived from
+                        maxNodeCount (if autoscaling) or nodeCount.
+                    devices:
+                      type: array
+                      description: >-
+                        Devices copied from the pool's InferenceClass.
+                        ModelDeployment.nodeSelector matches against these.
+                      maxItems: 16
+                      x-kubernetes-list-type: map
+                      x-kubernetes-list-map-keys: [name]
+                      items:
+                        type: object
+                        required: [name, driver]
+                        properties:
+                          name:
+                            type: string
+                            maxLength: 63
+                          claim:
+                            type: string
+                            enum: [DRA, Synthetic]
+                          driver:
+                            type: string
+                            maxLength: 253
+                          deviceClassName:
+                            type: string
+                            maxLength: 253
+                          count:
+                            type: integer
+                          attributes:
+                            type: object
+                            maxProperties: 32
+                            additionalProperties:
+                              type: object
+                              properties:
+                                string:
+                                  type: string
+                                  maxLength: 253
+                                version:
+                                  type: string
+                                  maxLength: 32
+                                bool:
+                                  type: boolean
+                                int:
+                                  type: integer
+                                  format: int64
+                          capacity:
+                            type: object
+                            maxProperties: 32
+                            additionalProperties:
+                              type: object
+                              required: [value]
+                              properties:
+                                value:
+                                  type: string
+                                  maxLength: 32
               namespace:
                 type: string
                 description: >-

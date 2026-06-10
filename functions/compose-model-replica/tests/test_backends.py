@@ -10,6 +10,7 @@ methods below the table.
 import dataclasses
 import unittest
 
+from crossplane.function import resource
 from function.backends import base, dynamo, llmd, native
 from models.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from models.ai.modelplane.modelreplica import v1alpha1
@@ -19,7 +20,20 @@ _SERVING = "modelplane.ai/serving"
 _ROLE = "modelplane.ai/lws-role"
 
 
-def _replica(name="r", *, tensor=1, pipeline=1, args=None, command=None, namespace="ml-team"):
+# A GPU device request (claim: DRA), as compose-model-deployment stamps it.
+_GPU_CEL = 'device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("80Gi")) >= 0'
+
+
+def _gpu_request(count):
+    return v1alpha1.DeviceRequest(
+        name="gpu",
+        deviceClassName="gpu.nvidia.com",
+        count=count,
+        selectors=[v1alpha1.Selector(cel=_GPU_CEL)],
+    )
+
+
+def _replica(name="r", *, tensor=1, pipeline=1, args=None, command=None, namespace="ml-team", device_requests=None):
     container = v1alpha1.Container(
         name="engine",
         image="vllm/vllm-openai:latest",
@@ -27,17 +41,45 @@ def _replica(name="r", *, tensor=1, pipeline=1, args=None, command=None, namespa
     )
     if command is not None:
         container.command = command
-    return v1alpha1.ModelReplica(
-        metadata=metav1.ObjectMeta(name=name, namespace=namespace),
-        spec=v1alpha1.SpecModel(
-            clusterName="cluster-a",
-            workers=v1alpha1.Workers(
-                count=1,
-                topology=v1alpha1.Topology(tensor=tensor, pipeline=pipeline),
-                template=v1alpha1.Template(spec=v1alpha1.Spec(containers=[container])),
-            ),
+    # nodePoolName and deviceRequests are XRD-required: compose-model-deployment
+    # only composes a replica it has pinned to a matching pool with a claimable
+    # device, so a replica always carries both.
+    spec = v1alpha1.SpecModel(
+        clusterName="cluster-a",
+        nodePoolName="frontier",
+        deviceRequests=device_requests if device_requests is not None else [_gpu_request(1)],
+        workers=v1alpha1.Workers(
+            count=1,
+            topology=v1alpha1.Topology(tensor=tensor, pipeline=pipeline),
+            template=v1alpha1.Template(spec=v1alpha1.Spec(containers=[container])),
         ),
     )
+    return v1alpha1.ModelReplica(metadata=metav1.ObjectMeta(name=name, namespace=namespace), spec=spec)
+
+
+def _claim_template(name, count):
+    """The ResourceClaimTemplate manifest a replica's device requests produce."""
+    return {
+        "apiVersion": "resource.k8s.io/v1",
+        "kind": "ResourceClaimTemplate",
+        "metadata": {"name": resource.child_name(name, "devices"), "namespace": "default"},
+        "spec": {
+            "spec": {
+                "devices": {
+                    "requests": [
+                        {
+                            "name": "gpu",
+                            "exactly": {
+                                "deviceClassName": "gpu.nvidia.com",
+                                "count": count,
+                                "selectors": [{"cel": {"expression": _GPU_CEL}}],
+                            },
+                        }
+                    ]
+                }
+            }
+        },
+    }
 
 
 _CLUSTER = icv1alpha1.InferenceCluster(
@@ -92,7 +134,7 @@ _NATIVE_WANT = {
                             "image": "vllm/vllm-openai:latest",
                             "args": ["--model=Qwen/Qwen3-0.6B"],
                             "ports": [{"containerPort": 8000}],
-                            "resources": {"limits": {"nvidia.com/gpu": "2"}},
+                            "resources": {"claims": [{"name": "devices"}]},
                             "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}],
                             "readinessProbe": {
                                 "httpGet": {"path": "/health", "port": 8000},
@@ -102,6 +144,11 @@ _NATIVE_WANT = {
                         }
                     ],
                     "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
+                    "nodeSelector": {"modelplane.ai/pool": "frontier"},
+                    "resourceClaims": [
+                        {"name": "devices", "resourceClaimTemplateName": resource.child_name("r", "devices")}
+                    ],
+                    "tolerations": [{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}],
                 },
             },
         },
@@ -113,10 +160,14 @@ _NATIVE_WANT = {
         "spec": {"selector": {_SERVING: "r"}, "ports": [{"port": 80, "targetPort": 8000}]},
     },
     "model-route": _route("r"),
+    "resource-claim": _claim_template("r", 1),
 }
 
 
 def _lws(leader_container, worker_container):
+    node_selector = {"modelplane.ai/pool": "frontier"}
+    claims = [{"name": "devices", "resourceClaimTemplateName": resource.child_name("r", "devices")}]
+    tolerations = [{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}]
     return {
         "apiVersion": "leaderworkerset.x-k8s.io/v1",
         "kind": "LeaderWorkerSet",
@@ -130,6 +181,9 @@ def _lws(leader_container, worker_container):
                     "spec": {
                         "containers": [leader_container],
                         "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
+                        "nodeSelector": node_selector,
+                        "resourceClaims": claims,
+                        "tolerations": tolerations,
                     },
                 },
                 "workerTemplate": {
@@ -137,6 +191,9 @@ def _lws(leader_container, worker_container):
                     "spec": {
                         "containers": [worker_container],
                         "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
+                        "nodeSelector": node_selector,
+                        "resourceClaims": claims,
+                        "tolerations": tolerations,
                     },
                 },
             },
@@ -148,7 +205,7 @@ def _engine(command, *, serving, args=None):
     c = {
         "name": "engine",
         "image": "vllm/vllm-openai:latest",
-        "resources": {"limits": {"nvidia.com/gpu": "8"}},
+        "resources": {"claims": [{"name": "devices"}]},
         "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}],
         "command": command,
     }
@@ -187,6 +244,7 @@ _LLMD_VLLM_WANT = {
         "spec": {"selector": {_SERVING: "r", _ROLE: "leader"}, "ports": [{"port": 80, "targetPort": 8000}]},
     },
     "model-route": _route("r"),
+    "resource-claim": _claim_template("r", 1),
 }
 
 # Escape hatch: the user command runs verbatim on both templates; no Ray
@@ -200,6 +258,7 @@ _LLMD_ESCAPE_WANT = {
     ),
     "model-service": _LLMD_VLLM_WANT["model-service"],
     "model-route": _route("r"),
+    "resource-claim": _claim_template("r", 1),
 }
 
 
@@ -247,11 +306,54 @@ class TestBackendManifests(unittest.TestCase):
 
     def test_resources_named_after_replica_avoid_collision(self):
         # Two replicas of one deployment on the same IC must produce distinct
-        # workload-resource names (Nic's collision concern).
+        # resource names (Nic's collision concern). The workload, Service, and
+        # HTTPRoute share the replica name; the ResourceClaimTemplate is named
+        # after it too (with a -devices suffix) so it can't collide either.
         a = native.NativeBackend().build(_replica("dep-clusterA"), _CLUSTER)
         b = native.NativeBackend().build(_replica("dep-clusterB"), _CLUSTER)
-        self.assertEqual(self._names(a), {"dep-clusterA"})
-        self.assertEqual(self._names(b), {"dep-clusterB"})
+        self.assertEqual(self._names(a), {"dep-clusterA", resource.child_name("dep-clusterA", "devices")})
+        self.assertEqual(self._names(b), {"dep-clusterB", resource.child_name("dep-clusterB", "devices")})
+
+    def test_workload_readiness_policies(self):
+        # The serving workload (Deployment or LWS) reports readiness from its
+        # Available condition via a CEL query: provider-kubernetes'
+        # DeriveFromObject only checks a Ready condition, which neither kind
+        # publishes, so it would never report ready. The Service and HTTPRoute
+        # have no runtime readiness worth waiting on, so they're ready on create.
+        for name, backend, replica in (
+            ("native", native.NativeBackend(), _replica(tensor=2)),
+            ("llm-d", llmd.LLMDBackend(), _replica(tensor=8, pipeline=2, args=["--model=m"])),
+        ):
+            with self.subTest(name):
+                out = backend.build(replica, _CLUSTER)
+                serving = out["model-serving"].spec.readiness
+                self.assertEqual(serving.policy, "DeriveFromCelQuery")
+                self.assertEqual(serving.celQuery, base.AVAILABLE_CEL)
+                self.assertEqual(out["model-service"].spec.readiness.policy, "SuccessfulCreate")
+                self.assertEqual(out["model-route"].spec.readiness.policy, "SuccessfulCreate")
+
+    def test_multiple_device_requests_single_container_claim(self):
+        # resources.claims is a list-map keyed on name alone, so N device
+        # requests must NOT produce N container claims all named "devices"
+        # (a duplicate-key violation the apiserver rejects). The container
+        # references the whole pod claim once; the template carries all requests.
+        replica = _replica(
+            tensor=8,
+            device_requests=[
+                v1alpha1.DeviceRequest(name="gpu", deviceClassName="gpu.nvidia.com", count=8),
+                v1alpha1.DeviceRequest(name="nic", deviceClassName="nic.nvidia.com", count=8),
+            ],
+        )
+        out = native.NativeBackend().build(replica, _CLUSTER)
+        pod = out["model-serving"].spec.forProvider.manifest["spec"]["template"]["spec"]
+        claims = pod["containers"][0]["resources"]["claims"]
+        self.assertEqual(claims, [{"name": "devices"}])
+        self.assertEqual(pod["resourceClaims"][0]["name"], "devices")
+        template_requests = out["resource-claim"].spec.forProvider.manifest["spec"]["spec"]["devices"]["requests"]
+        self.assertEqual([r["name"] for r in template_requests], ["gpu", "nic"])
+        # A ResourceClaimTemplate has no runtime status, so its Object is ready on
+        # create rather than deriving readiness from a (never-written) status.
+        self.assertEqual(out["resource-claim"].spec.readiness.policy, "SuccessfulCreate")
 
 
 class TestBackendSelection(unittest.TestCase):
@@ -284,6 +386,8 @@ class TestCacheMounts(unittest.TestCase):
     def _replica(self, *, cache=None, args=None, command=None):
         spec = v1alpha1.SpecModel(
             clusterName="c",
+            nodePoolName="frontier",
+            deviceRequests=[_gpu_request(1)],
             workers=v1alpha1.Workers(
                 topology=v1alpha1.Topology(tensor=1, pipeline=1),
                 template=v1alpha1.Template(
@@ -343,6 +447,8 @@ class TestNativeBackendCache(unittest.TestCase):
             metadata=metav1.ObjectMeta(name="r", namespace="ml-team"),
             spec=v1alpha1.SpecModel(
                 clusterName="cluster-a",
+                nodePoolName="frontier",
+                deviceRequests=[_gpu_request(1)],
                 modelCacheRef=v1alpha1.ModelCacheRef(name="qwen"),
                 workers=v1alpha1.Workers(
                     topology=v1alpha1.Topology(tensor=1, pipeline=1),
@@ -370,6 +476,8 @@ class TestLLMDBackendCache(unittest.TestCase):
             metadata=metav1.ObjectMeta(name="r", namespace="ml-team"),
             spec=v1alpha1.SpecModel(
                 clusterName="cluster-a",
+                nodePoolName="frontier",
+                deviceRequests=[_gpu_request(8)],
                 modelCacheRef=v1alpha1.ModelCacheRef(name="kimi"),
                 workers=v1alpha1.Workers(
                     count=1,

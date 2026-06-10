@@ -16,7 +16,7 @@ from models.ai.modelplane.modelendpoint import v1alpha1 as mev1alpha1
 from models.ai.modelplane.modelreplica import v1alpha1 as mrv1alpha1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 
-from function import scheduling
+from function import cel, name, scheduling
 
 # Condition types and reasons for the ModelDeployment XR.
 CONDITION_TYPE_REPLICAS_SCHEDULED = "ReplicasScheduled"
@@ -24,6 +24,7 @@ CONDITION_TYPE_REPLICAS_READY = "ReplicasReady"
 
 CONDITION_REASON_NO_CLUSTERS = "NoClusters"
 CONDITION_REASON_INSUFFICIENT_CAPACITY = "InsufficientCapacity"
+CONDITION_REASON_INVALID_NODE_SELECTOR = "InvalidNodeSelector"
 CONDITION_REASON_REPLICAS_CREATED = "ReplicasCreated"
 CONDITION_REASON_SCHEDULING = "Scheduling"
 CONDITION_REASON_NO_REPLICAS_SCHEDULED = "NoReplicasScheduled"
@@ -35,7 +36,12 @@ CONDITION_REASON_MODEL_STARTING = "ModelStarting"
 _LABEL_CLUSTER = "modelplane.ai/cluster"
 _LABEL_REPLICA = "modelplane.ai/replica"
 _LABEL_DEPLOYMENT = "modelplane.ai/deployment"
+# Per-cluster-local index distinguishing co-located replicas of one deployment.
+# Read back by the scheduler to reconstruct a replica's (cluster, index)
+# identity from observed state. Not an ordering - just a collision breaker.
+_LABEL_INDEX = "modelplane.ai/replica-index"
 _LABEL_VALUE_TRUE = "true"
+
 
 # Scheme for gateway-facing URLs. Traffic between the control plane gateway
 # and remote cluster gateways uses plain HTTP; TLS terminates at the edge.
@@ -50,8 +56,7 @@ def _inference_cluster(
     ic.status = ic.status or icv1alpha1.Status()
     ic.status.providerConfigRef = ic.status.providerConfigRef or icv1alpha1.ProviderConfigRef()
     ic.status.gateway = ic.status.gateway or icv1alpha1.Gateway()
-    ic.status.capacity = ic.status.capacity or icv1alpha1.Capacity()
-    ic.status.capacity.gpuPools = ic.status.capacity.gpuPools or []
+    ic.status.gpuPools = ic.status.gpuPools or []
     return ic
 
 
@@ -86,7 +91,23 @@ class Composer:
     def compose(self):
         if not self.resolve_inputs():
             return
-        matched = self.schedule()
+        try:
+            matched = self.schedule()
+        except cel.CELCompileError as e:
+            # A malformed nodeSelector CEL selector is a user error. Surface it
+            # and stop - we can't schedule without valid selectors.
+            response.set_conditions(
+                self.rsp,
+                resource.Condition(
+                    typ=CONDITION_TYPE_REPLICAS_SCHEDULED,
+                    status="False",
+                    reason=CONDITION_REASON_INVALID_NODE_SELECTOR,
+                    message=f"Invalid nodeSelector CEL expression: {e}",
+                ),
+            )
+            response.warning(self.rsp, f"Invalid nodeSelector CEL expression: {e}")
+            self.rsp.desired.composite.ready = fnv1.READY_FALSE
+            return
         self.compose_replicas(matched)
         self.compose_endpoints(matched)
         self.write_status(matched)
@@ -142,13 +163,17 @@ class Composer:
         """Match the deployment's topology against available clusters."""
         matched = scheduling.schedule(self.xr, self.clusters, self.all_replicas)
 
-        # Transition: emit which clusters were matched (first time only).
+        # Transition: emit which clusters were matched (first time only). A
+        # cluster can host several replicas, so report it once.
         if not matched:
             return matched
-        prev_replica_count = sum(1 for c in matched if f"replica-{c.name}" in self.req.observed.resources)
+        prev_replica_count = sum(1 for c in matched if name.replica_key(c) in self.req.observed.resources)
         if prev_replica_count == 0:
-            matched_names = [c.name for c in matched]
-            response.normal(self.rsp, f"Matched {len(matched)} clusters: {', '.join(matched_names)}")
+            matched_names = sorted({c.name for c in matched})
+            response.normal(
+                self.rsp,
+                f"Scheduled {len(matched)} replicas across {len(matched_names)} clusters: {', '.join(matched_names)}",
+            )
 
         return matched
 
@@ -167,26 +192,46 @@ class Composer:
         workers = mrv1alpha1.Workers.model_validate(self.xr.spec.workers.model_dump(exclude_none=True))
 
         for cluster_info in matched:
-            replica_key = f"replica-{cluster_info.name}"
+            replica_key = name.replica_key(cluster_info)
+
+            # Stamp the resolved claim: DRA device requests so the replica
+            # function can form a DRA ResourceClaim. The scheduler only places a
+            # replica on a pool that yields at least one claimable device, so
+            # this is always non-empty.
+            device_requests = [
+                mrv1alpha1.DeviceRequest(
+                    name=r.name,
+                    deviceClassName=r.device_class_name,
+                    count=r.count,
+                    selectors=[mrv1alpha1.Selector(cel=c) for c in r.cel_selectors],
+                )
+                for r in cluster_info.device_requests
+            ]
 
             replica = mrv1alpha1.ModelReplica(
                 metadata=metav1.ObjectMeta(
-                    name=resource.child_name(self.xr.metadata.name, cluster_info.name),
+                    name=name.replica(self.xr.metadata.name, cluster_info),
                     namespace=self.xr.metadata.namespace,
                     labels={
                         _LABEL_REPLICA: _LABEL_VALUE_TRUE,
                         _LABEL_DEPLOYMENT: self.xr.metadata.name,
                         _LABEL_CLUSTER: cluster_info.name,
+                        _LABEL_INDEX: str(cluster_info.index),
                     },
                 ),
-                spec=mrv1alpha1.SpecModel(clusterName=cluster_info.name, workers=workers),
+                spec=mrv1alpha1.SpecModel(
+                    clusterName=cluster_info.name,
+                    nodePoolName=cluster_info.pool,
+                    deviceRequests=device_requests,
+                    workers=workers,
+                ),
             )
             if self.xr.spec.modelCacheRef:
                 replica.spec.modelCacheRef = mrv1alpha1.ModelCacheRef(name=self.xr.spec.modelCacheRef.name)
             resource.update(self.rsp.desired.resources[replica_key], replica)
 
     def compose_endpoints(self, matched):
-        """Compose one ModelEndpoint per matched cluster.
+        """Compose one ModelEndpoint per matched replica.
 
         Endpoints are labeled with the deployment name so a ModelService
         can select them. The URL points at the per-replica path on the
@@ -207,10 +252,11 @@ class Composer:
                 continue
 
             # The replica name (== the ModelReplica and the backend's workload
-            # resources) is the per-placement routing key.
-            replica_name = resource.child_name(self.xr.metadata.name, cluster_info.name)
+            # resources) is the per-placement routing key. Must match the name
+            # composed in compose_replicas so routing lands on this replica.
+            replica_name = name.replica(self.xr.metadata.name, cluster_info)
             rewrite_path = f"/{self.xr.metadata.namespace}/{replica_name}/"
-            endpoint_key = f"endpoint-{cluster_info.name}"
+            endpoint_key = name.endpoint_key(cluster_info)
             url = f"{_GATEWAY_SCHEME}://{cluster_info.gateway_address}{rewrite_path}v1"
 
             resource.update(
@@ -222,6 +268,7 @@ class Composer:
                         labels={
                             _LABEL_DEPLOYMENT: self.xr.metadata.name,
                             _LABEL_CLUSTER: cluster_info.name,
+                            _LABEL_INDEX: str(cluster_info.index),
                         },
                     ),
                     spec=mev1alpha1.Spec(
@@ -236,7 +283,7 @@ class Composer:
         replicas_ready = sum(
             1
             for c in matched
-            if resource.get_condition(self.req.observed.resources.get(f"replica-{c.name}"), "Ready").status == "True"
+            if resource.get_condition(self.req.observed.resources.get(name.replica_key(c)), "Ready").status == "True"
         )
 
         status = v1alpha1.Status(
@@ -257,16 +304,17 @@ class Composer:
             self.rsp.desired.composite.ready = fnv1.READY_FALSE
 
     def derive_replicas_scheduled(self, matched):
-        """ReplicasScheduled: clusters matched and replicas created."""
-        any_observed = any(f"replica-{c.name}" in self.req.observed.resources for c in matched)
+        """ReplicasScheduled: replicas placed and created."""
+        any_observed = any(name.replica_key(c) in self.req.observed.resources for c in matched)
         scheduled = len(matched) > 0 and any_observed
+        desired = int(self.xr.spec.replicas)
 
         if not matched:
             reason = CONDITION_REASON_INSUFFICIENT_CAPACITY
-            msg = f"0 of {int(self.xr.spec.replicas)} clusters matched (checked {len(self.clusters)})"
+            msg = f"0 of {desired} replicas scheduled (checked {len(self.clusters)} clusters)"
         elif scheduled:
             reason = CONDITION_REASON_REPLICAS_CREATED
-            msg = f"Matched {len(matched)} clusters"
+            msg = f"Scheduled {len(matched)} of {desired} replicas"
         else:
             reason = CONDITION_REASON_SCHEDULING
             msg = ""
@@ -285,7 +333,7 @@ class Composer:
         """ReplicasReady: all replicas are serving traffic."""
         replicas_ready = 0
         for c in matched:
-            replica_key = f"replica-{c.name}"
+            replica_key = name.replica_key(c)
             if resource.get_condition(self.req.observed.resources.get(replica_key), "Ready").status == "True":
                 self.rsp.desired.resources[replica_key].ready = fnv1.READY_TRUE
                 replicas_ready += 1
@@ -315,7 +363,7 @@ class Composer:
     def mark_endpoint_readiness(self, matched):
         """Mark each composed ModelEndpoint Ready when observed Ready."""
         for c in matched:
-            endpoint_key = f"endpoint-{c.name}"
+            endpoint_key = name.endpoint_key(c)
             if endpoint_key not in self.rsp.desired.resources:
                 continue
             if resource.get_condition(self.req.observed.resources.get(endpoint_key), "Ready").status == "True":

@@ -8,7 +8,7 @@ GPU node pools reference InferenceClasses. For provisioned (GKE)
 clusters the class's provisioning block describes how to build the pool;
 for BYO (Existing) clusters the class is a pure description of pools
 that already exist. Either way, the class's resources block populates
-status.capacity.gpuPools so the scheduler can match models.
+status.gpuPools so the scheduler can match models.
 
 For provisioned clusters, a system node pool is injected automatically
 to host control-plane components (Envoy Gateway, Prometheus, etc.).
@@ -216,7 +216,7 @@ class Composer:
         backend_secrets = self.resolve_eks_backend_secrets(eks_ready, backend_exists)
         if backend_secrets or backend_exists:
             if backend_secrets:
-                self.compose_kserve_backend(backend_secrets)
+                self.compose_serving_stack(backend_secrets)
             self.compose_eks_usage()
 
         if eks_ready:
@@ -366,9 +366,7 @@ class Composer:
                 name=resource.child_name(self.xr.metadata.name, "cluster-kubeconfig"),
             ),
             namespace=_NAMESPACE_SYSTEM,
-            capacity=v1alpha1.Capacity(
-                gpuPools=gpu_pools,
-            ),
+            gpuPools=gpu_pools,
         )
         gateway_address = self.observed_gateway_address()
         if gateway_address:
@@ -536,7 +534,7 @@ class Composer:
                     ),
                     by=usagev1beta1.By(
                         apiVersion="infrastructure.modelplane.ai/v1alpha1",
-                        kind="KServeBackend",
+                        kind="ServingStack",
                         resourceSelector=usagev1beta1.ResourceSelector(matchControllerRef=True),
                     ),
                     replayDeletion=True,
@@ -624,32 +622,29 @@ class Composer:
         return None
 
     def gpu_pools(self):
-        """Derive status.capacity.gpuPools from each node pool's class.
+        """Derive status.gpuPools from each node pool's class.
 
-        The same logic applies to every cluster source: the class
-        declares the per-node GPU resources, the pool declares how many
-        nodes. The accelerator type comes from whichever provisioning
-        block the class carries (GKE or EKS); for BYO classes the
-        accelerator type is empty.
+        The class declares the node's devices (DRA-style); the pool declares how
+        many nodes. We copy the class's devices verbatim so
+        ModelDeployment.nodeSelector can match against them, and record the node
+        count for the scheduler's available-node gate.
         """
         gpu_pools = []
         for pool in self.xr.spec.nodePools or []:
             cls = self.classes.get(pool.className)
-            if not cls or not cls.spec.resources or not cls.spec.resources.gpu:
+            if not cls or not cls.spec.devices:
                 continue
-            gpu = cls.spec.resources.gpu
-            accelerator_type = ""
-            prov = cls.spec.provisioning
-            if prov and prov.gke and prov.gke.accelerator:
-                accelerator_type = prov.gke.accelerator.type
-            elif prov and prov.eks and prov.eks.accelerator:
-                accelerator_type = prov.eks.accelerator.type
+            # Copy the class's devices verbatim. model_dump drops None fields,
+            # keeping the typed attribute value objects
+            # (string/version/bool/int) one-of clean. by_alias keeps DRA's wire
+            # names (bool/int) rather than the generated bool_/int_ attributes,
+            # so the published status matches the InferenceClass schema.
+            devices = [d.model_dump(by_alias=True, exclude_none=True) for d in cls.spec.devices]
             gpu_pools.append(
                 {
-                    "acceleratorType": accelerator_type,
-                    "memory": gpu.memory,
-                    "countPerNode": gpu.count,
+                    "name": pool.name,
                     "nodes": pool.maxNodeCount or pool.nodeCount,
+                    "devices": devices,
                 }
             )
         return gpu_pools

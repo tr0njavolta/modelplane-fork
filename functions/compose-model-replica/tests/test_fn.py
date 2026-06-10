@@ -12,6 +12,9 @@ from google.protobuf import struct_pb2 as structpb
 from models.ai.modelplane.modelreplica import v1alpha1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 
+# A GPU device request CEL selector, as compose-model-deployment stamps it.
+_GPU_CEL = 'device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("80Gi")) >= 0'
+
 
 @dataclasses.dataclass
 class Case:
@@ -47,6 +50,15 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             ),
             spec=v1alpha1.SpecModel(
                 clusterName="cluster-a",
+                nodePoolName="frontier",
+                deviceRequests=[
+                    v1alpha1.DeviceRequest(
+                        name="gpu",
+                        deviceClassName="gpu.nvidia.com",
+                        count=1,
+                        selectors=[v1alpha1.Selector(cel=_GPU_CEL)],
+                    ),
+                ],
                 workers=v1alpha1.Workers(
                     topology=v1alpha1.Topology(tensor=1),
                     template=v1alpha1.Template(
@@ -70,7 +82,10 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             match_name="cluster-a",
         )
 
-        # Case 1: cluster resolved with providerConfigRef — composes native Deployment.
+        # Case 1: cluster resolved with providerConfigRef — composes native
+        # Deployment. First reconcile: none of the composed resources are in
+        # observed yet, so none are marked ready (the function only asserts
+        # readiness for a resource it can see in observed state).
         req1 = fnv1.RunFunctionRequest(
             observed=fnv1.State(
                 composite=fnv1.Resource(resource=resource.dict_to_struct(xr)),
@@ -109,7 +124,14 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                         "kind": "ClusterProviderConfig",
                                         "name": "cluster-a-pc",
                                     },
-                                    "readiness": {"policy": "DeriveFromObject"},
+                                    "readiness": {
+                                        "policy": "DeriveFromCelQuery",
+                                        "celQuery": (
+                                            "has(object.status.conditions) && "
+                                            "object.status.conditions.exists("
+                                            'c, c.type == "Available" && c.status == "True")'
+                                        ),
+                                    },
                                     "forProvider": {
                                         "manifest": {
                                             "apiVersion": "apps/v1",
@@ -138,9 +160,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                                 "image": "vllm/vllm-openai:latest",
                                                                 "args": ["--model=Qwen/Qwen3-0.6B"],
                                                                 "ports": [{"containerPort": 8000}],
-                                                                "resources": {
-                                                                    "limits": {"nvidia.com/gpu": "1"},
-                                                                },
+                                                                "resources": {"claims": [{"name": "devices"}]},
                                                                 "volumeMounts": [
                                                                     {"name": "dshm", "mountPath": "/dev/shm"},
                                                                 ],
@@ -153,6 +173,22 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                         ],
                                                         "volumes": [
                                                             {"name": "dshm", "emptyDir": {"medium": "Memory"}},
+                                                        ],
+                                                        "nodeSelector": {"modelplane.ai/pool": "frontier"},
+                                                        "resourceClaims": [
+                                                            {
+                                                                "name": "devices",
+                                                                "resourceClaimTemplateName": resource.child_name(
+                                                                    "test-replica", "devices"
+                                                                ),
+                                                            },
+                                                        ],
+                                                        "tolerations": [
+                                                            {
+                                                                "key": "nvidia.com/gpu",
+                                                                "operator": "Exists",
+                                                                "effect": "NoSchedule",
+                                                            },
                                                         ],
                                                     },
                                                 },
@@ -173,7 +209,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                         "kind": "ClusterProviderConfig",
                                         "name": "cluster-a-pc",
                                     },
-                                    "readiness": {"policy": "DeriveFromObject"},
+                                    "readiness": {"policy": "SuccessfulCreate"},
                                     "forProvider": {
                                         "manifest": {
                                             "apiVersion": "v1",
@@ -202,7 +238,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                         "kind": "ClusterProviderConfig",
                                         "name": "cluster-a-pc",
                                     },
-                                    "readiness": {"policy": "DeriveFromObject"},
+                                    "readiness": {"policy": "SuccessfulCreate"},
                                     "forProvider": {
                                         "manifest": {
                                             "apiVersion": "gateway.networking.k8s.io/v1",
@@ -244,6 +280,49 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                         ],
                                                     },
                                                 ],
+                                            },
+                                        },
+                                    },
+                                },
+                            }
+                        ),
+                    ),
+                    "resource-claim": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                                "kind": "Object",
+                                "spec": {
+                                    "providerConfigRef": {
+                                        "kind": "ClusterProviderConfig",
+                                        "name": "cluster-a-pc",
+                                    },
+                                    "readiness": {"policy": "SuccessfulCreate"},
+                                    "forProvider": {
+                                        "manifest": {
+                                            "apiVersion": "resource.k8s.io/v1",
+                                            "kind": "ResourceClaimTemplate",
+                                            "metadata": {
+                                                "name": resource.child_name("test-replica", "devices"),
+                                                "namespace": "default",
+                                            },
+                                            "spec": {
+                                                "spec": {
+                                                    "devices": {
+                                                        "requests": [
+                                                            {
+                                                                "name": "gpu",
+                                                                "exactly": {
+                                                                    "deviceClassName": "gpu.nvidia.com",
+                                                                    "count": 1,
+                                                                    "selectors": [
+                                                                        {"cel": {"expression": _GPU_CEL}},
+                                                                    ],
+                                                                },
+                                                            },
+                                                        ],
+                                                    },
+                                                },
                                             },
                                         },
                                     },
@@ -353,10 +432,64 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         )
         want3.requirements.resources["cluster"].CopyFrom(cluster_requirement)
 
+        # Case 4: the resources from case 1 now exist in observed, and the
+        # workload Object reports Available (so its derived Ready is True). The
+        # function marks every composed resource ready (it can now observe them),
+        # the workload because it's serving and the rest because existing is
+        # being ready for them. Built from case 1, mutating only what the
+        # observed-ready transition changes: the four ready flags, the
+        # acceptance/readiness conditions, and the dropped first-reconcile event.
+        req4 = fnv1.RunFunctionRequest()
+        req4.CopyFrom(req1)
+        # The workload Object as provider-kubernetes observes it back: applied
+        # (atProvider.manifest populated) and Available (its derived Ready=True).
+        req4.observed.resources["model-serving"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                        "kind": "Object",
+                        "spec": {"forProvider": {"manifest": {"kind": "Deployment"}}},
+                        "status": {
+                            "atProvider": {"manifest": {"kind": "Deployment"}},
+                            "conditions": [
+                                {
+                                    "type": "Ready",
+                                    "status": "True",
+                                    "reason": "Available",
+                                    "lastTransitionTime": "2025-01-01T00:00:00Z",
+                                },
+                            ],
+                        },
+                    }
+                ),
+            )
+        )
+        # The other three are observed simply by being present; their content
+        # doesn't matter, only that the function can see them.
+        for key in ("model-service", "model-route", "resource-claim"):
+            req4.observed.resources[key].CopyFrom(fnv1.Resource(resource=structpb.Struct()))
+
+        want4 = fnv1.RunFunctionResponse()
+        want4.CopyFrom(want1)
+        for key in ("model-serving", "model-service", "model-route", "resource-claim"):
+            want4.desired.resources[key].ready = fnv1.READY_TRUE
+        del want4.conditions[:]
+        want4.conditions.extend(
+            [
+                fnv1.Condition(type="ModelAccepted", status=fnv1.STATUS_CONDITION_TRUE, reason="Accepted"),
+                fnv1.Condition(type="ModelReady", status=fnv1.STATUS_CONDITION_TRUE, reason="Serving"),
+            ]
+        )
+        # The "Composing ..." event fires only the first reconcile (model-serving
+        # not yet observed), so it's gone now.
+        del want4.results[:]
+
         cases = [
             Case(name="cluster ready composes native Deployment", req=req1, want=want1),
             Case(name="cluster not resolved returns waiting conditions", req=req2, want=want2),
             Case(name="cluster without providerConfigRef returns waiting conditions", req=req3, want=want3),
+            Case(name="observed resources are marked ready", req=req4, want=want4),
         ]
 
         for case in cases:

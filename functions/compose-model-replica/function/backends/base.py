@@ -81,6 +81,72 @@ def apply_cache_args(args: list[str], replica: v1alpha1.ModelReplica, engine) ->
     return [*args, f"--model={CACHE_MOUNT_PATH}"]
 
 
+# Namespace for serving workloads (and their ResourceClaimTemplate) on remote
+# clusters.
+REMOTE_NAMESPACE = "default"
+
+# Port the engine serves its OpenAI-compatible API on. A contract shared with
+# the ModelEndpoint URLs, so it must not diverge between backends.
+ENGINE_PORT = 8000
+
+# Pod label carrying the ModelService name, used to wire a Service's selector to
+# its serving pods. Both backends label pods and select on it.
+LABEL_SERVING = "modelplane.ai/serving"
+
+# Response resource key for the DRA ResourceClaimTemplate.
+RESOURCE_CLAIM_KEY = "resource-claim"
+
+# DRA API the ResourceClaimTemplate targets. The manifest is a raw dict wrapped
+# in a provider-kubernetes Object, so no generated model is needed.
+_DRA_API_VERSION = "resource.k8s.io/v1"
+
+# Name of the pod-level claim that references the per-replica
+# ResourceClaimTemplate, and the suffix of the template's own name. Containers
+# reference individual requests within the claim.
+_POD_CLAIM_NAME = "devices"
+
+# CEL readiness query matching workloads whose all-replicas-available signal is
+# an Available=True condition. Both a Deployment and a LeaderWorkerSet publish
+# this condition when their desired replicas are up; neither publishes a Ready
+# condition, so provider-kubernetes' DeriveFromObject policy (which only checks
+# a Ready condition) can never mark them ready. The has() guard keeps the query
+# false (not erroring) before the workload first writes status.conditions.
+AVAILABLE_CEL = (
+    'has(object.status.conditions) && object.status.conditions.exists(c, c.type == "Available" && c.status == "True")'
+)
+
+
+def wrap_object(
+    provider_config: str,
+    manifest: dict,
+    *,
+    cel_query: str | None = None,
+) -> k8sobjv1alpha1.Object:
+    """Wrap a raw manifest in a provider-kubernetes Object for a remote cluster.
+
+    Readiness defaults to SuccessfulCreate: the Object is ready once applied.
+    That's right for resources with no meaningful runtime readiness (a Service,
+    an HTTPRoute, or a ResourceClaimTemplate that's never reconciled). Pass
+    cel_query for a workload whose readiness must reflect its observed status -
+    it selects the DeriveFromCelQuery policy with that query (see AVAILABLE_CEL).
+    """
+    readiness = (
+        k8sobjv1alpha1.Readiness(policy="DeriveFromCelQuery", celQuery=cel_query)
+        if cel_query is not None
+        else k8sobjv1alpha1.Readiness(policy="SuccessfulCreate")
+    )
+    return k8sobjv1alpha1.Object(
+        spec=k8sobjv1alpha1.Spec(
+            providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
+                kind="ClusterProviderConfig",
+                name=provider_config,
+            ),
+            readiness=readiness,
+            forProvider=k8sobjv1alpha1.ForProvider(manifest=manifest),
+        ),
+    )
+
+
 def engine_container(replica: v1alpha1.ModelReplica):
     """Return the container named 'engine'. The XRD's CEL validation
     guarantees exactly one exists, so this always succeeds.
@@ -121,6 +187,101 @@ def select_backend(replica: v1alpha1.ModelReplica) -> str:
     if not needs_cross_pod_coordination(replica):
         return NATIVE
     return LLMD
+
+
+def claim_template_name(replica: v1alpha1.ModelReplica) -> str:
+    """ResourceClaimTemplate name on the remote cluster.
+
+    Per-replica, derived from the replica's own name so concurrent replicas of
+    the same deployment on one cluster don't collide.
+    """
+    return resource.child_name(replica.metadata.name, _POD_CLAIM_NAME)
+
+
+def engine_resources() -> dict:
+    """Container resources for the engine.
+
+    GPUs bind only via DRA: the engine references the pod-level claim backed by
+    the replica's ResourceClaimTemplate and never sets a device-plugin
+    extended-resource limit. Every replica carries device requests (the XRD
+    requires them), so the claim always exists.
+
+    We emit one container claim entry referencing the pod-level claim, with no
+    `request` field, so the entire claim (all of its device requests) is made
+    available to the engine. A per-request entry would need a unique `name` per
+    entry - resources.claims is a list-map keyed on `name` alone - and the engine
+    uses every device anyway, so referencing the whole claim is both correct and
+    simplest.
+    """
+    return {"claims": [{"name": _POD_CLAIM_NAME}]}
+
+
+# Taint GPU node groups carry so non-GPU pods don't land on them. A pod that
+# claims a GPU must tolerate it to schedule there. With GPUs bound via DRA (not
+# the device plugin's extended resource), nothing injects this toleration for us
+# - the ExtendedResourceToleration admission controller only acts on
+# nvidia.com/gpu resource requests, which DRA pods don't make.
+_GPU_TOLERATION = {"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
+
+# Node label identifying the pool a node belongs to. compose-eks-cluster and
+# compose-gke-cluster stamp it on every node group they provision; the scheduler
+# pins a replica to a pool by name, and we steer the pod onto that pool by
+# selecting this label. For BYO (Existing) clusters Modelplane doesn't provision
+# the nodes, so the operator must label their pool's nodes with this key for the
+# pod to schedule (documented on the InferenceClass XRD).
+_LABEL_POOL = "modelplane.ai/pool"
+
+
+def place_pod(pod_spec: dict, replica: v1alpha1.ModelReplica) -> None:
+    """Constrain a serving pod to the placement the scheduler chose.
+
+    Pins the pod to its scheduled node pool, wires it to claim its GPUs via DRA,
+    and tolerates the GPU node taint. Every pod that shares this spec - a native
+    Deployment pod, or an llm-d LWS leader and worker - is placed identically.
+
+    The pool nodeSelector is what makes the scheduler's pool choice real: the
+    control-plane scheduler matched a pool and stamped spec.nodePoolName, but DRA
+    would otherwise place the pod on any pool whose devices satisfy the claim.
+    Without the pin the control plane's per-pool capacity accounting drifts from
+    where pods actually run, and a claim: Synthetic device (matched for placement
+    but never claimed) isn't enforced at all, since pool selection is its only
+    enforcement. nodePoolName is XRD-required, so it's always set.
+
+    The DRA claim references the per-replica ResourceClaimTemplate; every replica
+    carries device requests (the XRD requires them), so every serving pod claims
+    through DRA. A template-backed claim (not a shared ResourceClaim) gives each
+    pod in a gang its own claim.
+    """
+    pod_spec["nodeSelector"] = {_LABEL_POOL: replica.spec.nodePoolName}
+    pod_spec["resourceClaims"] = [{"name": _POD_CLAIM_NAME, "resourceClaimTemplateName": claim_template_name(replica)}]
+    pod_spec.setdefault("tolerations", []).append(_GPU_TOLERATION)
+
+
+def resource_claim_template(replica: v1alpha1.ModelReplica, provider_config: str) -> k8sobjv1alpha1.Object:
+    """Compose a DRA ResourceClaimTemplate Object for the replica.
+
+    Each resolved device request (stamped by compose-model-deployment from the
+    matched InferenceClass claim: DRA devices) becomes one DeviceRequest carrying
+    its DeviceClass, count, and CEL selectors verbatim. Every replica carries at
+    least one device request (the XRD requires them).
+    """
+    device_requests = []
+    for r in replica.spec.deviceRequests:
+        exactly: dict = {"deviceClassName": r.deviceClassName, "count": int(r.count or 1)}
+        selectors = [{"cel": {"expression": s.cel}} for s in (r.selectors or []) if s.cel]
+        if selectors:
+            exactly["selectors"] = selectors
+        device_requests.append({"name": r.name, "exactly": exactly})
+
+    return wrap_object(
+        provider_config,
+        {
+            "apiVersion": _DRA_API_VERSION,
+            "kind": "ResourceClaimTemplate",
+            "metadata": {"name": claim_template_name(replica), "namespace": REMOTE_NAMESPACE},
+            "spec": {"spec": {"devices": {"requests": device_requests}}},
+        },
+    )
 
 
 class Backend(Protocol):

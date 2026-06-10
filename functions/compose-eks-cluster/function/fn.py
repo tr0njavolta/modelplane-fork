@@ -20,9 +20,7 @@ from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 from crossplane.function.proto.v1 import run_function_pb2_grpc as grpcv1
 from models.ai.modelplane.infrastructure.ekscluster import v1alpha1
 from models.io.crossplane.m.helm.providerconfig import v1beta1 as helmpcv1beta1
-from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 from models.io.crossplane.m.kubernetes.providerconfig import v1alpha1 as k8spcv1alpha1
-from models.io.crossplane.protection.usage import v1beta1 as usagev1beta1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 from models.io.upbound.m.aws.ec2.internetgateway import v1beta1 as igwv1beta1
 from models.io.upbound.m.aws.ec2.route import v1beta1 as routev1beta1
@@ -73,11 +71,7 @@ _AMI_TYPE_SYSTEM = "AL2023_x86_64_STANDARD"
 _AMI_TYPE_GPU = "AL2023_x86_64_NVIDIA"
 
 # GPU taint applied to GPU node groups so non-GPU pods don't land on
-# expensive GPU nodes. GPU workloads still schedule because EKS enables
-# the ExtendedResourceToleration admission controller, which injects a
-# matching nvidia.com/gpu toleration into any pod that requests the
-# nvidia.com/gpu extended resource. The device plugin DaemonSet tolerates
-# the taint explicitly (it doesn't request the resource).
+# expensive GPU nodes.
 _GPU_TAINT_KEY = "nvidia.com/gpu"
 _GPU_TAINT_VALUE = "true"
 _GPU_TAINT_EFFECT = "NO_SCHEDULE"
@@ -107,23 +101,6 @@ _ASSUME_ROLE_NODE = (
 # networking, kube-proxy programs node iptables, and coredns provides
 # in-cluster DNS. All three are required for a functional cluster.
 _ADDONS = ("vpc-cni", "kube-proxy", "coredns")
-
-# NVIDIA device plugin. The GPU node groups run the AL2023 NVIDIA AMI,
-# which ships the driver and container toolkit but not the Kubernetes
-# device plugin. Without the plugin, nodes never advertise the
-# nvidia.com/gpu resource and GPU pods stay Pending. Managed clusters
-# like GKE install this automatically; EKS does not, so we install it.
-# It runs as a DaemonSet on GPU nodes (selected by the GPU pool label)
-# and tolerates the GPU taint those nodes carry.
-_DEVICE_PLUGIN_IMAGE = "nvcr.io/nvidia/k8s-device-plugin:v0.19.2"
-_DEVICE_PLUGIN_NAME = "nvidia-device-plugin-daemonset"
-_DEVICE_PLUGIN_NAMESPACE = "kube-system"
-
-# Label distinguishing the device-plugin Object from other composed
-# provider-kubernetes Objects, so the deletion-ordering Usages can select
-# it specifically by controller ref + label.
-_LABEL_RESOURCE = "modelplane.ai/resource"
-_RESOURCE_DEVICE_PLUGIN = "device-plugin"
 
 
 def _kubeconfig_secret_name(xr):
@@ -179,7 +156,6 @@ class Composer:
         self.compose_node_groups()
         self.compose_addons()
         self.compose_provider_configs()
-        self.compose_device_plugin()
         self.write_status()
         self.mark_readiness()
 
@@ -551,152 +527,6 @@ class Composer:
             ),
         )
 
-    def compose_device_plugin(self):
-        """Compose the NVIDIA device plugin DaemonSet on the cluster.
-
-        Gated on ClusterAuth being ready: the plugin is applied via
-        provider-kubernetes using the kubeconfig that ClusterAuth writes,
-        so there's nothing to target until that Secret exists. Once
-        observed, the Object stays composed so it isn't dropped on later
-        reconciles.
-
-        Deletion ordering is handled by Usages (see compose_device_plugin_
-        usages): the Object's Delete uninstalls the DaemonSet from the
-        cluster, which only works while the Cluster (API endpoint) and
-        ClusterAuth (kubeconfig credentials) still exist. The Usages hold
-        both until the Object is gone.
-        """
-        kubeconfig_secret = _kubeconfig_secret_name(self.xr)
-        auth_ready = resource.get_condition(self.req.observed.resources.get("cluster-auth"), "Ready").status == "True"
-        if not (auth_ready or "device-plugin" in self.req.observed.resources):
-            return
-
-        resource.update(
-            self.rsp.desired.resources["device-plugin"],
-            k8sobjv1alpha1.Object(
-                metadata=metav1.ObjectMeta(labels={_LABEL_RESOURCE: _RESOURCE_DEVICE_PLUGIN}),
-                spec=k8sobjv1alpha1.Spec(
-                    providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
-                        kind="ProviderConfig",
-                        name=kubeconfig_secret,
-                    ),
-                    forProvider=k8sobjv1alpha1.ForProvider(
-                        manifest=self._device_plugin_manifest(),
-                    ),
-                ),
-            ),
-        )
-        self.compose_device_plugin_usages()
-
-    def compose_device_plugin_usages(self):
-        """Compose Usages ordering the device-plugin Object's deletion.
-
-        The Object deletes the DaemonSet from the cluster via provider-
-        kubernetes, which needs both the cluster's API endpoint and the
-        kubeconfig credentials ClusterAuth writes. Without ordering, the
-        EKSCluster XR's composed resources delete concurrently and the
-        Object hangs on its finalizer once the Cluster or the kubeconfig
-        Secret is gone. These Usages hold the Cluster and ClusterAuth
-        until the Object is deleted first.
-        """
-        for key, of_kind in (
-            ("usage-cluster-by-device-plugin", "Cluster"),
-            ("usage-cluster-auth-by-device-plugin", "ClusterAuth"),
-        ):
-            resource.update(
-                self.rsp.desired.resources[key],
-                usagev1beta1.Usage(
-                    spec=usagev1beta1.Spec(
-                        of=usagev1beta1.Of(
-                            apiVersion="eks.aws.m.upbound.io/v1beta1",
-                            kind=of_kind,
-                            resourceSelector=usagev1beta1.ResourceSelectorModel(matchControllerRef=True),
-                        ),
-                        by=usagev1beta1.By(
-                            apiVersion="kubernetes.m.crossplane.io/v1alpha1",
-                            kind="Object",
-                            resourceSelector=usagev1beta1.ResourceSelector(
-                                matchControllerRef=True,
-                                matchLabels={_LABEL_RESOURCE: _RESOURCE_DEVICE_PLUGIN},
-                            ),
-                        ),
-                        replayDeletion=True,
-                    ),
-                ),
-            )
-            self.rsp.desired.resources[key].ready = fnv1.READY_TRUE
-
-    def _device_plugin_manifest(self) -> dict:
-        """Return the NVIDIA device plugin DaemonSet manifest.
-
-        Scheduled onto GPU nodes only (the GPU pool label) and tolerating
-        the GPU taint those nodes carry, so it doesn't run on the system
-        pool where there are no GPUs to advertise.
-        """
-        labels = {"name": _DEVICE_PLUGIN_NAME}
-        return {
-            "apiVersion": "apps/v1",
-            "kind": "DaemonSet",
-            "metadata": {
-                "name": _DEVICE_PLUGIN_NAME,
-                "namespace": _DEVICE_PLUGIN_NAMESPACE,
-            },
-            "spec": {
-                "selector": {"matchLabels": labels},
-                "updateStrategy": {"type": "RollingUpdate"},
-                "template": {
-                    "metadata": {"labels": labels},
-                    "spec": {
-                        "priorityClassName": "system-node-critical",
-                        "tolerations": [
-                            {
-                                "key": _GPU_TAINT_KEY,
-                                "operator": "Exists",
-                                "effect": "NoSchedule",
-                            },
-                        ],
-                        # Run only on GPU nodes. The GPU pool label is set
-                        # to the accelerator type (e.g. nvidia-t4), so match
-                        # on the key's presence with Exists rather than a
-                        # fixed value.
-                        "affinity": {
-                            "nodeAffinity": {
-                                "requiredDuringSchedulingIgnoredDuringExecution": {
-                                    "nodeSelectorTerms": [
-                                        {
-                                            "matchExpressions": [
-                                                {"key": _LABEL_GPU, "operator": "Exists"},
-                                            ],
-                                        },
-                                    ],
-                                },
-                            },
-                        },
-                        "containers": [
-                            {
-                                "name": "nvidia-device-plugin-ctr",
-                                "image": _DEVICE_PLUGIN_IMAGE,
-                                "env": [{"name": "FAIL_ON_INIT_ERROR", "value": "false"}],
-                                "securityContext": {
-                                    "allowPrivilegeEscalation": False,
-                                    "capabilities": {"drop": ["ALL"]},
-                                },
-                                "volumeMounts": [
-                                    {"name": "device-plugin", "mountPath": "/var/lib/kubelet/device-plugins"},
-                                ],
-                            },
-                        ],
-                        "volumes": [
-                            {
-                                "name": "device-plugin",
-                                "hostPath": {"path": "/var/lib/kubelet/device-plugins"},
-                            },
-                        ],
-                    },
-                },
-            },
-        }
-
     def write_status(self):
         status = v1alpha1.Status(
             secrets=[
@@ -739,9 +569,6 @@ class Composer:
             managed_resources.append(f"route-table-association-{i}")
         managed_resources += [f"nodegroup-{p.name}" for p in self.xr.spec.nodePools]
         managed_resources += [f"addon-{a}" for a in _ADDONS]
-
-        if "device-plugin" in self.rsp.desired.resources:
-            managed_resources.append("device-plugin")
 
         for r in managed_resources:
             if resource.get_condition(self.req.observed.resources.get(r), "Ready").status == "True":

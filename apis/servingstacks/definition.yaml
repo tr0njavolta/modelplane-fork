@@ -103,6 +103,24 @@ spec:
                     description: LeaderWorkerSet chart version.
                     minLength: 1
                     maxLength: 32
+                  nodeFeatureDiscovery:
+                    type: string
+                    default: "0.18.3"
+                    description: >-
+                      Node Feature Discovery chart version. NFD labels GPU
+                      nodes so the NVIDIA DRA driver targets its kubelet
+                      plugin to them.
+                    minLength: 1
+                    maxLength: 32
+                  nvidiaDraDriver:
+                    type: string
+                    default: "0.4.0"
+                    description: >-
+                      NVIDIA DRA driver chart version. Publishes GPUs as DRA
+                      ResourceSlices and the gpu.nvidia.com DeviceClass that
+                      ModelReplica ResourceClaims bind through.
+                    minLength: 1
+                    maxLength: 32
               gateway:
                 type: object
                 description: >-

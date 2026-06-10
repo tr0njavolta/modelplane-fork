@@ -25,7 +25,7 @@ spec:
         properties:
           spec:
             type: object
-            required: [replicas, workers]
+            required: [replicas, workers, nodeSelector]
             properties:
               replicas:
                 type: integer
@@ -43,6 +43,85 @@ spec:
                   matchLabels:
                     type: object
                     x-kubernetes-preserve-unknown-fields: true
+              nodeSelector:
+                type: object
+                description: >-
+                  Node-level matching, a list of device requests mirroring a
+                  DRA ResourceClaim. The scheduler matches each request against a
+                  candidate pool's InferenceClass devices (surfaced on
+                  InferenceCluster status.gpuPools) and pins the replica to a
+                  pool that satisfies every request. claim: DRA requests also
+                  become DeviceRequests in the ResourceClaim the serving pods
+                  bind GPUs through. Required: GPUs bind only via DRA, so a
+                  deployment must declare the devices its model needs. At least
+                  one request must resolve to a claimable (claim: DRA) device;
+                  the serving workload binds its GPUs through the resulting
+                  ResourceClaim. Synthetic devices refine placement but are never
+                  claimed, so a nodeSelector that matches only synthetic devices
+                  leaves the workload nothing to claim - the scheduler treats
+                  such a pool as ineligible and the deployment reports
+                  InsufficientCapacity.
+                required: [devices]
+                properties:
+                  devices:
+                    type: array
+                    description: >-
+                      Device requests. A pool matches a request when it has a
+                      device whose count covers the request and whose driver,
+                      attributes, and capacity satisfy every selector.
+                    minItems: 1
+                    maxItems: 16
+                    x-kubernetes-list-type: map
+                    x-kubernetes-list-map-keys: [name]
+                    items:
+                      type: object
+                      required: [name, selectors]
+                      properties:
+                        name:
+                          type: string
+                          description: >-
+                            Name of this request. Mirrors a DRA DeviceRequest
+                            name; carried through to the ResourceClaim.
+                          minLength: 1
+                          maxLength: 63
+                        count:
+                          type: integer
+                          description: >-
+                            How many matching devices a node must have. For a GPU
+                            request this is the per-node GPU count (matches the
+                            worker topology's GPUs per node).
+                          default: 1
+                          minimum: 1
+                          maximum: 64
+                        selectors:
+                          type: array
+                          description: >-
+                            Selectors a device must satisfy, all ANDed. Each is a
+                            one-of; today only cel is supported.
+                          minItems: 1
+                          maxItems: 8
+                          x-kubernetes-list-type: atomic
+                          items:
+                            type: object
+                            # A selector must carry at least one selector kind
+                            # (today only cel). Without this an empty {} selector
+                            # would match every device, and since nodeSelector is
+                            # the only path to a GPU that silently claims an
+                            # arbitrary one.
+                            minProperties: 1
+                            properties:
+                              cel:
+                                type: string
+                                description: >-
+                                  A DRA CEL expression evaluated against one
+                                  device. Reads device.driver,
+                                  device.attributes["<driver>"].<name> (typed),
+                                  and device.capacity["<driver>"].<name> (a
+                                  Quantity), with quantity() and semver() helpers,
+                                  e.g.
+                                  device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("141Gi")) >= 0.
+                                minLength: 1
+                                maxLength: 10240
               modelCacheRef:
                 type: object
                 required: [name]
