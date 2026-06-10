@@ -61,7 +61,7 @@ spec:
       selectors:
       - cel: device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("141Gi")) >= 0
     - name: nic
-      count: 8
+      count: 1
       selectors:
       - cel: device.attributes["nic.nvidia.com"].linkType == "infiniband"
   # Prefill role. Self-contained, with its own (compute-bound, single-GPU) hardware.
@@ -97,10 +97,10 @@ The `prefill` block is self-contained: its own `workers.count`, `topology`,
 the root, because explicit repetition is easier to reason about than an implicit
 merge. This matches the shape design.md already sketches for disaggregation.
 
-The prefill:decode ratio is the two `workers.count` values. It is a topology
-parameter fixed per deployment, not a scaling knob, and both counts are
-explicit. There is no default ratio, consistent with design.md avoiding
-cross-resource defaulting.
+The prefill:decode ratio is the two `workers.count` values — a topology
+parameter fixed per deployment, not a scaling knob. Each `count` defaults to 1,
+so a disaggregated deployment that omits them runs 1:1; set them explicitly to
+tune the ratio.
 
 Because the block carries its own `nodeSelector` and `topology`, an operator can
 place prefill and decode on different GPU classes through the normal
@@ -194,8 +194,9 @@ mature.
 - **Connector and model compatibility.** Both roles run a compatible KV
   connector (`NixlConnector`, paired `kv_role`) on the same model and dtype,
   with compatible parallelism so the KV layout matches.
-- **Both roles explicit.** A disaggregated deployment sets both `workers.count`
-  and `prefill.workers.count`.
+- **Ratio.** The prefill:decode ratio is `workers.count` to
+  `prefill.workers.count`; each defaults to 1, so omitting them runs 1:1. Set
+  them explicitly to tune the ratio.
 
 ## Alternatives considered
 
@@ -269,8 +270,10 @@ each role on a chosen GPU class. It does not. Placement stays a user-declared
 workload. Modelplane exposes the knob and guards correctness; it does not make
 in-cluster scheduling decisions.
 
-### An implicit prefill:decode ratio
+### Requiring both counts to be explicit
 
-A default ratio would let a deployment request disaggregation without prefill
-counts. Both counts are required instead, so the topology is explicit and
-nothing depends on cross-resource defaulting.
+We considered rejecting a disaggregated deployment that doesn't set both
+`workers.count` and `prefill.workers.count`, to force the ratio to be stated. We
+don't: `count` already defaults to 1, and enforcing explicit-only would mean
+dropping that default — making `count` mandatory for unified deployments too. A
+1:1 default is a reasonable starting point; tuning the ratio is an explicit edit.
