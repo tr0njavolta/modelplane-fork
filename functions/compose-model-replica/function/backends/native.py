@@ -11,15 +11,6 @@ from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 
 from function.backends import base
 
-# Namespace for serving workloads on remote clusters.
-_REMOTE_NAMESPACE = base.REMOTE_NAMESPACE
-
-# Port the engine serves the OpenAI-compatible API on.
-_ENGINE_PORT = 8000
-
-# Label joining the Deployment, its pods, and the Service selector.
-_LABEL_SERVING = "modelplane.ai/serving"
-
 
 class NativeBackend:
     def build(
@@ -33,7 +24,7 @@ class NativeBackend:
         # the deployment — so multiple replicas of one deployment can co-exist on
         # the same InferenceCluster without colliding on the remote cluster.
         name = replica.metadata.name
-        labels = {_LABEL_SERVING: name}
+        labels = {base.LABEL_SERVING: name}
 
         cache_volumes, cache_volume_mounts = base.cache_mounts(replica)
         args = base.apply_cache_args(list(engine.args or []), replica, engine)
@@ -42,14 +33,14 @@ class NativeBackend:
             "name": "engine",
             "image": engine.image,
             "args": args,
-            "ports": [{"containerPort": _ENGINE_PORT}],
+            "ports": [{"containerPort": base.ENGINE_PORT}],
             # GPUs bind via DRA: the engine references the pod-level claim backed
             # by the replica's ResourceClaimTemplate.
             "resources": base.engine_resources(),
             # vLLM tensor parallelism needs a large /dev/shm.
             "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}, *cache_volume_mounts],
             "readinessProbe": {
-                "httpGet": {"path": "/health", "port": _ENGINE_PORT},
+                "httpGet": {"path": "/health", "port": base.ENGINE_PORT},
                 "initialDelaySeconds": 30,
                 "periodSeconds": 10,
             },
@@ -72,7 +63,7 @@ class NativeBackend:
         deployment = {
             "apiVersion": "apps/v1",
             "kind": "Deployment",
-            "metadata": {"name": name, "namespace": _REMOTE_NAMESPACE},
+            "metadata": {"name": name, "namespace": base.REMOTE_NAMESPACE},
             "spec": {
                 "replicas": int(replica.spec.workers.count or 1),
                 "selector": {"matchLabels": labels},
@@ -83,14 +74,14 @@ class NativeBackend:
         service = {
             "apiVersion": "v1",
             "kind": "Service",
-            "metadata": {"name": name, "namespace": _REMOTE_NAMESPACE},
-            "spec": {"selector": labels, "ports": [{"port": 80, "targetPort": _ENGINE_PORT}]},
+            "metadata": {"name": name, "namespace": base.REMOTE_NAMESPACE},
+            "spec": {"selector": labels, "ports": [{"port": 80, "targetPort": base.ENGINE_PORT}]},
         }
 
         http_route = {
             "apiVersion": "gateway.networking.k8s.io/v1",
             "kind": "HTTPRoute",
-            "metadata": {"name": name, "namespace": _REMOTE_NAMESPACE},
+            "metadata": {"name": name, "namespace": base.REMOTE_NAMESPACE},
             "spec": {
                 "parentRefs": [{"name": "inference-gateway", "namespace": "modelplane-system"}],
                 "rules": [

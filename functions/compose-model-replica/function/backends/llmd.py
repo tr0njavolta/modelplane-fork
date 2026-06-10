@@ -42,15 +42,6 @@ from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 
 from function.backends import base
 
-# Namespace for serving workloads on remote clusters.
-_REMOTE_NAMESPACE = base.REMOTE_NAMESPACE
-
-# Port the engine serves the OpenAI-compatible API on.
-_ENGINE_PORT = 8000
-
-# Label joining the LWS pods and the Service selector (mirrors native.py).
-_LABEL_SERVING = "modelplane.ai/serving"
-
 # Label set only on the LWS leader pod. The Service selects on it so traffic
 # reaches the gang leader (the only pod that serves the OpenAI API for vLLM
 # multi-node; for symmetric engines like SGLang the API server also runs on
@@ -137,9 +128,9 @@ class LLMDBackend:
             if env:
                 c["env"] = env
             if serving:
-                c["ports"] = [{"containerPort": _ENGINE_PORT}]
+                c["ports"] = [{"containerPort": base.ENGINE_PORT}]
                 c["readinessProbe"] = {
-                    "httpGet": {"path": "/health", "port": _ENGINE_PORT},
+                    "httpGet": {"path": "/health", "port": base.ENGINE_PORT},
                     "initialDelaySeconds": 30,
                     "periodSeconds": 10,
                 }
@@ -160,11 +151,11 @@ class LLMDBackend:
         # Only the leader serves the OpenAI API → it carries the role label the
         # Service selects on, plus the serving port and readiness probe.
         leader_pod = {
-            "metadata": {"labels": {_LABEL_SERVING: name, _LABEL_ROLE: "leader"}},
+            "metadata": {"labels": {base.LABEL_SERVING: name, _LABEL_ROLE: "leader"}},
             "spec": pod_spec(container(leader_command, serving=True)),
         }
         worker_pod = {
-            "metadata": {"labels": {_LABEL_SERVING: name}},
+            "metadata": {"labels": {base.LABEL_SERVING: name}},
             "spec": pod_spec(container(worker_command, serving=False)),
         }
 
@@ -172,7 +163,7 @@ class LLMDBackend:
         leader_worker_set = {
             "apiVersion": "leaderworkerset.x-k8s.io/v1",
             "kind": "LeaderWorkerSet",
-            "metadata": {"name": name, "namespace": _REMOTE_NAMESPACE},
+            "metadata": {"name": name, "namespace": base.REMOTE_NAMESPACE},
             "spec": {
                 "replicas": int(replica.spec.workers.count or 1),
                 "leaderWorkerTemplate": {
@@ -187,10 +178,10 @@ class LLMDBackend:
         service = {
             "apiVersion": "v1",
             "kind": "Service",
-            "metadata": {"name": name, "namespace": _REMOTE_NAMESPACE},
+            "metadata": {"name": name, "namespace": base.REMOTE_NAMESPACE},
             "spec": {
-                "selector": {_LABEL_SERVING: name, _LABEL_ROLE: "leader"},
-                "ports": [{"port": 80, "targetPort": _ENGINE_PORT}],
+                "selector": {base.LABEL_SERVING: name, _LABEL_ROLE: "leader"},
+                "ports": [{"port": 80, "targetPort": base.ENGINE_PORT}],
             },
         }
 
@@ -198,7 +189,7 @@ class LLMDBackend:
         http_route = {
             "apiVersion": "gateway.networking.k8s.io/v1",
             "kind": "HTTPRoute",
-            "metadata": {"name": name, "namespace": _REMOTE_NAMESPACE},
+            "metadata": {"name": name, "namespace": base.REMOTE_NAMESPACE},
             "spec": {
                 "parentRefs": [{"name": "inference-gateway", "namespace": "modelplane-system"}],
                 "rules": [

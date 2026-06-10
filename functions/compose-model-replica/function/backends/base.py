@@ -85,6 +85,14 @@ def apply_cache_args(args: list[str], replica: v1alpha1.ModelReplica, engine) ->
 # clusters.
 REMOTE_NAMESPACE = "default"
 
+# Port the engine serves its OpenAI-compatible API on. A contract shared with
+# the ModelEndpoint URLs, so it must not diverge between backends.
+ENGINE_PORT = 8000
+
+# Pod label carrying the ModelService name, used to wire a Service's selector to
+# its serving pods. Both backends label pods and select on it.
+LABEL_SERVING = "modelplane.ai/serving"
+
 # Response resource key for the DRA ResourceClaimTemplate.
 RESOURCE_CLAIM_KEY = "resource-claim"
 
