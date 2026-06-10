@@ -136,9 +136,20 @@ Gateway API Inference Extension (GAIE) `InferencePool` fronted by a swappable
 endpoint-picker (EPP), defaulting to the llm-d inference-scheduler — no bespoke
 proxy.
 
+An [`InferencePool`][gaie] is a Gateway API backend (used in an `HTTPRoute` like
+a `Service`) that groups model-serving pods and delegates the per-request
+endpoint choice to an EPP over the Endpoint Picker Protocol. It is the standard
+seam where inference-aware routing — prefix-cache locality, load, prefill/decode
+sequencing — plugs in, instead of the round-robin a plain `Service` does.
+
+[gaie]: https://gateway-api-inference-extension.sigs.k8s.io/
+
 **One `InferencePool` fronts both roles.** Its selector matches a deployment's
 prefill and decode pods alike; the EPP partitions them internally by a role
-label (`llm-d.ai/role: prefill|decode`). Per request the EPP picks a decode pod,
+label (`llm-d.ai/role: prefill|decode`) its prefill/decode filters select on.
+Modelplane stamps that `llm-d.ai/role` label on each role's pods — alongside the
+`modelplane.ai/pd-role` label its own compositions use internally, since the EPP
+does not read Modelplane's label. Per request the EPP picks a decode pod,
 then a prefill pod, and passes the decode pod the chosen prefill's address (an
 `x-prefiller-host-port` header). A small routing sidecar on the decode pod
 forwards the prompt to that prefill, which runs prefill and transfers its KV
@@ -157,12 +168,14 @@ of the per-role topology.
 
 **Gateway.** `InferencePool` as an `HTTPRoute` backend needs a GAIE-conformant
 gateway; core Envoy Gateway — which ServingStack installs today for plain
-`HTTPRoute → Service` routing — does not serve it. Modelplane therefore runs
-**Envoy AI Gateway** on the serving clusters: it layers on the same Envoy
-Gateway data plane, so existing plain routes are unaffected. Unified serving
-keeps its plain `Service` route for now; the `InferencePool`/EPP path is used by
-disaggregated serving (and can later carry KV-/load-aware routing for unified
-serving too).
+`HTTPRoute → Service` routing — does not serve it. Of the conformant options
+(Envoy AI Gateway, Istio, kgateway), **Modelplane chooses Envoy AI Gateway**: it
+layers on the Envoy Gateway data plane ServingStack already runs (an additive
+controller + CRDs, not a gateway swap), so it's the lowest-friction change and
+leaves existing plain routes untouched — where Istio or kgateway would replace
+the gateway. Unified serving keeps its plain `Service` route for now; the
+`InferencePool`/EPP path is used by disaggregated serving (and can later carry
+KV-/load-aware routing for unified serving too).
 
 ## Constraints
 
