@@ -166,12 +166,18 @@ def _replica(
     deployment_name: str,
     cluster_name: str,
     *,
+    pool: str = "default",
     index: int = 0,
     tensor: int = 1,
     pipeline: int = 1,
     count: int = 1,
 ) -> mrv1alpha1.ModelReplica:
-    """Construct an observed ModelReplica pinned to a (cluster, index)."""
+    """Construct an observed ModelReplica pinned to a (cluster, index).
+
+    nodePoolName and deviceRequests are XRD-required, so every observed replica
+    carries them; the pool defaults to "default" for cases where the specific
+    pool isn't material.
+    """
     return mrv1alpha1.ModelReplica(
         metadata=metav1.ObjectMeta(
             name=f"{deployment_name}-{cluster_name}-{index}",
@@ -185,6 +191,15 @@ def _replica(
         ),
         spec=mrv1alpha1.SpecModel(
             clusterName=cluster_name,
+            nodePoolName=pool,
+            deviceRequests=[
+                mrv1alpha1.DeviceRequest(
+                    name="gpu",
+                    deviceClassName="gpu.nvidia.com",
+                    count=1,
+                    selectors=[mrv1alpha1.Selector(cel=_MEM_141)],
+                ),
+            ],
             workers=mrv1alpha1.Workers(
                 count=count,
                 topology=mrv1alpha1.Topology(tensor=tensor, pipeline=pipeline),
@@ -208,10 +223,10 @@ def _replica_with_pool(
     pipeline: int = 1,
     count: int = 1,
 ) -> mrv1alpha1.ModelReplica:
-    """An observed ModelReplica pinned to a cluster AND a node pool."""
-    r = _replica(deployment_name, cluster_name, index=index, tensor=tensor, pipeline=pipeline, count=count)
-    r.spec.nodePoolName = pool
-    return r
+    """An observed ModelReplica pinned to a cluster AND a specific node pool."""
+    return _replica(
+        deployment_name, cluster_name, pool=pool, index=index, tensor=tensor, pipeline=pipeline, count=count
+    )
 
 
 # Convenience: the resolved DeviceRequest for a default GPU request matching a
@@ -671,20 +686,48 @@ class TestScheduleNodeSelector(unittest.TestCase):
             ),
             Case(
                 name="first matching pool wins (deterministic)",
-                deployment=_deployment(requests=[_request(name="nic", cel_exprs=[_IB])]),
+                # Both pools carry a claimable GPU; the synthetic NIC's link type
+                # is the discriminator. Only the infiniband pool satisfies the
+                # nic selector, so it wins regardless of pool order.
+                deployment=_deployment(
+                    requests=[
+                        _request(name="gpu", cel_exprs=[_MEM_141]),
+                        _request(name="nic", cel_exprs=[_IB]),
+                    ]
+                ),
                 clusters=[
                     _cluster(
                         "cluster-a",
                         pools=[
-                            _pool("dev", devices=[_nic_device(link_type="gpudirect-tcpx")]),
-                            _pool("frontier", devices=[_nic_device(link_type="infiniband")]),
+                            _pool("dev", devices=[_gpu_device(), _nic_device(link_type="gpudirect-tcpx")]),
+                            _pool("frontier", devices=[_gpu_device(), _nic_device(link_type="infiniband")]),
                         ],
                     )
                 ],
                 all_replicas=[],
-                # nic is synthetic, so resolved requests is empty, but the pool
-                # is still recorded.
-                want=[_cand(name="cluster-a", gateway_address="10.0.0.1", pool="frontier", device_requests=[])],
+                want=[
+                    _cand(
+                        name="cluster-a",
+                        gateway_address="10.0.0.1",
+                        pool="frontier",
+                        device_requests=[_resolved(name="gpu")],
+                    )
+                ],
+            ),
+            Case(
+                name="synthetic-only selector leaves nothing to claim, pool ineligible",
+                # The sole request matches a synthetic NIC. The replica's serving
+                # workload would have no ResourceClaim to bind GPUs through, so
+                # the pool is not a viable host and nothing is scheduled.
+                deployment=_deployment(requests=[_request(name="nic", cel_exprs=[_IB])]),
+                clusters=[
+                    _cluster(
+                        "cluster-a",
+                        pools=[_pool("frontier", devices=[_gpu_device(), _nic_device(link_type="infiniband")])],
+                    )
+                ],
+                all_replicas=[],
+                want=[],
             ),
             Case(
                 name="retained replica keeps its pinned pool",
@@ -702,49 +745,100 @@ class TestScheduleNodeSelector(unittest.TestCase):
             ),
             Case(
                 name="selector drift re-places replica onto a now-matching pool",
-                deployment=_deployment(requests=[_request(name="nic", cel_exprs=[_IB])]),
+                # A claimable GPU keeps both pools viable hosts; the synthetic
+                # NIC's link type is the drifting discriminator.
+                deployment=_deployment(
+                    requests=[
+                        _request(name="gpu", cel_exprs=[_MEM_141]),
+                        _request(name="nic", cel_exprs=[_IB]),
+                    ]
+                ),
                 clusters=[
                     _cluster(
                         "cluster-a",
                         pools=[
-                            _pool("a", devices=[_nic_device(link_type="gpudirect-tcpx")]),
-                            _pool("b", devices=[_nic_device(link_type="infiniband")]),
+                            _pool("a", devices=[_gpu_device(), _nic_device(link_type="gpudirect-tcpx")]),
+                            _pool("b", devices=[_gpu_device(), _nic_device(link_type="infiniband")]),
                         ],
                     )
                 ],
                 all_replicas=[_replica_with_pool("my-model", "cluster-a", pool="a")],
-                want=[_cand(name="cluster-a", gateway_address="10.0.0.1", pool="b", device_requests=[])],
+                want=[
+                    _cand(
+                        name="cluster-a",
+                        gateway_address="10.0.0.1",
+                        pool="b",
+                        device_requests=[_resolved(name="gpu")],
+                    )
+                ],
             ),
             Case(
                 name="pinned pool that still matches stays pinned (attribute drift is sticky)",
-                deployment=_deployment(requests=[_request(name="nic", cel_exprs=[_IB])]),
+                deployment=_deployment(
+                    requests=[
+                        _request(name="gpu", cel_exprs=[_MEM_141]),
+                        _request(name="nic", cel_exprs=[_IB]),
+                    ]
+                ),
                 clusters=[
                     _cluster(
                         "cluster-a",
                         pools=[
-                            _pool("a", devices=[_nic_device(link_type="infiniband")]),
-                            _pool("b", devices=[_nic_device(link_type="infiniband")]),
+                            _pool("a", devices=[_gpu_device(), _nic_device(link_type="infiniband")]),
+                            _pool("b", devices=[_gpu_device(), _nic_device(link_type="infiniband")]),
                         ],
                     )
                 ],
                 all_replicas=[_replica_with_pool("my-model", "cluster-a", pool="a")],
-                want=[_cand(name="cluster-a", gateway_address="10.0.0.1", pool="a", device_requests=[])],
+                want=[
+                    _cand(
+                        name="cluster-a",
+                        gateway_address="10.0.0.1",
+                        pool="a",
+                        device_requests=[_resolved(name="gpu")],
+                    )
+                ],
             ),
             Case(
                 name="no matching pool anywhere drops the replica entirely",
-                deployment=_deployment(requests=[_request(name="nic", cel_exprs=[_IB])]),
-                clusters=[_cluster("cluster-a", pools=[_pool("a", devices=[_nic_device(link_type="gpudirect-tcpx")])])],
+                deployment=_deployment(
+                    requests=[
+                        _request(name="gpu", cel_exprs=[_MEM_141]),
+                        _request(name="nic", cel_exprs=[_IB]),
+                    ]
+                ),
+                clusters=[
+                    _cluster(
+                        "cluster-a",
+                        pools=[_pool("a", devices=[_gpu_device(), _nic_device(link_type="gpudirect-tcpx")])],
+                    )
+                ],
                 all_replicas=[_replica_with_pool("my-model", "cluster-a", pool="a")],
                 want=[],
             ),
             Case(
                 name="replica with no pool pin is re-placed when a selector now applies",
-                deployment=_deployment(requests=[_request(name="nic", cel_exprs=[_IB])]),
+                deployment=_deployment(
+                    requests=[
+                        _request(name="gpu", cel_exprs=[_MEM_141]),
+                        _request(name="nic", cel_exprs=[_IB]),
+                    ]
+                ),
                 clusters=[
-                    _cluster("cluster-a", pools=[_pool("frontier", devices=[_nic_device(link_type="infiniband")])])
+                    _cluster(
+                        "cluster-a",
+                        pools=[_pool("frontier", devices=[_gpu_device(), _nic_device(link_type="infiniband")])],
+                    )
                 ],
                 all_replicas=[_replica("my-model", "cluster-a")],
-                want=[_cand(name="cluster-a", gateway_address="10.0.0.1", pool="frontier", device_requests=[])],
+                want=[
+                    _cand(
+                        name="cluster-a",
+                        gateway_address="10.0.0.1",
+                        pool="frontier",
+                        device_requests=[_resolved(name="gpu")],
+                    )
+                ],
             ),
             Case(
                 name="dropping a non-matching replica frees its node for the refill",

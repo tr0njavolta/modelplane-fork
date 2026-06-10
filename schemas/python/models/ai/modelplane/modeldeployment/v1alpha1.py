@@ -199,7 +199,7 @@ class SpecModel(BaseModel):
     """
     nodeSelector: NodeSelector
     """
-    Node-level matching, a list of device requests mirroring a DRA ResourceClaim. The scheduler matches each request against a candidate pool's InferenceClass devices (surfaced on InferenceCluster status.gpuPools) and pins the replica to a pool that satisfies every request. claim: DRA requests also become DeviceRequests in the ResourceClaim the serving pods bind GPUs through. Required: GPUs bind only via DRA, so a deployment must declare the devices its model needs.
+    Node-level matching, a list of device requests mirroring a DRA ResourceClaim. The scheduler matches each request against a candidate pool's InferenceClass devices (surfaced on InferenceCluster status.gpuPools) and pins the replica to a pool that satisfies every request. claim: DRA requests also become DeviceRequests in the ResourceClaim the serving pods bind GPUs through. Required: GPUs bind only via DRA, so a deployment must declare the devices its model needs. At least one request must resolve to a claimable (claim: DRA) device; the serving workload binds its GPUs through the resulting ResourceClaim. Synthetic devices refine placement but are never claimed, so a nodeSelector that matches only synthetic devices leaves the workload nothing to claim - the scheduler treats such a pool as ineligible and the deployment reports InsufficientCapacity.
     """
     replicas: conint(ge=1, le=10)
     """

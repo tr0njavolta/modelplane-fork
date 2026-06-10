@@ -138,17 +138,17 @@ class SpecModel(BaseModel):
     """
     Configures how Crossplane will reconcile this composite resource
     """
-    deviceRequests: list[DeviceRequest] | None = Field(None, max_length=16)
+    deviceRequests: list[DeviceRequest] = Field(..., max_length=16, min_length=1)
     """
-    Resolved DRA device requests for the matched pool. The parent ModelDeployment's compose function joins the nodeSelector requests with the matched InferenceClass devices and stamps the claim: DRA devices here. This function turns each into a DeviceRequest in a DRA ResourceClaim for the serving pods. Empty when the deployment has no nodeSelector or matched only synthetic devices.
+    Resolved DRA device requests for the matched pool. The parent ModelDeployment's compose function joins the nodeSelector requests with the matched InferenceClass devices and stamps the claim: DRA devices here. This function turns each into a DeviceRequest in a DRA ResourceClaim for the serving pods. At least one request is always present: the scheduler only pins a replica to a pool that yields a claimable device, so the serving workload always has a ResourceClaim to bind through.
     """
     modelCacheRef: ModelCacheRef | None = None
     """
     Optional reference to a ModelCache mounted into the engine pod. Inherited verbatim from the parent ModelDeployment.
     """
-    nodePoolName: str | None = None
+    nodePoolName: constr(min_length=1)
     """
-    Name of the node pool on the pinned InferenceCluster the scheduler selected for this replica. Set when the parent ModelDeployment's nodeSelector matched a specific pool.
+    Name of the node pool on the pinned InferenceCluster the scheduler selected for this replica. The scheduler pins every replica to a specific matching pool, so this is always set.
     """
     workers: Workers
 

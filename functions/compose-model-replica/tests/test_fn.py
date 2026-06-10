@@ -12,6 +12,9 @@ from google.protobuf import struct_pb2 as structpb
 from models.ai.modelplane.modelreplica import v1alpha1
 from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 
+# A GPU device request CEL selector, as compose-model-deployment stamps it.
+_GPU_CEL = 'device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("80Gi")) >= 0'
+
 
 @dataclasses.dataclass
 class Case:
@@ -47,6 +50,15 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             ),
             spec=v1alpha1.SpecModel(
                 clusterName="cluster-a",
+                nodePoolName="frontier",
+                deviceRequests=[
+                    v1alpha1.DeviceRequest(
+                        name="gpu",
+                        deviceClassName="gpu.nvidia.com",
+                        count=1,
+                        selectors=[v1alpha1.Selector(cel=_GPU_CEL)],
+                    ),
+                ],
                 workers=v1alpha1.Workers(
                     topology=v1alpha1.Topology(tensor=1),
                     template=v1alpha1.Template(
@@ -145,7 +157,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                                 "image": "vllm/vllm-openai:latest",
                                                                 "args": ["--model=Qwen/Qwen3-0.6B"],
                                                                 "ports": [{"containerPort": 8000}],
-                                                                "resources": {},
+                                                                "resources": {"claims": [{"name": "devices"}]},
                                                                 "volumeMounts": [
                                                                     {"name": "dshm", "mountPath": "/dev/shm"},
                                                                 ],
@@ -158,6 +170,21 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                         ],
                                                         "volumes": [
                                                             {"name": "dshm", "emptyDir": {"medium": "Memory"}},
+                                                        ],
+                                                        "resourceClaims": [
+                                                            {
+                                                                "name": "devices",
+                                                                "resourceClaimTemplateName": resource.child_name(
+                                                                    "test-replica", "devices"
+                                                                ),
+                                                            },
+                                                        ],
+                                                        "tolerations": [
+                                                            {
+                                                                "key": "nvidia.com/gpu",
+                                                                "operator": "Exists",
+                                                                "effect": "NoSchedule",
+                                                            },
                                                         ],
                                                     },
                                                 },
@@ -250,6 +277,50 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                         ],
                                                     },
                                                 ],
+                                            },
+                                        },
+                                    },
+                                },
+                            }
+                        ),
+                        ready=fnv1.READY_TRUE,
+                    ),
+                    "resource-claim": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                                "kind": "Object",
+                                "spec": {
+                                    "providerConfigRef": {
+                                        "kind": "ClusterProviderConfig",
+                                        "name": "cluster-a-pc",
+                                    },
+                                    "readiness": {"policy": "SuccessfulCreate"},
+                                    "forProvider": {
+                                        "manifest": {
+                                            "apiVersion": "resource.k8s.io/v1",
+                                            "kind": "ResourceClaimTemplate",
+                                            "metadata": {
+                                                "name": resource.child_name("test-replica", "devices"),
+                                                "namespace": "default",
+                                            },
+                                            "spec": {
+                                                "spec": {
+                                                    "devices": {
+                                                        "requests": [
+                                                            {
+                                                                "name": "gpu",
+                                                                "exactly": {
+                                                                    "deviceClassName": "gpu.nvidia.com",
+                                                                    "count": 1,
+                                                                    "selectors": [
+                                                                        {"cel": {"expression": _GPU_CEL}},
+                                                                    ],
+                                                                },
+                                                            },
+                                                        ],
+                                                    },
+                                                },
                                             },
                                         },
                                     },

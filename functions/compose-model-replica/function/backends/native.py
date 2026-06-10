@@ -43,9 +43,9 @@ class NativeBackend:
             "image": engine.image,
             "args": args,
             "ports": [{"containerPort": _ENGINE_PORT}],
-            # GPUs bind via DRA: when the replica has device requests the engine
-            # references the pod claim; with none it claims nothing.
-            "resources": base.engine_resources(replica),
+            # GPUs bind via DRA: the engine references the pod-level claim backed
+            # by the replica's ResourceClaimTemplate.
+            "resources": base.engine_resources(),
             # vLLM tensor parallelism needs a large /dev/shm.
             "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}, *cache_volume_mounts],
             "readinessProbe": {
@@ -124,8 +124,5 @@ class NativeBackend:
             "model-service": base.wrap_object(pc, service),
             "model-route": base.wrap_object(pc, http_route),
         }
-        # Emit a DRA ResourceClaimTemplate when the replica has device requests.
-        claim = base.resource_claim_template(replica, pc)
-        if claim is not None:
-            out[base.RESOURCE_CLAIM_KEY] = claim
+        out[base.RESOURCE_CLAIM_KEY] = base.resource_claim_template(replica, pc)
         return out

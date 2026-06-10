@@ -195,9 +195,9 @@ class Composer:
             replica_key = name.replica_key(cluster_info)
 
             # Stamp the resolved claim: DRA device requests so the replica
-            # function can form a DRA ResourceClaim. Only set the field when
-            # there are requests, so we don't claim ownership of an empty list
-            # (only synthetic devices matched) under SSA.
+            # function can form a DRA ResourceClaim. The scheduler only places a
+            # replica on a pool that yields at least one claimable device, so
+            # this is always non-empty.
             device_requests = [
                 mrv1alpha1.DeviceRequest(
                     name=r.name,
@@ -221,13 +221,9 @@ class Composer:
                 ),
                 spec=mrv1alpha1.SpecModel(
                     clusterName=cluster_info.name,
+                    nodePoolName=cluster_info.pool,
+                    deviceRequests=device_requests,
                     workers=workers,
-                    # Only set nodePoolName when the scheduler matched a
-                    # specific pool. Leaving it unset (rather than null)
-                    # avoids claiming ownership of a field we have no
-                    # opinion on under server-side apply.
-                    **({"nodePoolName": cluster_info.pool} if cluster_info.pool else {}),
-                    **({"deviceRequests": device_requests} if device_requests else {}),
                 ),
             )
             if self.xr.spec.modelCacheRef:

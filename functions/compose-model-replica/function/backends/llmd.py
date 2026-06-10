@@ -124,8 +124,8 @@ class LLMDBackend:
                 "name": "engine",
                 "image": engine.image,
                 # GPUs PER POD (one tensor-parallel shard runs per pod in the
-                # gang), bound via DRA when the replica has device requests.
-                "resources": base.engine_resources(replica),
+                # gang), bound via DRA through the pod-level claim.
+                "resources": base.engine_resources(),
                 # vLLM tensor parallelism needs a large /dev/shm.
                 "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}, *cache_volume_mounts],
                 "command": command,
@@ -231,8 +231,5 @@ class LLMDBackend:
             "model-service": base.wrap_object(pc, service),
             "model-route": base.wrap_object(pc, http_route),
         }
-        # Emit a DRA ResourceClaimTemplate when the replica has device requests.
-        claim = base.resource_claim_template(replica, pc)
-        if claim is not None:
-            out[base.RESOURCE_CLAIM_KEY] = claim
+        out[base.RESOURCE_CLAIM_KEY] = base.resource_claim_template(replica, pc)
         return out

@@ -98,13 +98,14 @@ class Candidate:
     # Callers should not compose a ModelEndpoint when this is empty -
     # there is nothing to route traffic to.
     gateway_address: str = ""
-    # The node pool the scheduler matched on this cluster. Empty when the pool of
-    # a retained replica can't be re-derived (e.g. the cluster is degraded).
-    # Propagated to the ModelReplica as spec.nodePoolName.
+    # The node pool the scheduler matched on this cluster, propagated to the
+    # ModelReplica as spec.nodePoolName. Always set: a candidate exists only
+    # because a named pool matched (the pool name is XRD-required).
     pool: str = ""
     # Resolved claim: DRA device requests for the matched pool, in nodeSelector
-    # order. Stamped onto the ModelReplica as spec.deviceRequests. Empty when the
-    # cluster is degraded (pool not re-derived) or only synthetic devices matched.
+    # order. Stamped onto the ModelReplica as spec.deviceRequests. Always
+    # non-empty: a pool matches only when at least one claim: DRA device
+    # resolves (see _match_pool), so every scheduled replica has a claim.
     device_requests: list[DeviceRequest] = field(default_factory=list)
 
 
@@ -192,9 +193,9 @@ def _device_satisfies(device, programs: list[cel.Program]) -> bool:
 def _match_pool(pool, requests: list[_CompiledRequest]) -> "list[DeviceRequest] | None":
     """Match a pool against the device requests.
 
-    Returns the resolved claim: DRA DeviceRequests (possibly empty if only
-    synthetic devices matched) when the pool satisfies every request, or None
-    when the pool fails any request.
+    Returns the resolved claim: DRA DeviceRequests when the pool satisfies every
+    request AND at least one matched device is claim: DRA, or None when the pool
+    fails any request or matches only synthetic devices.
 
     A request matches a pool device when the device has enough UNCONSUMED count
     to cover the request and every selector evaluates true against that device.
@@ -204,6 +205,15 @@ def _match_pool(pool, requests: list[_CompiledRequest]) -> "list[DeviceRequest] 
     by the same single-count device, and N requests against one device must fit
     within that device's count. Without this accounting the scheduler would place
     a replica onto a node DRA can't actually satisfy.
+
+    A replica's serving workload binds its GPUs through this ResourceClaim, so a
+    pool that matches only synthetic devices (claim: Synthetic, matched for fleet
+    scheduling but never claimed) yields nothing to claim and is not a viable
+    host. Synthetic devices are co-selectors that refine placement alongside a
+    claimable device; a selector that resolves to synthetic devices alone leaves
+    the workload with no claim, so we reject the pool. The deployment then finds
+    no eligible pool and surfaces InsufficientCapacity. The ModelDeployment XRD
+    documents that a nodeSelector must match at least one claimable device.
     """
     devices = pool.devices or []
     # Track remaining count per device by its index in the pool, so capacity
@@ -231,6 +241,11 @@ def _match_pool(pool, requests: list[_CompiledRequest]) -> "list[DeviceRequest] 
                     cel_selectors=req.cel_selectors,
                 )
             )
+    # Every request matched, but if none resolved to a claim: DRA device the
+    # replica would have no ResourceClaim to bind its GPUs through. Reject the
+    # pool rather than place a claimless workload.
+    if not resolved:
+        return None
     return resolved
 
 
@@ -422,18 +437,15 @@ def _pinned_pool_still_matches(
 
 
 def _retained_requests(replica, cluster, requests: list[_CompiledRequest]) -> list[DeviceRequest]:
-    """Resolve device requests for a retained replica's pinned pool.
+    """Resolve the claim: DRA requests for a retained replica's pinned pool.
 
-    Returns the claim: DRA requests for the pinned pool, or empty if the pool
-    can't be found (degraded cluster). The pin itself was already validated by
-    _pinned_pool_still_matches.
+    Only called for a replica _pinned_pool_still_matches already accepted, so the
+    pinned pool exists and yields at least one DRA request: _match_pool returns a
+    non-empty list here, never None. If that contract were ever broken the empty
+    result would surface as an XRD validation error in compose_replicas (which
+    requires deviceRequests), not as a silently claimless replica.
     """
-    pool_name = replica.spec.nodePoolName
-    if not pool_name:
-        return []
-    pool = _pool_by_name(cluster, pool_name)
-    if pool is None:
-        return []
+    pool = _pool_by_name(cluster, replica.spec.nodePoolName)
     return _match_pool(pool, requests) or []
 
 

@@ -181,11 +181,6 @@ def select_backend(replica: v1alpha1.ModelReplica) -> str:
     return LLMD
 
 
-def _device_requests(replica: v1alpha1.ModelReplica):
-    """Resolved claim: DRA device requests stamped by compose-model-deployment."""
-    return replica.spec.deviceRequests or []
-
-
 def claim_template_name(replica: v1alpha1.ModelReplica) -> str:
     """ResourceClaimTemplate name on the remote cluster.
 
@@ -195,13 +190,13 @@ def claim_template_name(replica: v1alpha1.ModelReplica) -> str:
     return resource.child_name(replica.metadata.name, _POD_CLAIM_NAME)
 
 
-def engine_resources(replica: v1alpha1.ModelReplica) -> dict:
+def engine_resources() -> dict:
     """Container resources for the engine.
 
-    GPUs bind only via DRA. When the replica carries device requests the engine
-    references the pod-level claim backed by the replica's ResourceClaimTemplate;
-    it never sets a device-plugin extended-resource limit. With no device requests
-    the engine claims nothing - GPU binding is DRA's job, not the device plugin's.
+    GPUs bind only via DRA: the engine references the pod-level claim backed by
+    the replica's ResourceClaimTemplate and never sets a device-plugin
+    extended-resource limit. Every replica carries device requests (the XRD
+    requires them), so the claim always exists.
 
     We emit one container claim entry referencing the pod-level claim, with no
     `request` field, so the entire claim (all of its device requests) is made
@@ -210,8 +205,6 @@ def engine_resources(replica: v1alpha1.ModelReplica) -> dict:
     uses every device anyway, so referencing the whole claim is both correct and
     simplest.
     """
-    if not _device_requests(replica):
-        return {}
     return {"claims": [{"name": _POD_CLAIM_NAME}]}
 
 
@@ -228,32 +221,26 @@ def attach_device_claims(pod_spec: dict, replica: v1alpha1.ModelReplica) -> None
 
     Adds a pod-level resourceClaims entry pointing at the per-replica
     ResourceClaimTemplate, and a toleration for the GPU node taint so the pod can
-    land on a GPU node. No-op when the replica has no device requests (then
-    there's no ResourceClaimTemplate to reference and no GPU node to reach). Every
-    pod that shares this spec - a native Deployment pod, or an llm-d LWS leader
-    and worker - gets its own template-backed claim, which is why we use a
-    ResourceClaimTemplate rather than a shared ResourceClaim.
+    land on a GPU node. Every replica carries device requests (the XRD requires
+    them), so every serving pod claims through DRA. Every pod that shares this
+    spec - a native Deployment pod, or an llm-d LWS leader and worker - gets its
+    own template-backed claim, which is why we use a ResourceClaimTemplate rather
+    than a shared ResourceClaim.
     """
-    if not _device_requests(replica):
-        return
     pod_spec["resourceClaims"] = [{"name": _POD_CLAIM_NAME, "resourceClaimTemplateName": claim_template_name(replica)}]
     pod_spec.setdefault("tolerations", []).append(_GPU_TOLERATION)
 
 
-def resource_claim_template(replica: v1alpha1.ModelReplica, provider_config: str) -> k8sobjv1alpha1.Object | None:
-    """Compose a DRA ResourceClaimTemplate Object for the replica, or None.
+def resource_claim_template(replica: v1alpha1.ModelReplica, provider_config: str) -> k8sobjv1alpha1.Object:
+    """Compose a DRA ResourceClaimTemplate Object for the replica.
 
     Each resolved device request (stamped by compose-model-deployment from the
     matched InferenceClass claim: DRA devices) becomes one DeviceRequest carrying
-    its DeviceClass, count, and CEL selectors verbatim. Returns None when the
-    replica has no device requests.
+    its DeviceClass, count, and CEL selectors verbatim. Every replica carries at
+    least one device request (the XRD requires them).
     """
-    requests = _device_requests(replica)
-    if not requests:
-        return None
-
     device_requests = []
-    for r in requests:
+    for r in replica.spec.deviceRequests:
         exactly: dict = {"deviceClassName": r.deviceClassName, "count": int(r.count or 1)}
         selectors = [{"cel": {"expression": s.cel}} for s in (r.selectors or []) if s.cel]
         if selectors:

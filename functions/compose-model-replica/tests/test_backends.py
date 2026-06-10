@@ -20,27 +20,6 @@ _SERVING = "modelplane.ai/serving"
 _ROLE = "modelplane.ai/lws-role"
 
 
-def _replica(name="r", *, tensor=1, pipeline=1, args=None, command=None, namespace="ml-team", device_requests=None):
-    container = v1alpha1.Container(
-        name="engine",
-        image="vllm/vllm-openai:latest",
-        args=args if args is not None else ["--model=Qwen/Qwen3-0.6B"],
-    )
-    if command is not None:
-        container.command = command
-    spec = v1alpha1.SpecModel(
-        clusterName="cluster-a",
-        workers=v1alpha1.Workers(
-            count=1,
-            topology=v1alpha1.Topology(tensor=tensor, pipeline=pipeline),
-            template=v1alpha1.Template(spec=v1alpha1.Spec(containers=[container])),
-        ),
-    )
-    if device_requests is not None:
-        spec.deviceRequests = device_requests
-    return v1alpha1.ModelReplica(metadata=metav1.ObjectMeta(name=name, namespace=namespace), spec=spec)
-
-
 # A GPU device request (claim: DRA), as compose-model-deployment stamps it.
 _GPU_CEL = 'device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("80Gi")) >= 0'
 
@@ -52,6 +31,30 @@ def _gpu_request(count):
         count=count,
         selectors=[v1alpha1.Selector(cel=_GPU_CEL)],
     )
+
+
+def _replica(name="r", *, tensor=1, pipeline=1, args=None, command=None, namespace="ml-team", device_requests=None):
+    container = v1alpha1.Container(
+        name="engine",
+        image="vllm/vllm-openai:latest",
+        args=args if args is not None else ["--model=Qwen/Qwen3-0.6B"],
+    )
+    if command is not None:
+        container.command = command
+    # nodePoolName and deviceRequests are XRD-required: compose-model-deployment
+    # only composes a replica it has pinned to a matching pool with a claimable
+    # device, so a replica always carries both.
+    spec = v1alpha1.SpecModel(
+        clusterName="cluster-a",
+        nodePoolName="frontier",
+        deviceRequests=device_requests if device_requests is not None else [_gpu_request(1)],
+        workers=v1alpha1.Workers(
+            count=1,
+            topology=v1alpha1.Topology(tensor=tensor, pipeline=pipeline),
+            template=v1alpha1.Template(spec=v1alpha1.Spec(containers=[container])),
+        ),
+    )
+    return v1alpha1.ModelReplica(metadata=metav1.ObjectMeta(name=name, namespace=namespace), spec=spec)
 
 
 def _claim_template(name, count):
@@ -131,7 +134,7 @@ _NATIVE_WANT = {
                             "image": "vllm/vllm-openai:latest",
                             "args": ["--model=Qwen/Qwen3-0.6B"],
                             "ports": [{"containerPort": 8000}],
-                            "resources": {},
+                            "resources": {"claims": [{"name": "devices"}]},
                             "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}],
                             "readinessProbe": {
                                 "httpGet": {"path": "/health", "port": 8000},
@@ -141,6 +144,10 @@ _NATIVE_WANT = {
                         }
                     ],
                     "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
+                    "resourceClaims": [
+                        {"name": "devices", "resourceClaimTemplateName": resource.child_name("r", "devices")}
+                    ],
+                    "tolerations": [{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}],
                 },
             },
         },
@@ -152,10 +159,13 @@ _NATIVE_WANT = {
         "spec": {"selector": {_SERVING: "r"}, "ports": [{"port": 80, "targetPort": 8000}]},
     },
     "model-route": _route("r"),
+    "resource-claim": _claim_template("r", 1),
 }
 
 
 def _lws(leader_container, worker_container):
+    claims = [{"name": "devices", "resourceClaimTemplateName": resource.child_name("r", "devices")}]
+    tolerations = [{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}]
     return {
         "apiVersion": "leaderworkerset.x-k8s.io/v1",
         "kind": "LeaderWorkerSet",
@@ -169,6 +179,8 @@ def _lws(leader_container, worker_container):
                     "spec": {
                         "containers": [leader_container],
                         "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
+                        "resourceClaims": claims,
+                        "tolerations": tolerations,
                     },
                 },
                 "workerTemplate": {
@@ -176,6 +188,8 @@ def _lws(leader_container, worker_container):
                     "spec": {
                         "containers": [worker_container],
                         "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
+                        "resourceClaims": claims,
+                        "tolerations": tolerations,
                     },
                 },
             },
@@ -187,7 +201,7 @@ def _engine(command, *, serving, args=None):
     c = {
         "name": "engine",
         "image": "vllm/vllm-openai:latest",
-        "resources": {},
+        "resources": {"claims": [{"name": "devices"}]},
         "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}],
         "command": command,
     }
@@ -226,6 +240,7 @@ _LLMD_VLLM_WANT = {
         "spec": {"selector": {_SERVING: "r", _ROLE: "leader"}, "ports": [{"port": 80, "targetPort": 8000}]},
     },
     "model-route": _route("r"),
+    "resource-claim": _claim_template("r", 1),
 }
 
 # Escape hatch: the user command runs verbatim on both templates; no Ray
@@ -239,115 +254,7 @@ _LLMD_ESCAPE_WANT = {
     ),
     "model-service": _LLMD_VLLM_WANT["model-service"],
     "model-route": _route("r"),
-}
-
-
-# Native DRA: container claims a request instead of an nvidia.com/gpu limit,
-# the pod references the ResourceClaimTemplate, and a resource-claim Object is
-# emitted alongside the workload.
-_NATIVE_DRA_WANT = {
-    "model-serving": {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {"name": "r", "namespace": "default"},
-        "spec": {
-            "replicas": 1,
-            "selector": {"matchLabels": {_SERVING: "r"}},
-            "template": {
-                "metadata": {"labels": {_SERVING: "r"}},
-                "spec": {
-                    "containers": [
-                        {
-                            "name": "engine",
-                            "image": "vllm/vllm-openai:latest",
-                            "args": ["--model=Qwen/Qwen3-0.6B"],
-                            "ports": [{"containerPort": 8000}],
-                            "resources": {"claims": [{"name": "devices"}]},
-                            "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}],
-                            "readinessProbe": {
-                                "httpGet": {"path": "/health", "port": 8000},
-                                "initialDelaySeconds": 30,
-                                "periodSeconds": 10,
-                            },
-                        }
-                    ],
-                    "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
-                    "resourceClaims": [
-                        {"name": "devices", "resourceClaimTemplateName": resource.child_name("r", "devices")}
-                    ],
-                    "tolerations": [{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}],
-                },
-            },
-        },
-    },
-    "model-service": _NATIVE_WANT["model-service"],
-    "model-route": _route("r"),
-    "resource-claim": _claim_template("r", 2),
-}
-
-
-def _lws_dra(leader_container, worker_container):
-    """An LWS whose leader and worker pods both reference the claim template."""
-    claims = [{"name": "devices", "resourceClaimTemplateName": resource.child_name("r", "devices")}]
-    tolerations = [{"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}]
-    return {
-        "apiVersion": "leaderworkerset.x-k8s.io/v1",
-        "kind": "LeaderWorkerSet",
-        "metadata": {"name": "r", "namespace": "default"},
-        "spec": {
-            "replicas": 1,
-            "leaderWorkerTemplate": {
-                "size": 2,
-                "leaderTemplate": {
-                    "metadata": {"labels": {_SERVING: "r", _ROLE: "leader"}},
-                    "spec": {
-                        "containers": [leader_container],
-                        "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
-                        "resourceClaims": claims,
-                        "tolerations": tolerations,
-                    },
-                },
-                "workerTemplate": {
-                    "metadata": {"labels": {_SERVING: "r"}},
-                    "spec": {
-                        "containers": [worker_container],
-                        "volumes": [{"name": "dshm", "emptyDir": {"medium": "Memory"}}],
-                        "resourceClaims": claims,
-                        "tolerations": tolerations,
-                    },
-                },
-            },
-        },
-    }
-
-
-def _engine_dra(command, *, serving):
-    """An llm-d engine container that claims GPUs via DRA (no nvidia.com/gpu)."""
-    c = {
-        "name": "engine",
-        "image": "vllm/vllm-openai:latest",
-        "resources": {"claims": [{"name": "devices"}]},
-        "volumeMounts": [{"name": "dshm", "mountPath": "/dev/shm"}],
-        "command": command,
-    }
-    if serving:
-        c["ports"] = [{"containerPort": 8000}]
-        c["readinessProbe"] = {
-            "httpGet": {"path": "/health", "port": 8000},
-            "initialDelaySeconds": 30,
-            "periodSeconds": 10,
-        }
-    return c
-
-
-_LLMD_DRA_WANT = {
-    "model-serving": _lws_dra(
-        _engine_dra(_LLMD_VLLM_LEADER_CMD, serving=True),
-        _engine_dra(["/bin/sh", "-c", llmd._WORKER_BOOTSTRAP], serving=False),
-    ),
-    "model-service": _LLMD_VLLM_WANT["model-service"],
-    "model-route": _route("r"),
-    "resource-claim": _claim_template("r", 8),
+    "resource-claim": _claim_template("r", 1),
 }
 
 
@@ -378,20 +285,6 @@ _CASES = [
         replica=_replica(tensor=8, pipeline=2, command=_SGLANG_CMD, args=_SGLANG_ARGS),
         want=_LLMD_ESCAPE_WANT,
     ),
-    Case(
-        name="native with device requests claims GPUs via DRA",
-        backend=native.NativeBackend(),
-        replica=_replica(tensor=2, device_requests=[_gpu_request(2)]),
-        want=_NATIVE_DRA_WANT,
-    ),
-    Case(
-        name="llm-d with device requests claims GPUs via DRA on leader and worker",
-        backend=llmd.LLMDBackend(),
-        replica=_replica(
-            tensor=8, pipeline=2, args=["--model=meta-llama/Llama-3.1-405B"], device_requests=[_gpu_request(8)]
-        ),
-        want=_LLMD_DRA_WANT,
-    ),
 ]
 
 
@@ -409,11 +302,13 @@ class TestBackendManifests(unittest.TestCase):
 
     def test_resources_named_after_replica_avoid_collision(self):
         # Two replicas of one deployment on the same IC must produce distinct
-        # workload-resource names (Nic's collision concern).
+        # resource names (Nic's collision concern). The workload, Service, and
+        # HTTPRoute share the replica name; the ResourceClaimTemplate is named
+        # after it too (with a -devices suffix) so it can't collide either.
         a = native.NativeBackend().build(_replica("dep-clusterA"), _CLUSTER)
         b = native.NativeBackend().build(_replica("dep-clusterB"), _CLUSTER)
-        self.assertEqual(self._names(a), {"dep-clusterA"})
-        self.assertEqual(self._names(b), {"dep-clusterB"})
+        self.assertEqual(self._names(a), {"dep-clusterA", resource.child_name("dep-clusterA", "devices")})
+        self.assertEqual(self._names(b), {"dep-clusterB", resource.child_name("dep-clusterB", "devices")})
 
     def test_workload_readiness_policies(self):
         # The serving workload (Deployment or LWS) reports readiness from its
@@ -432,16 +327,6 @@ class TestBackendManifests(unittest.TestCase):
                 self.assertEqual(serving.celQuery, base.AVAILABLE_CEL)
                 self.assertEqual(out["model-service"].spec.readiness.policy, "SuccessfulCreate")
                 self.assertEqual(out["model-route"].spec.readiness.policy, "SuccessfulCreate")
-
-    def test_no_device_requests_claims_nothing(self):
-        # DRA-only: a replica without device requests gets no GPU. The engine
-        # claims nothing (no nvidia.com/gpu device-plugin limit), the pod
-        # references no ResourceClaimTemplate, and none is composed.
-        out = native.NativeBackend().build(_replica(tensor=2), _CLUSTER)
-        pod = out["model-serving"].spec.forProvider.manifest["spec"]["template"]["spec"]
-        self.assertEqual(pod["containers"][0]["resources"], {})
-        self.assertNotIn("resourceClaims", pod)
-        self.assertNotIn("resource-claim", out)
 
     def test_multiple_device_requests_single_container_claim(self):
         # resources.claims is a list-map keyed on name alone, so N device
@@ -497,6 +382,8 @@ class TestCacheMounts(unittest.TestCase):
     def _replica(self, *, cache=None, args=None, command=None):
         spec = v1alpha1.SpecModel(
             clusterName="c",
+            nodePoolName="frontier",
+            deviceRequests=[_gpu_request(1)],
             workers=v1alpha1.Workers(
                 topology=v1alpha1.Topology(tensor=1, pipeline=1),
                 template=v1alpha1.Template(
@@ -556,6 +443,8 @@ class TestNativeBackendCache(unittest.TestCase):
             metadata=metav1.ObjectMeta(name="r", namespace="ml-team"),
             spec=v1alpha1.SpecModel(
                 clusterName="cluster-a",
+                nodePoolName="frontier",
+                deviceRequests=[_gpu_request(1)],
                 modelCacheRef=v1alpha1.ModelCacheRef(name="qwen"),
                 workers=v1alpha1.Workers(
                     topology=v1alpha1.Topology(tensor=1, pipeline=1),
@@ -583,6 +472,8 @@ class TestLLMDBackendCache(unittest.TestCase):
             metadata=metav1.ObjectMeta(name="r", namespace="ml-team"),
             spec=v1alpha1.SpecModel(
                 clusterName="cluster-a",
+                nodePoolName="frontier",
+                deviceRequests=[_gpu_request(8)],
                 modelCacheRef=v1alpha1.ModelCacheRef(name="kimi"),
                 workers=v1alpha1.Workers(
                     count=1,

@@ -25,7 +25,7 @@ spec:
         properties:
           spec:
             type: object
-            required: [clusterName, workers]
+            required: [clusterName, nodePoolName, deviceRequests, workers]
             properties:
               clusterName:
                 type: string
@@ -40,10 +40,11 @@ spec:
                   the replica on another viable cluster.
               nodePoolName:
                 type: string
+                minLength: 1
                 description: >-
                   Name of the node pool on the pinned InferenceCluster the
-                  scheduler selected for this replica. Set when the parent
-                  ModelDeployment's nodeSelector matched a specific pool.
+                  scheduler selected for this replica. The scheduler pins every
+                  replica to a specific matching pool, so this is always set.
               deviceRequests:
                 type: array
                 description: >-
@@ -51,9 +52,11 @@ spec:
                   ModelDeployment's compose function joins the nodeSelector
                   requests with the matched InferenceClass devices and stamps the
                   claim: DRA devices here. This function turns each into a
-                  DeviceRequest in a DRA ResourceClaim for the serving pods.
-                  Empty when the deployment has no nodeSelector or matched only
-                  synthetic devices.
+                  DeviceRequest in a DRA ResourceClaim for the serving pods. At
+                  least one request is always present: the scheduler only pins a
+                  replica to a pool that yields a claimable device, so the
+                  serving workload always has a ResourceClaim to bind through.
+                minItems: 1
                 maxItems: 16
                 x-kubernetes-list-type: map
                 x-kubernetes-list-map-keys: [name]
