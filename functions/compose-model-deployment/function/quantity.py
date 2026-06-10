@@ -66,17 +66,28 @@ def parse(s: str) -> decimal.Decimal:
     suffix (Ki, Mi, Gi, Ti, Pi, Ei), a decimal SI suffix (n, u, m, k, M, G, T,
     P, E, or none), or a decimal exponent (e/E + signed int). The result is
     rounded up to nano scale, as resource.Quantity does, so comparisons match
-    resource.Quantity.Cmp. Raises ValueError on input resource.Quantity would
-    reject (e.g. capital 'K', a comma, a bare suffix) so a malformed device
-    capacity surfaces as a non-match rather than a silently-wrong number. Unlike
-    UnmarshalJSON, the quantity() CEL constructor does NOT trim whitespace, so
-    neither do we.
+    resource.Quantity.Cmp. A binary-suffix value that overflows int64 saturates
+    to ±int64-max (see _saturate), again matching resource.Quantity.Cmp. Raises
+    ValueError on input resource.Quantity would reject (e.g. capital 'K', a
+    comma) so a malformed device capacity surfaces as a non-match rather than a
+    silently-wrong number. Unlike UnmarshalJSON, the quantity() CEL constructor
+    does NOT trim whitespace, so neither do we.
+
+    Known divergences from resource.ParseQuantity (corner cases no device
+    capacity hits, not worth reproducing the upstream parser state machine for):
+
+    * Bare suffix. Upstream parses most bare suffixes as 0 ("Mi", "Ki", "k",
+      "M", "E", "n" -> 0) but inconsistently errors on a few ("Ei", "" -> error).
+      We reject every bare suffix (no number) as a malformed quantity.
+    * Very large decimal-exponent values. Upstream's inf.Dec scale handling
+      mis-renders some (e.g. "1000E" -> "1"); we keep the mathematically correct
+      value. Neither appears as a real device capacity.
     """
     s = str(s)
     # Binary SI suffix (two characters; check first so "Mi" is not read as "M").
     for suffix, mult in _BINARY.items():
         if s.endswith(suffix):
-            return _round_nano(_number(s[: -len(suffix)], s) * mult)
+            return _round_nano(_saturate(_number(s[: -len(suffix)], s) * mult))
     # Decimal exponent (e/E + signed int): the exponent is part of the number.
     for i, c in enumerate(s):
         if c in "eE" and i > 0:
@@ -100,9 +111,37 @@ def _number(num: str, original: str) -> decimal.Decimal:
     return decimal.Decimal(num)
 
 
+def _saturate(value: decimal.Decimal) -> decimal.Decimal:
+    """Clamp an overflowing binary-suffix value to ±int64-max, as upstream does.
+
+    resource.ParseQuantity stores a binary-suffix quantity (Ki..Ei) in a
+    BinarySI int64; a magnitude at or above 2^63 overflows and saturates to
+    int64-max, KEEPING THE SIGN (so -10Ei stores -(2^63-1), not int64-min).
+    Confirmed against resource.Quantity.Cmp: quantity("8Ei"), quantity("10Ei"),
+    and quantity("100Ei") all compare equal to quantity("9223372036854775807").
+    Only the binary path saturates - the decimal/exponent path keeps its value
+    (quantity("256E") stays 2.56e20) - so we clamp only there. Without this we'd
+    report 10Ei > 8Ei where upstream reports them equal.
+    """
+    if value > _INT64_MAX:
+        return decimal.Decimal(_INT64_MAX)
+    if value < -_INT64_MAX:
+        return decimal.Decimal(-_INT64_MAX)
+    return value
+
+
 def _round_nano(value: decimal.Decimal) -> decimal.Decimal:
-    """Round up to nano scale, matching resource.ParseQuantity (inf.RoundUp)."""
-    return value.quantize(_NANO, rounding=decimal.ROUND_UP)
+    """Round up to nano scale, matching resource.ParseQuantity (inf.RoundUp).
+
+    Uses a wide local precision so a large decimal-path quantity (e.g.
+    quantity("256E") == 2.56e20, which needs >28 significant digits at nano
+    scale) rounds instead of raising decimal.InvalidOperation under Python's
+    default 28-digit context. Go's inf.RoundUp rounds away from zero, which is
+    decimal.ROUND_UP (not ROUND_CEILING).
+    """
+    with decimal.localcontext() as ctx:
+        ctx.prec = 60
+        return value.quantize(_NANO, rounding=decimal.ROUND_UP)
 
 
 def _cmp(a: decimal.Decimal, b: decimal.Decimal) -> int:

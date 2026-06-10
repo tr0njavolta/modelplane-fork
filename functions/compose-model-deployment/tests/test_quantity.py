@@ -14,6 +14,12 @@ compile-time overload errors (isQuantity([1,2,3])) - celpy doesn't type-check
 overloads; and runtime-error cases (an invalid suffix, integer overflow) which
 upstream raises but we treat as a non-match (a CEL eval error -> matches() is
 False), exercised here through the parse layer and the selector layer.
+
+These expected values come from running the inputs through the real Kubernetes
+code, not from assertion by hand. When you change the quantity module or want to
+add a case, derive its expected value with the parity oracle in ./oracle (see
+oracle/README.md) rather than reasoning about it - upstream has surprises (e.g.
+binary-suffix overflow saturates to int64-max, so 8Ei == 10Ei).
 """
 
 import dataclasses
@@ -119,10 +125,40 @@ class TestQuantityCEL(unittest.TestCase):
                 expr='quantity("50k").add(20).sub(quantity("100k")).sub(-50000).asInteger() == 20',
                 want=True,
             ),
-            # sign (doc comment).
-            Case(name="sign positive", expr='quantity("50k").sign() == 1', want=True),
-            Case(name="sign negative", expr='quantity("-50k").sign() == -1', want=True),
-            Case(name="sign zero", expr='quantity("0").sign() == 0', want=True),
+            # sign (doc comment). Upstream declares sign as a GLOBAL function
+            # (sign(q)), not a member (q.sign()); the global form is the parity
+            # surface. celpy can't tell the two call styles apart, so we accept
+            # both, but the test asserts the upstream-correct global form (see
+            # cel.py's documented divergences).
+            Case(name="sign positive", expr='sign(quantity("50k")) == 1', want=True),
+            Case(name="sign negative", expr='sign(quantity("-50k")) == -1', want=True),
+            Case(name="sign zero", expr='sign(quantity("0")) == 0', want=True),
+            # Binary-suffix overflow saturates to int64-max, keeping sign, so
+            # 8Ei/10Ei/100Ei all compare equal to int64-max (resource.Quantity
+            # stores BinarySI in an int64). Confirmed against resource.Quantity.
+            Case(
+                name="Ei saturates to int64 max",
+                expr='quantity("8Ei").compareTo(quantity("9223372036854775807")) == 0',
+                want=True,
+            ),
+            Case(name="8Ei equals 10Ei", expr='quantity("8Ei").compareTo(quantity("10Ei")) == 0', want=True),
+            Case(name="10Ei equals 100Ei", expr='quantity("10Ei").compareTo(quantity("100Ei")) == 0', want=True),
+            Case(
+                name="negative Ei saturates",
+                expr='quantity("-10Ei").compareTo(quantity("-9223372036854775807")) == 0',
+                want=True,
+            ),
+            # 7Ei is below int64-max, so it does NOT saturate and stays less.
+            Case(name="7Ei below saturation", expr='quantity("7Ei").isLessThan(quantity("8Ei"))', want=True),
+            # Large DECIMAL-path values do not saturate (only the binary path
+            # does) and must not raise on nano-rounding. isQuantity must be true
+            # and the value must round-trip.
+            Case(name="isQuantity 256E", expr='isQuantity("256E")', want=True),
+            Case(name="isQuantity 10E", expr='isQuantity("10E")', want=True),
+            Case(
+                name="256E value", expr='quantity("256E").compareTo(quantity("256000000000000000000")) == 0', want=True
+            ),
+            Case(name="256E greater than 1Ei", expr='quantity("256E").isGreaterThan(quantity("1Ei"))', want=True),
             # asInteger / isInteger.
             Case(name="as integer", expr='quantity("50k").asInteger() == 50000', want=True),
             Case(name="is integer true small", expr='quantity("50").isInteger()', want=True),
@@ -141,7 +177,13 @@ class TestQuantityCEL(unittest.TestCase):
             # asApproximateFloat.
             Case(name="as approximate float", expr='quantity("50.703k").asApproximateFloat() == 50703.0', want=True),
             # An invalid suffix is a runtime error upstream -> non-match here.
-            Case(name="invalid suffix is non-match", expr='quantity("10Mo").sign() == 1', want=False),
+            # (Uses a member method upstream accepts, isGreaterThan, so the
+            # non-match is the parse failure, not a rejected call form.)
+            Case(
+                name="invalid suffix is non-match",
+                expr='quantity("10Mo").isGreaterThan(quantity("1"))',
+                want=False,
+            ),
         ]
         for case in cases:
             with self.subTest(case.name):
@@ -149,7 +191,13 @@ class TestQuantityCEL(unittest.TestCase):
 
 
 class TestParseRejects(unittest.TestCase):
-    """parse() rejects what resource.Quantity rejects (drives the non-matches above)."""
+    """parse() rejects what resource.Quantity rejects (drives the non-matches above).
+
+    The bare-suffix row ("Mi") is a DELIBERATE divergence, not parity: upstream
+    parses most bare suffixes as 0 but inconsistently errors on a few (see
+    parse()'s docstring). We reject every bare suffix; no device capacity is
+    ever a bare suffix.
+    """
 
     def test_parse_rejects(self) -> None:
         cases = [
@@ -158,7 +206,7 @@ class TestParseRejects(unittest.TestCase):
             ParseErrCase(name="capital K", input="200K"),
             ParseErrCase(name="comma", input="1,3G"),
             ParseErrCase(name="word", input="Three"),
-            ParseErrCase(name="bare suffix", input="Mi"),
+            ParseErrCase(name="bare suffix (deliberate divergence)", input="Mi"),
             ParseErrCase(name="empty", input=""),
         ]
         for case in cases:

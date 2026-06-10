@@ -13,7 +13,6 @@ evaluator, so an expression that selects a device upstream selects the same
 device here. Each selector is evaluated against ONE device, exposed as `device`:
 
 * device.driver                          -> the device's DRA driver (a string)
-* device.allowMultipleAllocations        -> bool (false when unset)
 * device.attributes["<domain>"].<name>   -> a typed attribute under a domain
 * device.capacity["<domain>"].<name>     -> a capacity Quantity
 
@@ -52,6 +51,19 @@ Deliberate divergences we CANNOT match exactly (documented, not bugs):
   at compile; instead a non-bool result is treated as a non-match (never a
   truthy coercion), so a stray non-bool selector excludes devices rather than
   spuriously matching them.
+* Member vs global call style. celpy dispatches x.method(y) to the function
+  method(x, y), so it can't distinguish a member call from a global one. We
+  therefore accept both spellings of every function, whereas upstream is strict
+  per-overload: quantity()'s sign is a GLOBAL function (sign(q) only; q.sign()
+  is a compile error upstream), while compareTo/isGreaterThan/isLessThan are
+  member-only. This only makes us MORE permissive (an extra accepted spelling),
+  never changing which devices a well-formed selector matches.
+* has() on an index. cel-go's has() macro accepts only a field selection
+  (has(x.y)), not an index (has(x["y"])), so has(device.attributes["domain"])
+  is a compile error upstream; the domain-presence idiom is
+  "domain" in device.attributes. celpy accepts the has(index) form too, so
+  again we're more permissive. A selector that needs to test domain presence
+  should use the in form, which compiles both here and upstream.
 
 Operationally: a device that errors on evaluation (unknown id, malformed
 quantity/version, type mismatch) is treated as a non-match rather than failing
@@ -200,9 +212,6 @@ def _device_activation(device: dict) -> celtypes.MapType:
 
     out = celtypes.MapType()
     out[celtypes.StringType("driver")] = celtypes.StringType(driver)
-    out[celtypes.StringType("allowMultipleAllocations")] = celtypes.BoolType(
-        bool(device.get("allowMultipleAllocations", False))
-    )
 
     attributes = _DefaultMap()
     for name, raw in device.get("attributes", {}).items():

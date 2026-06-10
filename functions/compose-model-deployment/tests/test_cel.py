@@ -70,21 +70,9 @@ _GPU_64GI = _device(
 class TestMatches(unittest.TestCase):
     def test_matches(self) -> None:
         cases = [
-            # driver + allowMultipleAllocations.
+            # driver.
             Case(name="driver equals", expr='device.driver == "gpu.nvidia.com"', device=_GPU, want=True),
             Case(name="driver not equals", expr='device.driver == "nic.nvidia.com"', device=_GPU, want=False),
-            Case(
-                name="allowMultipleAllocations defaults false",
-                expr="device.allowMultipleAllocations",
-                device=_GPU,
-                want=False,
-            ),
-            Case(
-                name="allowMultipleAllocations set true",
-                expr="device.allowMultipleAllocations",
-                device=_device(allowMultipleAllocations=True),
-                want=True,
-            ),
             # Quantity comparison + methods.
             Case(
                 name="quantity compareTo ge",
@@ -206,17 +194,26 @@ class TestMatches(unittest.TestCase):
                 device=_device(attributes={"x": {"int": 5}}),
                 want=False,
             ),
-            # Unknown domain resolves to an empty map (not an error).
-            Case(name="has unknown domain is true", expr='has(device.attributes["other.com"])', device=_GPU, want=True),
+            # Domain presence. Upstream's domain-presence idiom is "<domain>" in
+            # device.attributes, not has(device.attributes["<domain>"]): cel-go's
+            # has() macro rejects an index argument, so the has() form is a
+            # compile error on a real cluster (celpy accepts it - see cel.py's
+            # documented divergences). An unknown domain is simply absent (False),
+            # not present-but-empty.
+            Case(name="unknown domain absent", expr='"other.com" in device.attributes', device=_GPU, want=False),
+            Case(name="known domain present", expr='"gpu.nvidia.com" in device.attributes', device=_GPU, want=True),
+            # Reading an unknown domain resolves to an empty map (not an error),
+            # so an id lookup under it is a non-match rather than a failure.
             Case(
                 name="unknown domain id is non-match",
                 expr='device.attributes["other.com"].x == "y"',
                 device=_GPU,
                 want=False,
             ),
+            # Guard a domain read with the in idiom before indexing it.
             Case(
                 name="guarded known domain",
-                expr=f'has(device.attributes["gpu.nvidia.com"]) && {_ATTR}.architecture == "Hopper"',
+                expr=f'"gpu.nvidia.com" in device.attributes && {_ATTR}.architecture == "Hopper"',
                 device=_GPU,
                 want=True,
             ),
