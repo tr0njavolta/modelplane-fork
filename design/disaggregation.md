@@ -88,6 +88,17 @@ spec:
         count: 1
         selectors:
         - cel: device.attributes["nic.nvidia.com"].linkType == "infiniband"
+  # Routing: required for a disaggregated deployment. The endpoint picker (EPP)
+  # that sequences prefill -> decode, given explicitly like the engine — no
+  # guessed default. routing.template is a curated PodSpec subset (the EPP
+  # container); the llm-d inference-scheduler is the usual choice.
+  routing:
+    template:
+      spec:
+        containers:
+        - name: epp
+          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.8.0
+          args: ["--config-file=/config/epp.yaml"]
 ```
 
 ## The prefill block
@@ -98,9 +109,10 @@ the root, because explicit repetition is easier to reason about than an implicit
 merge. This matches the shape design.md already sketches for disaggregation.
 
 The prefill:decode ratio is the two `workers.count` values — a topology
-parameter fixed per deployment, not a scaling knob. Each `count` defaults to 1,
-so a disaggregated deployment that omits them runs 1:1; set them explicitly to
-tune the ratio.
+parameter fixed per deployment, not a scaling knob. Both are stated explicitly;
+there is no default ratio. Defaulting one block of a disaggregated deployment
+would be asymmetrical with the rest — we don't guess an engine config or the
+`routing` EPP if you omit them — and the ratio is a deliberate topology choice.
 
 Because the block carries its own `nodeSelector` and `topology`, an operator can
 place prefill and decode on different GPU classes through the normal
@@ -133,7 +145,7 @@ chunked), keeping the disaggregation overhead small.
 Disaggregation needs to route a request to a prefill instance, transfer the KV
 cache, then have a decode instance generate from it. Modelplane does this with a
 Gateway API Inference Extension (GAIE) `InferencePool` fronted by a swappable
-endpoint-picker (EPP), defaulting to the llm-d inference-scheduler — no bespoke
+endpoint-picker (EPP), typically the llm-d inference-scheduler — no bespoke
 proxy.
 
 An [`InferencePool`][gaie] is a Gateway API backend (used in an `HTTPRoute` like
@@ -158,9 +170,17 @@ still applies, so cache-aware placement carries over. (An earlier sketch assumed
 a decode-only pool with the EPP pair-picking across two pools; the llm-d
 mechanism is the single-pool, role-partitioned form above.)
 
-The EPP itself is configured through `routing.template` — a curated PodSpec
-subset, defaulting to the llm-d EPP and overridable by image and args, the same
-shape and owner as the engine.
+The EPP is configured through `routing.template` — a curated PodSpec subset, the
+same shape and owner as the engine — given **explicitly** on a disaggregated
+deployment (the example above). There is no default EPP: we don't guess the
+routing component any more than we guess the engine. `routing` is required when a
+`prefill` block is set.
+
+The EPP is a lightweight CPU controller — it watches the deployment's pods and
+scores requests; it serves no model and holds no GPU. So it runs as a small
+Deployment on ordinary nodes in the serving namespace (no GPU, no special
+`nodeSelector`), one per deployment's `InferencePool`. Its pod shape comes from
+`routing.template`, the same way the engine's comes from `workers.template`.
 
 A deployment with a `prefill` block selects the multi-pod (llm-d) backend even
 at `pipeline: 1`, because disaggregation needs cross-pod coordination regardless
@@ -196,9 +216,10 @@ mature.
 - **Connector and model compatibility.** Both roles run a compatible KV
   connector (`NixlConnector`, paired `kv_role`) on the same model and dtype,
   with compatible parallelism so the KV layout matches.
-- **Ratio.** The prefill:decode ratio is `workers.count` to
-  `prefill.workers.count`; each defaults to 1, so omitting them runs 1:1. Set
-  them explicitly to tune the ratio.
+- **Both counts explicit.** A disaggregated deployment sets both `workers.count`
+  and `prefill.workers.count`; there is no default ratio.
+- **Routing explicit.** A disaggregated deployment sets `routing`; the EPP is
+  not defaulted.
 
 ## Alternatives considered
 
@@ -236,7 +257,8 @@ disaggregation-only proxy.
 
 ### A routing discriminator instead of a template
 
-The EPP could be selected by a `picker` enum:
+The EPP could be selected by a `picker` enum instead of the `routing.template`
+shown in the example above:
 
 ```yaml
 spec:
@@ -244,22 +266,8 @@ spec:
     picker: llm-d        # enum: llm-d | ...; each value hard-codes an EPP
 ```
 
-Instead it is a curated PodSpec subset, the same shape and owner as the engine —
-defaulting to the llm-d EPP, overridable by image and args:
-
-```yaml
-spec:
-  routing:
-    template:
-      spec:
-        containers:
-        - name: epp
-          image: ghcr.io/llm-d/llm-d-inference-scheduler:v0.8.0   # default
-          args: ["--config-file=/config/epp.yaml"]                # override to tune scorers
-```
-
 A discriminator would force Modelplane to enumerate and version every supported
-picker; the template treats the EPP as what it is — a container — and lets a
+picker. The template treats the EPP as what it is — a container — and lets a
 user swap or tune it (different image, extra scorer args) without an API change,
 matching the engine convention and design.md's preference against gratuitous
 discriminators.
@@ -272,10 +280,9 @@ each role on a chosen GPU class. It does not. Placement stays a user-declared
 workload. Modelplane exposes the knob and guards correctness; it does not make
 in-cluster scheduling decisions.
 
-### Requiring both counts to be explicit
+### An implicit prefill:decode ratio
 
-We considered rejecting a disaggregated deployment that doesn't set both
-`workers.count` and `prefill.workers.count`, to force the ratio to be stated. We
-don't: `count` already defaults to 1, and enforcing explicit-only would mean
-dropping that default — making `count` mandatory for unified deployments too. A
-1:1 default is a reasonable starting point; tuning the ratio is an explicit edit.
+A default ratio — say 1:1 when the counts are omitted — would be convenient. We
+require both counts instead: defaulting one block of a disaggregated deployment
+is asymmetrical with the rest (we don't guess an engine config or the `routing`
+EPP), and the ratio is a deliberate topology choice, not a sensible default.
