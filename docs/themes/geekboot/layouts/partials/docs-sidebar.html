@@ -14,14 +14,6 @@
             <a class="d-flex w-100 border-0" href="{{.Permalink}}">{{ .Title }} </a>
             {{ $isCRDs := eq .Params.product "crds" }}
             {{ if or $isCRDs (and .IsSection (ne .FirstSection .)) }}
-              {{/* Expand/collapse toggle for sections and crds pages */}}
-              <div class="d-flex flex-shrink-1 sidebar-control-container align-self-center">
-                <input type="checkbox" class="d-flex sidebar-checkbox" {{if $expand}}checked{{ end }} aria-label="Close or Expand {{.Title}} Section" />
-                <label for="collapse-{{$id}}" class="sidebar-label {{if not $expand}} collapsed {{ end }}" data-bs-toggle="collapse" data-bs-target="#collapse-{{$id}}" aria-expanded="false" aria-label="Close or Expand {{.Title}} Section">
-                  <svg class="flex bi sidebar-icon plus" ><use xlink:href="#plus"></use></svg>
-                  <svg class="flex bi sidebar-icon x " ><use xlink:href="#x"></use></svg>
-                </label>
-              </div>
             {{ end }}
           </div>
           {{ if $isCRDs }}
