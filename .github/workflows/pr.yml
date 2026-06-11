@@ -2,13 +2,17 @@ name: PR
 
 on:
   pull_request:
-    types: [opened, edited, synchronize]
+    types: [opened, edited, synchronize, ready_for_review]
 
 permissions:
   contents: read
 
 jobs:
   checklist-completed:
+    # Draft PRs are still in progress, so don't require a completed checklist
+    # until they're marked ready for review. The ready_for_review trigger above
+    # re-runs this job when that happens.
+    if: github.event.pull_request.draft == false
     permissions:
       # The action reads the PR body through the issues API, so it needs issues
       # access on top of pull-requests. The repo's default workflow token is

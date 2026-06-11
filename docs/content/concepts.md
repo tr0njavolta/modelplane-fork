@@ -140,6 +140,34 @@ across GPUs within a node.
 Multi-node deployments require a [ModelCache](#modelcache) referenced via
 `spec.modelCacheRef.name`.
 
+## Disaggregated Serving
+
+Prefill (processing the whole prompt) and decode (generating tokens one at a
+time) have opposite hardware profiles. Prefill is compute-bound and sets
+time-to-first-token; decode is memory-bandwidth-bound and sets inter-token
+latency. On shared pods a prefill burst stalls in-flight decodes, and neither
+phase can be tuned on its own.
+
+Set a `prefill` block on the ModelDeployment to split them. The top-level
+`workers` becomes the decode role and `prefill` is its own self-contained role,
+with its own `workers.count`, `topology`, `template`, and `nodeSelector`, so
+each phase can land on a different GPU class through the usual capability
+matching. The prefill engine transfers its KV cache to a decode engine over
+NIXL, configured through the engine's `--kv-transfer-config`. Like multi-node
+serving, a disaggregated deployment requires a [ModelCache](#modelcache); both
+roles mount the same PVC and stay co-located on one cluster, since KV transfer
+needs a fast interconnect (NVLink within a node, RDMA across nodes).
+
+Disaggregation runs on the multi-node (llm-d) path. A request is routed to a
+prefill instance and then to the decode instance holding its KV cache by the
+same endpoint picker that fronts multi-node serving. A deployment without a
+`prefill` block is unified serving and is unaffected.
+
+Disaggregation pays off for large models under load with strict latency targets
+and long context. For small models or low traffic the KV-transfer overhead
+outweighs the benefit, so aggregated serving (optionally with chunked prefill)
+is the default.
+
 ## ModelCache
 
 A ModelCache stages a model artifact on workload-cluster storage as a
@@ -157,11 +185,11 @@ engine container's `env`).
 
 Each cache has:
 
-- A **source**: a discriminated union of where to fetch the artifact, with
-  source-specific fields (e.g. `huggingFace.repo` and `huggingFace.sizeGiB`
-  today). Future types (`dragonfly` for P2P distribution, `oci` for NIM-style
-  bundled artifacts) will declare different fields under their own
-  discriminator.
+- A **source**: a required `source` enum naming the kind, with the matching
+  source object set alongside it (e.g. `source: HuggingFace` selects
+  `spec.huggingFace`, which carries `repo` and `sizeGiB`). `HuggingFace` is the
+  only value today; future sources add an enum value and a sibling object
+  (`Dragonfly` for P2P distribution, `OCI` for NIM-style bundled artifacts).
 - An optional **clusterSelector** to scope replication. Omitting
   `spec.clusterSelector` stages the cache on every matched cluster; setting
   `matchLabels` restricts it to clusters carrying those labels.
