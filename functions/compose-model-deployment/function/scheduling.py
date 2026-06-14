@@ -15,17 +15,18 @@ garbage-collects it, and the fill phase mints a fresh replica elsewhere to
 refill the deployment's replica count. Moving is always delete-plus-create,
 mirroring how Kubernetes treats a Pod whose node is gone.
 
-A replica is a set of engines co-scheduled onto one cluster. The unit of pool
-placement is the engine member: each member carries its own nodeSelector, so
-each is placed on a pool of that cluster that satisfies it. A gang's members
-usually want the same hardware, and they talk over the pool's fabric, so the
-scheduler prefers one pool that satisfies every member of an engine; only when
-no single pool does are the members split across pools. A member with no
-nodeSelector claims no devices - it's pinned to the pool of its engine's first
-claiming member at zero node cost, packed onto the gang's nodes by the
-cluster's scheduler. The scheduler therefore asks, for each candidate cluster,
-whether every member of every engine can be assigned a pool with enough free
-nodes, all on that one cluster.
+A replica is a set of engines co-scheduled onto one cluster. Every member of an
+engine is placed on one pool of that cluster: each member carries its own
+nodeSelector, but the scheduler requires a single pool that satisfies them all.
+A gang's members talk over their pool's fabric, and the scheduler can't reason
+about fabric - pool identity is the finest grain it has - so it never splits an
+engine's members across pools, where a collective could be scattered across
+fabrics and silently hang. An engine that no single pool satisfies is not
+scheduled on that cluster (see #149 for the same-fabric multi-pool case). A
+member with no nodeSelector claims no devices - it matches the engine's pool at
+zero node cost, packed onto the gang's nodes by the cluster's scheduler. The
+scheduler therefore asks, for each candidate cluster, whether every engine can
+be assigned a single pool with enough free nodes, all on that one cluster.
 
 Scheduling runs in two phases:
 
@@ -144,9 +145,8 @@ class MemberPlacement:
 class EnginePlacement:
     """An engine's placement within a replica: one placement per member.
 
-    members is in the deployment's member order. The members usually share one
-    pool (the scheduler prefers that) but may be split across pools when no
-    single pool satisfies them all.
+    members is in the deployment's member order. Every member shares one pool:
+    the scheduler places a whole engine on a single pool or not at all.
     """
 
     name: str
@@ -214,8 +214,7 @@ class _CompiledEngine:
     """An engine reduced to what the scheduler needs.
 
     name identifies the engine; members are its compiled members in deployment
-    order. Each member is placed on its own pool, preferring one pool for the
-    whole engine.
+    order. Every member of an engine is placed on a single shared pool.
     """
 
     name: str
@@ -686,58 +685,43 @@ def _place_engine(
     engine: _CompiledEngine,
     trial: dict[str, int],
 ) -> list[MemberPlacement] | None:
-    """Assign one engine's members to pools, preferring one pool for them all.
+    """Place a whole engine on a single pool of this cluster, or reject it.
 
-    A gang's members talk over their pool's fabric (NVLink and InfiniBand
-    domains are per pool), so splitting a gang across pools can silently
-    degrade interconnect. The first pass therefore looks for a single pool that
-    satisfies every member with enough free nodes for all of them, taking the
-    first such pool in published order. Only when no pool can host the whole
-    engine does the second pass place each member on its own pool.
+    Every member of an engine lands on one pool. A gang's members talk over
+    their pool's fabric (NVLink within a node, InfiniBand within a pool), and
+    the scheduler can't reason about fabric - pool identity is the finest grain
+    it has, so it can't tell whether two pools share an interconnect. Placing a
+    gang's members on different pools would risk scattering a collective across
+    fabrics, where it never forms and the gang hangs NotReady with no signal. So
+    the scheduler never splits an engine across pools: it places every member on
+    the first single pool that satisfies them all with room to spare, or rejects
+    the engine on this cluster. Rejection is safe and recoverable - the caller
+    surfaces InsufficientCapacity and the fill phase tries another cluster -
+    whereas a cross-fabric placement is a silent hang. (Co-scheduling a gang
+    across pools that genuinely share a fabric is tracked in #149.)
 
-    Either way the placement must leave the engine something to claim: at least
-    one member must resolve a claim: DRA device, or its pods would have no
-    ResourceClaim to bind GPUs through and the placement is rejected. This gate
-    is per engine, so an engine (and so a replica) that resolves only synthetic
-    devices everywhere is never scheduled; an individual claimless member is only
-    allowed alongside a claiming sibling. And a member whose requests resolve a
-    claimable device on SOME pool must never be placed on a pool where they
-    resolve only synthetic devices - greedy pool order must not strand a member
-    without the GPUs its selector asked for. A member that resolves only
-    synthetic devices everywhere is deliberate (a selector that pins a pool
-    without claiming), so it may place claimless - as long as its engine has
-    another member that claims.
+    A pool hosts the engine when every member matches it, no member that could
+    claim a real device elsewhere is stranded on a synthetic-only match, the
+    engine has at least one member that resolves a claim: DRA device (or its
+    pods would have no ResourceClaim to bind GPUs through), and the pool has free
+    nodes for the engine's whole cost. A member with no nodeSelector claims
+    nothing, matches every pool, and rides along on the engine's pool at zero
+    node cost. Returns one MemberPlacement per member, or None when no single
+    pool can host the engine.
 
     Decrements trial as it places; on failure the caller discards the whole
     trial, so partial decrements don't leak.
     """
     pools = cluster.status.gpuPools or []
     # Whether each member's requests resolve a claimable device on any pool of
-    # this cluster, ignoring capacity. Both passes use this to refuse a
-    # placement that would strand the member claimless.
+    # this cluster, ignoring capacity. Used to refuse a placement that would
+    # strand a claim-capable member on a pool where it resolves only synthetic
+    # devices.
     claimable = [any(_match_member(pool, member) for pool in pools) for member in engine.members]
     # No member can claim anywhere on this cluster, so any placement would
     # leave the engine's pods with no ResourceClaim to bind GPUs through.
     if not any(claimable):
         return None
-    placed = _place_engine_one_pool(pools, engine, claimable, trial)
-    if placed is not None:
-        return placed
-    return _place_engine_split(pools, engine, claimable, trial)
-
-
-def _place_engine_one_pool(
-    pools: list[icv1alpha1.GpuPool],
-    engine: _CompiledEngine,
-    claimable: list[bool],
-    trial: dict[str, int],
-) -> list[MemberPlacement] | None:
-    """Place a whole engine on the first single pool that satisfies it.
-
-    A pool hosts the engine when every member matches it, no member that could
-    claim elsewhere is stranded claimless, and the pool has free nodes for the
-    engine's whole cost. Returns None when no pool can.
-    """
     for pool in pools:
         pool_name = pool.name or ""
         members = _match_members(pool, engine, claimable)
@@ -767,76 +751,6 @@ def _match_members(
             return None
         members.append(MemberPlacement(role=member.role, pool=pool.name or "", device_requests=resolved))
     return members
-
-
-def _place_engine_split(
-    pools: list[icv1alpha1.GpuPool],
-    engine: _CompiledEngine,
-    claimable: list[bool],
-    trial: dict[str, int],
-) -> list[MemberPlacement] | None:
-    """Split an engine's members across pools when no one pool fits them all.
-
-    Reached only as _place_engine's fallback: no single pool satisfies every
-    member, so each member is placed on its own pool. Members fall into two
-    groups, placed in two passes.
-
-    Members WITH a nodeSelector are placed first. Each takes the first pool (in
-    published order) that both matches its requests and has free nodes for it. A
-    member that can claim a real device somewhere on this cluster (can_claim,
-    precomputed by _place_engine) is only placed on a pool where it actually
-    resolves one: a pool where it matches only synthetic devices is skipped even
-    if it has capacity, because free nodes there don't give the member the GPUs
-    its selector asked for. If such a member finds no pool, the whole split fails
-    and returns None; the caller surfaces that as InsufficientCapacity, which is
-    a safe false-reject (never a placement that can't claim). A member that
-    resolves only synthetic devices everywhere (can_claim is False) is allowed to
-    place on a synthetic-only pool - that's a deliberate scheduling-only pin.
-
-    Members WITHOUT a nodeSelector are placed second. They claim nothing, so they
-    have no pool of their own; each is pinned to gang_pool - the pool of the
-    engine's first member that did claim a device - and rides along there at zero
-    node cost, next to the workers it coordinates. If no member claimed anything,
-    the engine has nothing to bind GPUs through, so the split is rejected.
-    """
-    placed: list[MemberPlacement | None] = [None] * len(engine.members)
-    for i, (member, can_claim) in enumerate(zip(engine.members, claimable, strict=True)):
-        if not member.requests:
-            continue
-        placement = _place_member(pools, member, trial, can_claim=can_claim)
-        if placement is None:
-            return None
-        trial[placement.pool] -= _member_cost(member, placement.device_requests)
-        placed[i] = placement
-
-    gang_pool = next((p.pool for p in placed if p is not None and p.device_requests), None)
-    if gang_pool is None:
-        return None
-    for i, member in enumerate(engine.members):
-        if placed[i] is None:
-            placed[i] = MemberPlacement(role=member.role, pool=gang_pool, device_requests=[])
-    return placed
-
-
-def _place_member(
-    pools: list[icv1alpha1.GpuPool], member: _CompiledMember, trial: dict[str, int], *, can_claim: bool
-) -> MemberPlacement | None:
-    """Place one member on the first matching pool with capacity.
-
-    can_claim says whether the member resolves a claimable device on some pool;
-    when it does, pools where it resolves none are skipped so the member is
-    never stranded claimless. Doesn't decrement trial - the caller does, so it
-    can account the chosen placement.
-    """
-    for pool in pools:
-        pool_name = pool.name or ""
-        resolved = _match_member(pool, member)
-        if resolved is None or (can_claim and not resolved):
-            continue
-        if trial[pool_name] < _member_cost(member, resolved):
-            continue
-        return MemberPlacement(role=member.role, pool=pool_name, device_requests=resolved)
-    return None
 
 
 def _fill(
