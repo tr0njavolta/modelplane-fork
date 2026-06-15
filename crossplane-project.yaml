@@ -60,6 +60,10 @@ spec:
     tarball:
       name: compose-model-service
       pathPrefix: _output/functions/compose-model-service
+  - source: Tarball
+    tarball:
+      name: compose-usages
+      pathPrefix: _output/functions/compose-usages
   dependencies:
   - type: crd
     git:

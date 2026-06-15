@@ -70,42 +70,6 @@ _PROVIDER_CONFIG_HELM = {
     },
 }
 
-_USAGE_HELM_PC = {
-    "apiVersion": "protection.crossplane.io/v1beta1",
-    "kind": "Usage",
-    "spec": {
-        "by": {
-            "apiVersion": "helm.m.crossplane.io/v1beta1",
-            "kind": "Release",
-            "resourceSelector": {"matchControllerRef": True},
-        },
-        "of": {
-            "apiVersion": "helm.m.crossplane.io/v1beta1",
-            "kind": "ProviderConfig",
-            "resourceRef": {"name": _PC_NAME},
-        },
-        "replayDeletion": True,
-    },
-}
-
-_USAGE_K8S_PC = {
-    "apiVersion": "protection.crossplane.io/v1beta1",
-    "kind": "Usage",
-    "spec": {
-        "by": {
-            "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
-            "kind": "Object",
-            "resourceSelector": {"matchControllerRef": True},
-        },
-        "of": {
-            "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
-            "kind": "ProviderConfig",
-            "resourceRef": {"name": _PC_NAME},
-        },
-        "replayDeletion": True,
-    },
-}
-
 _USAGE_ENVOY_GW_BY_GATEWAY_CLASS = {
     "apiVersion": "protection.crossplane.io/v1beta1",
     "kind": "Usage",
@@ -564,14 +528,6 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                         resource=resource.dict_to_struct(_USAGE_GATEWAY_CLASS_BY_GATEWAY),
                         ready=fnv1.READY_TRUE,
                     ),
-                    "usage-helm-pc": fnv1.Resource(
-                        resource=resource.dict_to_struct(_USAGE_HELM_PC),
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "usage-k8s-pc": fnv1.Resource(
-                        resource=resource.dict_to_struct(_USAGE_K8S_PC),
-                        ready=fnv1.READY_TRUE,
-                    ),
                 },
             ),
             context=structpb.Struct(),
@@ -657,14 +613,6 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     ),
                     "usage-gateway-class-by-gateway": fnv1.Resource(
                         resource=resource.dict_to_struct(_USAGE_GATEWAY_CLASS_BY_GATEWAY),
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "usage-helm-pc": fnv1.Resource(
-                        resource=resource.dict_to_struct(_USAGE_HELM_PC),
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "usage-k8s-pc": fnv1.Resource(
-                        resource=resource.dict_to_struct(_USAGE_K8S_PC),
                         ready=fnv1.READY_TRUE,
                     ),
                 },
@@ -786,14 +734,6 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     ),
                     "usage-gateway-class-by-gateway": fnv1.Resource(
                         resource=resource.dict_to_struct(_USAGE_GATEWAY_CLASS_BY_GATEWAY),
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "usage-helm-pc": fnv1.Resource(
-                        resource=resource.dict_to_struct(_USAGE_HELM_PC),
-                        ready=fnv1.READY_TRUE,
-                    ),
-                    "usage-k8s-pc": fnv1.Resource(
-                        resource=resource.dict_to_struct(_USAGE_K8S_PC),
                         ready=fnv1.READY_TRUE,
                     ),
                 },

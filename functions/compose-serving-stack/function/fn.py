@@ -326,62 +326,17 @@ class Composer:
         return True
 
     def compose_usages(self):
-        """Compose Usages for deletion ordering.
+        """Compose Usages ordering the Envoy Gateway teardown.
 
-        Two concerns: ProviderConfigs must outlive the resources that reference
-        them, and the Envoy Gateway controller must outlive the Gateway and
-        GatewayClass resources it manages (they have finalizers the controller
-        must process).
+        The Envoy Gateway controller must outlive the Gateway and GatewayClass
+        resources it manages: they carry finalizers it has to process on delete.
+        The chain is Gateway Object → GatewayClass Object → envoy-gateway
+        Release.
 
-        The deletion chain is:
-          Gateway Object → GatewayClass Object → envoy-gateway Release
-          All Releases → helm ProviderConfig
-          All Objects → k8s ProviderConfig
+        ProviderConfig protection (every Release and Object must outlive the
+        ProviderConfig it references) is handled generically by the
+        compose-usages pipeline function, which runs after this one.
         """
-        pc = _pc_name(self.xr)
-
-        # Helm ProviderConfig protected by all Releases.
-        resource.update(
-            self.rsp.desired.resources["usage-helm-pc"],
-            usagev1beta1.Usage(
-                spec=usagev1beta1.Spec(
-                    of=usagev1beta1.Of(
-                        apiVersion="helm.m.crossplane.io/v1beta1",
-                        kind="ProviderConfig",
-                        resourceRef=usagev1beta1.ResourceRefModel(name=pc),
-                    ),
-                    by=usagev1beta1.By(
-                        apiVersion="helm.m.crossplane.io/v1beta1",
-                        kind="Release",
-                        resourceSelector=usagev1beta1.ResourceSelector(matchControllerRef=True),
-                    ),
-                    replayDeletion=True,
-                ),
-            ),
-        )
-        self.rsp.desired.resources["usage-helm-pc"].ready = fnv1.READY_TRUE
-
-        # K8s ProviderConfig protected by all Objects.
-        resource.update(
-            self.rsp.desired.resources["usage-k8s-pc"],
-            usagev1beta1.Usage(
-                spec=usagev1beta1.Spec(
-                    of=usagev1beta1.Of(
-                        apiVersion="kubernetes.m.crossplane.io/v1alpha1",
-                        kind="ProviderConfig",
-                        resourceRef=usagev1beta1.ResourceRefModel(name=pc),
-                    ),
-                    by=usagev1beta1.By(
-                        apiVersion="kubernetes.m.crossplane.io/v1alpha1",
-                        kind="Object",
-                        resourceSelector=usagev1beta1.ResourceSelector(matchControllerRef=True),
-                    ),
-                    replayDeletion=True,
-                ),
-            ),
-        )
-        self.rsp.desired.resources["usage-k8s-pc"].ready = fnv1.READY_TRUE
-
         # GatewayClass Object protected by Gateway Object. The GatewayClass
         # has a gateway-exists-finalizer that the EG controller won't remove
         # while Gateways reference it.
