@@ -202,7 +202,10 @@
     program = pkgs.lib.getExe (
       pkgs.writeShellApplication {
         name = "modelplane-docs-vale";
-        runtimeInputs = [ pkgs.vale pkgs.findutils ];
+        runtimeInputs = [
+          pkgs.vale
+          pkgs.findutils
+        ];
         inheritPath = false;
         text = ''
           vale sync --config="$PWD/docs/utils/vale/.vale.ini"
