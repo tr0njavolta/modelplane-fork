@@ -87,8 +87,12 @@ spec:
                     maxLength: 32
                   envoyGateway:
                     type: string
-                    default: "v1.3.0"
-                    description: Envoy Gateway chart version.
+                    default: "v1.8.1"
+                    description: >-
+                      Envoy Gateway chart version. Must support InferencePool
+                      backend resources (the disaggregated-serving routing
+                      path), which requires v1.8.x or newer; older releases lack
+                      the Gateway API CRDs (ListenerSet) the AI Gateway needs.
                     minLength: 1
                     maxLength: 32
                   prometheus:

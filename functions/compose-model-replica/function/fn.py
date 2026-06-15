@@ -19,6 +19,7 @@ from models.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from models.ai.modelplane.modelreplica import v1alpha1
 from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 
+from function import routing
 from function.backends import base, dynamo, llmd, native
 
 # Condition types and reasons for the ModelReplica XR.
@@ -132,21 +133,23 @@ class Composer:
         return True
 
     def compose_model_serving(self):
-        """Compose each engine's workload, plus the replica's shared serving.
+        """Compose each engine's workload, then the replica's routing surface.
 
         Every engine composes to a Deployment or LeaderWorkerSet (with its
-        members' ResourceClaimTemplates) via the backend its roles select. One
-        Service and HTTPRoute, spanning all engines' serving pods, front the
-        replica.
+        members' ResourceClaimTemplates) via the backend its roles select; the
+        backends build no routing. routing.apply then fronts the engines with the
+        surface serving.mode selects: a Service (Unified) or an InferencePool +
+        endpoint picker (PrefillDecode).
         """
         pc = self.ic.status.providerConfigRef.name
         label = base.serving_label(self.xr)
+        composed: dict[str, k8sobjv1alpha1.Object] = {}
         for engine in self.xr.spec.engines:
             backend = _BACKENDS[base.select_backend(engine)]()
-            for key, composed in backend.build(self.xr, engine, pc, label).items():
-                resource.update(self.rsp.desired.resources[key], composed)
-        for key, composed in base.serving_resources(self.xr, pc).items():
-            resource.update(self.rsp.desired.resources[key], composed)
+            composed.update(backend.build(self.xr, engine, pc, label))
+        composed = routing.apply(composed, self.xr, pc)
+        for key, obj in composed.items():
+            resource.update(self.rsp.desired.resources[key], obj)
 
     def derive_conditions(self):
         """Derive ModelAccepted and ModelReady across all of the replica's engines.

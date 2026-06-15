@@ -190,16 +190,99 @@ _ENVOY_GATEWAY = {
             "chart": {
                 "name": "gateway-helm",
                 "repository": "oci://docker.io/envoyproxy",
-                "version": "v1.3.0",
+                "version": "v1.8.1",
             },
             "namespace": "envoy-gateway-system",
             "values": {
                 "config": {
                     "envoyGateway": {
                         "extensionApis": {"enableBackend": True},
+                        "extensionManager": {
+                            "hooks": {
+                                "xdsTranslator": {
+                                    "translation": {
+                                        "listener": {"includeAll": True},
+                                        "route": {"includeAll": True},
+                                        "cluster": {"includeAll": True},
+                                        "secret": {"includeAll": True},
+                                    },
+                                    "post": ["Translation", "Cluster", "Route"],
+                                },
+                            },
+                            "service": {
+                                "fqdn": {
+                                    "hostname": "ai-gateway-controller.envoy-ai-gateway-system.svc.cluster.local",
+                                    "port": 1063,
+                                },
+                            },
+                            "backendResources": [
+                                {
+                                    "group": "inference.networking.k8s.io",
+                                    "kind": "InferencePool",
+                                    "version": "v1",
+                                },
+                            ],
+                        },
                     },
                 },
             },
+        },
+        "providerConfigRef": {
+            "kind": "ProviderConfig",
+            "name": _PC_NAME,
+        },
+    },
+}
+
+_AI_GATEWAY_CRDS = {
+    "apiVersion": "helm.m.crossplane.io/v1beta1",
+    "kind": "Release",
+    "spec": {
+        "forProvider": {
+            "chart": {
+                "name": "ai-gateway-crds-helm",
+                "repository": "oci://docker.io/envoyproxy",
+                "version": "v0.7.0",
+            },
+            "namespace": "envoy-ai-gateway-system",
+        },
+        "providerConfigRef": {
+            "kind": "ProviderConfig",
+            "name": _PC_NAME,
+        },
+    },
+}
+
+_AI_GATEWAY = {
+    "apiVersion": "helm.m.crossplane.io/v1beta1",
+    "kind": "Release",
+    "spec": {
+        "forProvider": {
+            "chart": {
+                "name": "ai-gateway-helm",
+                "repository": "oci://docker.io/envoyproxy",
+                "version": "v0.7.0",
+            },
+            "namespace": "envoy-ai-gateway-system",
+        },
+        "providerConfigRef": {
+            "kind": "ProviderConfig",
+            "name": _PC_NAME,
+        },
+    },
+}
+
+_GAIE_CRDS = {
+    "apiVersion": "helm.m.crossplane.io/v1beta1",
+    "kind": "Release",
+    "spec": {
+        "forProvider": {
+            "chart": {
+                "name": "inferencepool",
+                "repository": "oci://ghcr.io/kubernetes-sigs/gateway-api-inference-extension/charts",
+                "version": "v1.0.1",
+            },
+            "namespace": "gateway-api-inference-extension",
         },
         "providerConfigRef": {
             "kind": "ProviderConfig",
@@ -518,6 +601,15 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     "envoy-gateway": fnv1.Resource(
                         resource=resource.dict_to_struct(_ENVOY_GATEWAY),
                     ),
+                    "ai-gateway-crds": fnv1.Resource(
+                        resource=resource.dict_to_struct(_AI_GATEWAY_CRDS),
+                    ),
+                    "ai-gateway": fnv1.Resource(
+                        resource=resource.dict_to_struct(_AI_GATEWAY),
+                    ),
+                    "gaie-crds": fnv1.Resource(
+                        resource=resource.dict_to_struct(_GAIE_CRDS),
+                    ),
                     "gateway": fnv1.Resource(
                         resource=resource.dict_to_struct(_GATEWAY),
                     ),
@@ -634,6 +726,15 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     ),
                     "envoy-gateway": fnv1.Resource(
                         resource=resource.dict_to_struct(_ENVOY_GATEWAY),
+                    ),
+                    "ai-gateway-crds": fnv1.Resource(
+                        resource=resource.dict_to_struct(_AI_GATEWAY_CRDS),
+                    ),
+                    "ai-gateway": fnv1.Resource(
+                        resource=resource.dict_to_struct(_AI_GATEWAY),
+                    ),
+                    "gaie-crds": fnv1.Resource(
+                        resource=resource.dict_to_struct(_GAIE_CRDS),
                     ),
                     "gateway": fnv1.Resource(
                         resource=resource.dict_to_struct(_GATEWAY),

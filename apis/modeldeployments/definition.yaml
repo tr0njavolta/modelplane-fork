@@ -26,6 +26,19 @@ spec:
           spec:
             type: object
             required: [replicas, engines]
+            # PrefillDecode serving runs one Prefill and one Decode engine, each
+            # marking its phase. Validate the pairing here, where both serving
+            # and the engine list are visible. serving is optional and defaults
+            # to Unified, under which no engine may carry a phase.
+            x-kubernetes-validations:
+            - rule: "!has(self.serving) || self.serving.mode != 'PrefillDecode' || size(self.engines) == 2"
+              message: "PrefillDecode serving requires exactly two engines (one Prefill, one Decode)"
+            - rule: "!has(self.serving) || self.serving.mode != 'PrefillDecode' || self.engines.exists_one(e, has(e.phase) && e.phase == 'Prefill')"
+              message: "PrefillDecode serving requires exactly one engine with phase Prefill"
+            - rule: "!has(self.serving) || self.serving.mode != 'PrefillDecode' || self.engines.exists_one(e, has(e.phase) && e.phase == 'Decode')"
+              message: "PrefillDecode serving requires exactly one engine with phase Decode"
+            - rule: "(has(self.serving) && self.serving.mode == 'PrefillDecode') || !self.engines.exists(e, has(e.phase))"
+              message: "engine phase may only be set when serving.mode is PrefillDecode"
             properties:
               replicas:
                 type: integer
@@ -57,6 +70,24 @@ spec:
                     type: string
                     description: ModelCache resource name in the same namespace.
                     minLength: 1
+              serving:
+                type: object
+                description: >-
+                  How the deployment is served from the cluster edge to its
+                  engines. Unified (the default) fronts the engines with a
+                  Service. PrefillDecode serves prefill and decode from the two
+                  engines marking those phases, with inference-aware routing that
+                  sequences prefill then decode. Omitted means Unified.
+                required: [mode]
+                properties:
+                  mode:
+                    type: string
+                    enum: [Unified, PrefillDecode]
+                    default: Unified
+                    description: >-
+                      Unified serves prefill and decode on one engine.
+                      PrefillDecode splits them across two engines, each marking
+                      its phase as Prefill or Decode.
               engines:
                 type: array
                 description: >-
@@ -119,6 +150,13 @@ spec:
                       default: 1
                       minimum: 1
                       maximum: 64
+                    phase:
+                      type: string
+                      enum: [Prefill, Decode]
+                      description: >-
+                        The engine's phase in a PrefillDecode deployment,
+                        Prefill or Decode. Set only when serving.mode is
+                        PrefillDecode, where exactly one engine takes each phase.
                     members:
                       type: array
                       description: >-

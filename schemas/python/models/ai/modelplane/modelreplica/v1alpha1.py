@@ -138,10 +138,15 @@ class Engine(BaseModel):
     copies: conint(ge=1, le=64) | None = 1
     members: list[Member] = Field(..., max_length=2, min_length=1)
     name: constr(min_length=1, max_length=63)
+    phase: Literal['Prefill', 'Decode'] | None = None
 
 
 class ModelCacheRef(BaseModel):
     name: constr(min_length=1)
+
+
+class Serving(BaseModel):
+    mode: Literal['Unified', 'PrefillDecode'] | None = 'Unified'
 
 
 class SpecModel(BaseModel):
@@ -160,6 +165,10 @@ class SpecModel(BaseModel):
     modelCacheRef: ModelCacheRef | None = None
     """
     Optional reference to a ModelCache mounted into the engine pods. Inherited verbatim from the parent ModelDeployment.
+    """
+    serving: Serving | None = None
+    """
+    Serving mode, inherited verbatim from the parent ModelDeployment. PrefillDecode fronts the engines with an InferencePool + endpoint picker and role-labels the engine each marks with its phase; Unified (or absent) fronts them with a Service.
     """
 
 
