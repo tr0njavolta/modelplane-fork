@@ -15,11 +15,8 @@ An `InferenceClass` is a tested recipe for a GPU node pool. It bundles:
   scheduling only. The scheduler matches a member's `nodeSelector` against these
   devices.
 - **Provisioning** (optional): how to create a node pool of this class on a
-  specific cloud. Omit for classes that describe BYO node pools that already
-  exist. Set `provisioning.provider: GKE` with `gke.machineType` and
-  `gke.accelerator` for GKE pools; set `provisioning.provider: EKS` with
-  `eks.instanceType` for EKS. The `accelerator` block is provisioning input
-  only — the scheduler matches against `spec.devices`, not this block.
+  specific cloud. Classes without provisioning are for existing clusters where
+  the pool already exists.
 
 Different clouds and GPU types imply different classes. A GKE L4 pool is
 `gke-l4-1x-g2`. A bare-metal H100 pool is `h100-8x-ib` (no provisioning).

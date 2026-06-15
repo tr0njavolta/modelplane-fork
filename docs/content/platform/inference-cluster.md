@@ -26,29 +26,12 @@ which Modelplane assumes are solely for its use.
 
 {{< tabs >}}
 {{< tab "GKE" >}}
-Modelplane provisions the full GKE cluster — VPC, subnet, system pool, GPU
-pools, service account, and IAM bindings — and installs the inference stack.
-Set `spec.cluster.gke.project` to your GCP project ID.
-
 {{< manifests "platform/inference-cluster-gke.yaml" >}}
 {{< /tab >}}
 {{< tab "EKS" >}}
-Modelplane provisions the full EKS cluster — VPC, subnets, internet gateway,
-IAM roles, system and GPU node groups, and core addons — and installs the
-inference stack.
-
-{{< hint "warning" >}}
-EKS does not auto-provision RWX storage for ModelCache. See
-[Cache storage](#cache-storage) below.
-{{< /hint >}}
-
 {{< manifests "platform/inference-cluster-eks.yaml" >}}
 {{< /tab >}}
 {{< tab "Existing" >}}
-Bring a cluster you already manage. Modelplane installs its inference stack
-on the cluster and assumes it is solely for Modelplane's use. Provide a
-kubeconfig secret reference under `spec.cluster.existing`.
-
 {{< manifests "platform/inference-cluster-existing.yaml" >}}
 {{< /tab >}}
 {{< /tabs >}}

@@ -16,9 +16,4 @@ LeaderWorkerSet for a Leader/Worker gang. One Service and HTTPRoute, spanning
 every engine's serving pods, front the replica as a unified OpenAI-compatible
 endpoint.
 
-Replicas are pinned to their cluster at creation time (`spec.clusterName`). If
-the cluster is temporarily unavailable the replica stays pinned and the parent
-`ModelDeployment` surfaces the degraded state via its conditions. If the
-cluster is deleted entirely the parent `ModelDeployment` re-places the replica
-on another viable cluster.
 <!-- vale write-good.Passive = YES -->

@@ -4,13 +4,7 @@ weight: 20
 description: Resources for platform engineers provisioning GPU clusters and hardware classes for ML teams.
 ---
 <!-- vale write-good.Passive = NO -->
-Platform engineers set up the GPU fleet that ML teams deploy models onto. You
-create the `InferenceGateway` for control-plane routing, `InferenceClass`
-resources defining hardware recipes, and `InferenceClusters` representing
-individual GPU clusters.
-
-Modelplane installs the inference stack on every cluster you register — including
-existing clusters you bring yourself.
+Platform teams provision infrastructure and define hardware classes.
 
 ## Resources
 

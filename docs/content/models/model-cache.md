@@ -23,13 +23,9 @@ Each cache has:
 
 - A **source**: a required `source` enum naming the kind, with the matching
   source object set alongside it (`source: HuggingFace`, for example, selects
-  `spec.huggingFace`, which carries `repo`, `sizeGiB`, and optionally
-  `revision` (branch, tag, or commit SHA — defaults to the repo's default
-  branch) and `authSecret` (a Secret holding an HF token for gated or private
-  repos, resolved on the workload cluster at hydration time)). `HuggingFace`
-  is the only value today; future sources add an enum value and a sibling
-  object (`Dragonfly` for P2P distribution, `OCI` for NIM-style bundled
-  artifacts).
+  `spec.huggingFace`, which carries `repo` and `sizeGiB`). `HuggingFace` is
+  the only value today; future sources add an enum value and a sibling object
+  (`Dragonfly` for P2P distribution, `OCI` for NIM-style bundled artifacts).
 - An optional **clusterSelector** to scope replication. Omitting
   `spec.clusterSelector` stages the cache on every matched cluster; setting
   `matchLabels` restricts it to clusters carrying those labels.

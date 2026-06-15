@@ -4,12 +4,7 @@ weight: 30
 description: Resources for ML teams deploying models and getting unified endpoints.
 ---
 <!-- vale write-good.Passive = NO -->
-ML teams deploy models to the GPU fleet provisioned by platform engineers. You
-create `ModelDeployments` carrying everything needed to serve a model, optional
-`ModelCaches` to stage weights, and `ModelServices` to expose a unified
-OpenAI-compatible endpoint.
-
-**API group:** `modelplane.ai/v1alpha1` · Namespaced
+ML teams deploy models and get unified endpoints.
 
 ## Resources
 
