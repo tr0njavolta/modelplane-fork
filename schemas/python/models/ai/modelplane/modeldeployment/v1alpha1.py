@@ -154,7 +154,7 @@ class Template(BaseModel):
 class Worker(BaseModel):
     nodes: conint(ge=1, le=63)
     """
-    How many nodes this member spans - how big the engine is. Each node runs one follower pod, so the engine's gang spans 1 (the Leader) plus this many nodes. Defaults to 1.
+    How many nodes this member spans - how big the engine is. Each node runs one worker pod, so the engine's gang spans 1 (the Leader) plus this many worker pods. Defaults to 1.
     """
 
 
@@ -173,7 +173,7 @@ class Member(BaseModel):
     """
     worker: Worker | None = None
     """
-    Settings for a Worker member only. No schema default - the apiserver applies defaults before CEL validation, so defaulting this object would inject it onto Standalone and Leader members and trip the rule that forbids it.
+    Settings for a Worker member. Valid only on a member whose role is Worker.
     """
 
 
@@ -190,12 +190,23 @@ class Engine(BaseModel):
     """
     Identifies the engine within the deployment. Becomes part of the composed workload names, so it must be a DNS label.
     """
+    phase: Literal['Prefill', 'Decode'] | None = None
+    """
+    The engine's phase in a PrefillDecode deployment, Prefill or Decode. Set only when serving.mode is PrefillDecode, where exactly one engine takes each phase.
+    """
 
 
 class ModelCacheRef(BaseModel):
     name: constr(min_length=1)
     """
     ModelCache resource name in the same namespace.
+    """
+
+
+class Serving(BaseModel):
+    mode: Literal['Unified', 'PrefillDecode']
+    """
+    Unified serves prefill and decode on one engine. PrefillDecode splits them across two engines, each marking its phase as Prefill or Decode.
     """
 
 
@@ -219,6 +230,10 @@ class SpecModel(BaseModel):
     replicas: conint(ge=1, le=10)
     """
     How many ModelReplicas to fan out to. Each replica is a complete serving instance scheduled to one InferenceCluster.
+    """
+    serving: Serving | None = None
+    """
+    How the deployment is served from the cluster edge to its engines. Unified (the default) fronts the engines with a Service. PrefillDecode serves prefill and decode from the two engines marking those phases, with inference-aware routing that sequences prefill then decode. Omitted means Unified.
     """
 
 

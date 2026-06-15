@@ -2,8 +2,10 @@
 
 This function composes the serving substrate (the cluster-side CRDs,
 controllers, and gateway) that the native and llm-d model-serving backends
-depend on: cert-manager, Envoy Gateway, Prometheus, LeaderWorkerSet, and an
-inference Gateway. Resources are composed as Helm releases and
+depend on: cert-manager, Envoy Gateway, the Envoy AI Gateway and Gateway API
+Inference Extension (which together route HTTPRoute -> InferencePool backendRefs
+for disaggregated serving), Prometheus, LeaderWorkerSet, and an inference
+Gateway. Resources are composed as Helm releases and
 provider-kubernetes Objects, all targeting the remote cluster via
 ProviderConfigs.
 
@@ -42,6 +44,22 @@ _PROMETHEUS_FULLNAME_OVERRIDE = "prometheus"
 _PROMETHEUS_URL = f"http://{_PROMETHEUS_FULLNAME_OVERRIDE}-prometheus.{_PROMETHEUS_NAMESPACE}.svc.cluster.local:9090"
 _PROMETHEUS_CHART = "kube-prometheus-stack"
 _PROMETHEUS_REPO = "https://prometheus-community.github.io/helm-charts"
+
+# Envoy AI Gateway constants. The AI Gateway controller supplies the ext-proc
+# extension server that Envoy Gateway delegates InferencePool backend resolution
+# to, so HTTPRoute -> InferencePool backendRefs (disaggregated serving) route.
+_AI_GATEWAY_NAMESPACE = "envoy-ai-gateway-system"
+_AI_GATEWAY_REPO = "oci://docker.io/envoyproxy"
+_AI_GATEWAY_VERSION = "v0.7.0"
+_AI_GATEWAY_CONTROLLER_FQDN = f"ai-gateway-controller.{_AI_GATEWAY_NAMESPACE}.svc.cluster.local"
+_AI_GATEWAY_CONTROLLER_PORT = 1063
+
+# Gateway API Inference Extension (GAIE) constants. Provides the InferencePool
+# CRD that disaggregated replicas front their decode endpoints with.
+_GAIE_CHART = "inferencepool"
+_GAIE_REPO = "oci://ghcr.io/kubernetes-sigs/gateway-api-inference-extension/charts"
+_GAIE_VERSION = "v1.0.1"
+_GAIE_NAMESPACE = "gateway-api-inference-extension"
 
 
 def _helm_release(
@@ -208,6 +226,8 @@ class Composer:
         self.compose_usages()
         self.compose_cert_manager()
         self.compose_envoy_gateway()
+        self.compose_ai_gateway()
+        self.compose_gaie_crds()
         self.compose_prometheus()
         self.compose_leader_worker_set()
         self.compose_node_feature_discovery()
@@ -428,7 +448,14 @@ class Composer:
         )
 
     def compose_envoy_gateway(self):
-        """Compose Envoy Gateway. Gated on ProviderConfigs being observed."""
+        """Compose Envoy Gateway. Gated on ProviderConfigs being observed.
+
+        The extensionManager block points Envoy Gateway at the Envoy AI Gateway
+        controller's ext-proc server and declares InferencePool a backend
+        resource, so HTTPRoute -> InferencePool backendRefs (disaggregated
+        serving) resolve. enableBackend turns on the Backend API the AI Gateway
+        relies on.
+        """
         pc_observed = self.provider_configs_observed()
         if not (pc_observed or "envoy-gateway" in self.req.observed.resources):
             return
@@ -447,9 +474,92 @@ class Composer:
                     "config": {
                         "envoyGateway": {
                             "extensionApis": {"enableBackend": True},
+                            "extensionManager": {
+                                "hooks": {
+                                    "xdsTranslator": {
+                                        "translation": {
+                                            "listener": {"includeAll": True},
+                                            "route": {"includeAll": True},
+                                            "cluster": {"includeAll": True},
+                                            "secret": {"includeAll": True},
+                                        },
+                                        "post": ["Translation", "Cluster", "Route"],
+                                    },
+                                },
+                                "service": {
+                                    "fqdn": {
+                                        "hostname": _AI_GATEWAY_CONTROLLER_FQDN,
+                                        "port": _AI_GATEWAY_CONTROLLER_PORT,
+                                    },
+                                },
+                                "backendResources": [
+                                    {
+                                        "group": "inference.networking.k8s.io",
+                                        "kind": "InferencePool",
+                                        "version": "v1",
+                                    },
+                                ],
+                            },
                         },
                     },
                 },
+            ),
+        )
+
+    def compose_ai_gateway(self):
+        """Compose the Envoy AI Gateway CRDs and controller. Gated on the same
+        ProviderConfigs as Envoy Gateway.
+
+        The controller runs the ext-proc extension server that Envoy Gateway's
+        extensionManager delegates InferencePool backend resolution to.
+        """
+        pc_observed = self.provider_configs_observed()
+        if not (pc_observed or "ai-gateway-crds" in self.req.observed.resources):
+            return
+
+        resource.update(
+            self.rsp.desired.resources["ai-gateway-crds"],
+            _helm_release(
+                chart="ai-gateway-crds-helm",
+                repo=_AI_GATEWAY_REPO,
+                version=_AI_GATEWAY_VERSION,
+                namespace=_AI_GATEWAY_NAMESPACE,
+                provider_config=_pc_name(self.xr),
+            ),
+        )
+        resource.update(
+            self.rsp.desired.resources["ai-gateway"],
+            _helm_release(
+                chart="ai-gateway-helm",
+                repo=_AI_GATEWAY_REPO,
+                version=_AI_GATEWAY_VERSION,
+                namespace=_AI_GATEWAY_NAMESPACE,
+                provider_config=_pc_name(self.xr),
+            ),
+        )
+
+    def compose_gaie_crds(self):
+        """Compose the Gateway API Inference Extension (GAIE) CRDs. Gated on the
+        same ProviderConfigs as Envoy Gateway.
+
+        Installs the InferencePool CRD that disaggregated replicas front their
+        decode endpoints with. The codebase has no remote-manifest pattern for
+        provider-kubernetes Objects, so the CRDs come from the upstream Helm
+        chart published by kubernetes-sigs - equivalent to applying that
+        release's manifests.yaml.
+        """
+        pc_observed = self.provider_configs_observed()
+        if not (pc_observed or "gaie-crds" in self.req.observed.resources):
+            return
+
+        resource.update(
+            self.rsp.desired.resources["gaie-crds"],
+            _helm_release(
+                chart=_GAIE_CHART,
+                repo=_GAIE_REPO,
+                version=_GAIE_VERSION,
+                namespace=_GAIE_NAMESPACE,
+                provider_config=_pc_name(self.xr),
             ),
         )
 

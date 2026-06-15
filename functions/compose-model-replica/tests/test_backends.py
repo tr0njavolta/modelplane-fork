@@ -12,6 +12,7 @@ import dataclasses
 import unittest
 
 from crossplane.function import resource
+from function import routing
 from function.backends import base, dynamo, llmd, native
 from models.ai.modelplane.inferencecluster import v1alpha1 as icv1alpha1
 from models.ai.modelplane.modelreplica import v1alpha1
@@ -678,6 +679,129 @@ class TestLLMDBackendCache(unittest.TestCase):
             leader["volumeMounts"],
         )
         self.assertEqual(leader["command"], leader_cmd)
+
+
+class TestDisaggregated(unittest.TestCase):
+    """serving.mode: PrefillDecode routing layers an InferencePool + endpoint
+    picker over two engines, role-labels them, and sidecars decode — no unified
+    Service. Mirrors how fn.py composes engines then calls routing.apply."""
+
+    def _apply(self):
+        prefill = _standalone_engine(name="prefill")
+        prefill.phase = "Prefill"
+        decode = _standalone_engine(name="decode")
+        decode.phase = "Decode"
+        replica = _replica(engines=[prefill, decode])
+        replica.spec.serving = v1alpha1.Serving(mode="PrefillDecode")
+        composed = {}
+        for engine in replica.spec.engines:
+            composed.update(native.NativeBackend().build(replica, engine, _PC, base.serving_label(replica)))
+        return routing.apply(composed, replica, _PC)
+
+    def _serving_pod(self, out, engine_name):
+        return out[f"model-serving-{engine_name}"].spec.forProvider.manifest["spec"]["template"]
+
+    def test_replaces_unified_service_with_pool_and_epp(self):
+        out = self._apply()
+        self.assertNotIn(base.SERVICE_KEY, out)  # unified Service gone
+        self.assertIn("inference-pool", out)
+        self.assertIn("epp", out)
+        self.assertIn("epp-config", out)
+        pool = out["inference-pool"].spec.forProvider.manifest
+        self.assertEqual(pool["kind"], "InferencePool")
+        self.assertEqual(pool["spec"]["endpointPickerRef"]["name"], "r-epp")
+
+    def test_epp_role_watches_inferenceobjectives(self):
+        """The picker watches InferenceObjectives (GIE x-k8s.io group); the Role must allow it."""
+        rules = self._apply()["epp-role"].spec.forProvider.manifest["rules"]
+        self.assertTrue(
+            any(
+                "inference.networking.x-k8s.io" in r["apiGroups"] and "inferenceobjectives" in r["resources"]
+                for r in rules
+            ),
+            f"EPP Role missing inferenceobjectives watch: {rules}",
+        )
+
+    def test_decode_port_follows_user_arg(self):
+        """The sidecar and the decode container port track the user's --port, not a hardcoded one."""
+        prefill = _standalone_engine(name="prefill")
+        prefill.phase = "Prefill"
+        decode = _standalone_engine(name="decode", args=["--model=m", "--port=9000"])
+        decode.phase = "Decode"
+        replica = _replica(engines=[prefill, decode])
+        replica.spec.serving = v1alpha1.Serving(mode="PrefillDecode")
+        composed = {}
+        for e in replica.spec.engines:
+            composed.update(native.NativeBackend().build(replica, e, _PC, base.serving_label(replica)))
+        out = routing.apply(composed, replica, _PC)
+        containers = self._serving_pod(out, "decode")["spec"]["containers"]
+        engine = next(c for c in containers if c["name"] == "engine")
+        sidecar = next(c for c in containers if c["name"] == "pd-sidecar")
+        self.assertEqual(engine["ports"][0]["containerPort"], 9000)
+        self.assertIn("--vllm-port=9000", sidecar["args"])
+        self.assertEqual(sidecar["ports"][0]["containerPort"], 8000)
+
+    def test_engines_role_labeled(self):
+        out = self._apply()
+        self.assertEqual(self._serving_pod(out, "prefill")["metadata"]["labels"]["llm-d.ai/role"], "prefill")
+        decode_labels = self._serving_pod(out, "decode")["metadata"]["labels"]
+        self.assertEqual(decode_labels["llm-d.ai/role"], "decode")
+        self.assertEqual(decode_labels["app"], "r")
+
+    def test_decode_gets_sidecar_and_moves_engine_port(self):
+        out = self._apply()
+        containers = self._serving_pod(out, "decode")["spec"]["containers"]
+        names = [c["name"] for c in containers]
+        self.assertEqual(names, ["engine", "pd-sidecar"])
+        engine = next(c for c in containers if c["name"] == "engine")
+        self.assertEqual(engine["ports"][0]["containerPort"], 8001)
+        sidecar = next(c for c in containers if c["name"] == "pd-sidecar")
+        self.assertEqual(sidecar["ports"][0]["containerPort"], 8000)
+        self.assertIn("--secure-proxy=false", sidecar["args"])
+
+    def test_prefill_has_no_sidecar(self):
+        containers = self._serving_pod(self._apply(), "prefill")["spec"]["containers"]
+        self.assertEqual([c["name"] for c in containers], ["engine"])
+
+    def test_route_targets_inference_pool(self):
+        route = self._apply()[base.ROUTE_KEY].spec.forProvider.manifest
+        ref = route["spec"]["rules"][0]["backendRefs"][0]
+        self.assertEqual(ref["kind"], "InferencePool")
+        self.assertEqual(ref["name"], "r-pool")
+
+    def test_selects_engines_by_phase_not_name(self):
+        """Roles come from each engine's phase, not its name."""
+        decode = _standalone_engine(name="alpha")
+        decode.phase = "Decode"
+        prefill = _standalone_engine(name="beta")
+        prefill.phase = "Prefill"
+        replica = _replica(engines=[decode, prefill])
+        replica.spec.serving = v1alpha1.Serving(mode="PrefillDecode")
+        composed = {}
+        for e in replica.spec.engines:
+            composed.update(native.NativeBackend().build(replica, e, _PC, base.serving_label(replica)))
+        out = routing.apply(composed, replica, _PC)
+        # alpha is Decode -> sidecar; beta is Prefill -> none, despite their names.
+        self.assertEqual(
+            [c["name"] for c in self._serving_pod(out, "alpha")["spec"]["containers"]], ["engine", "pd-sidecar"]
+        )
+        self.assertEqual([c["name"] for c in self._serving_pod(out, "beta")["spec"]["containers"]], ["engine"])
+        self.assertEqual(self._serving_pod(out, "alpha")["metadata"]["labels"]["llm-d.ai/role"], "decode")
+        self.assertEqual(self._serving_pod(out, "beta")["metadata"]["labels"]["llm-d.ai/role"], "prefill")
+
+
+class TestUnifiedRouting(unittest.TestCase):
+    """With no serving block (or mode Unified), routing.apply adds a plain
+    Service + HTTPRoute and no InferencePool."""
+
+    def test_adds_service_and_route(self):
+        engine = _standalone_engine(name="main")
+        replica = _replica(engines=[engine])
+        composed = native.NativeBackend().build(replica, engine, _PC, base.serving_label(replica))
+        out = routing.apply(composed, replica, _PC)
+        self.assertIn(base.SERVICE_KEY, out)
+        self.assertIn(base.ROUTE_KEY, out)
+        self.assertNotIn("inference-pool", out)
 
 
 if __name__ == "__main__":

@@ -207,13 +207,19 @@ class Composer:
             )
             if self.xr.spec.modelCacheRef:
                 replica.spec.modelCacheRef = mrv1alpha1.ModelCacheRef(name=self.xr.spec.modelCacheRef.name)
+            # The replica backend reads serving to pick unified vs. disaggregated
+            # routing; copy it down unchanged.
+            if self.xr.spec.serving:
+                replica.spec.serving = mrv1alpha1.Serving.model_validate(
+                    self.xr.spec.serving.model_dump(exclude_unset=True)
+                )
             resource.update(self.rsp.desired.resources[replica_key], replica)
 
     def _replica_engine(self, engine, placement):
         """Build a ModelReplica engine from a deployment engine + placement.
 
-        The engine keeps its name, copies, and member templates verbatim; the
-        scheduler supplies each member's pool (nodePoolName) and resolved
+        The engine keeps its name, copies, phase, and member templates verbatim;
+        the scheduler supplies each member's pool (nodePoolName) and resolved
         claim: DRA device requests. A member that claims nothing - no
         nodeSelector, or only synthetic devices matched - carries only its pool
         pin; the scheduler guarantees at least one member of every engine
@@ -245,11 +251,16 @@ class Composer:
             if member.worker is not None:
                 replica_member.worker = mrv1alpha1.Worker(nodes=member.worker.nodes)
             members.append(replica_member)
-        return mrv1alpha1.Engine(
+        replica_engine = mrv1alpha1.Engine(
             name=engine.name,
             copies=engine.copies,
             members=members,
         )
+        # phase is only set under PrefillDecode serving; omit it otherwise so it
+        # doesn't serialize a null into the composed ModelReplica.
+        if engine.phase is not None:
+            replica_engine.phase = engine.phase
+        return replica_engine
 
     def compose_endpoints(self, matched):
         """Compose one ModelEndpoint per matched replica.

@@ -87,9 +87,9 @@ class Versions(BaseModel):
     """
     cert-manager chart version.
     """
-    envoyGateway: constr(min_length=1, max_length=32) | None = 'v1.3.0'
+    envoyGateway: constr(min_length=1, max_length=32) | None = 'v1.8.1'
     """
-    Envoy Gateway chart version.
+    Envoy Gateway chart version. Must support InferencePool backend resources (the disaggregated-serving routing path), which requires v1.8.x or newer; older releases lack the Gateway API CRDs (ListenerSet) the AI Gateway needs.
     """
     gatewayApi: constr(min_length=1, max_length=32) | None = 'v1.5.1'
     """

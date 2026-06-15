@@ -106,6 +106,13 @@ def _replica_engines(*, args: bool = True) -> list:
 _REPLICA_ENGINES = _replica_engines()
 _REPLICA_ENGINES_NO_ARGS = _replica_engines(args=False)
 
+# The composed spec.engines for a PrefillDecode deployment: the standard
+# single-GPU Standalone engine, one marked Prefill and one Decode.
+_PD_REPLICA_ENGINES = [
+    {**_replica_engines()[0], "name": "prefill", "phase": "Prefill"},
+    {**_replica_engines()[0], "name": "decode", "phase": "Decode"},
+]
+
 # A one-replica deployment requesting a single GPU. Reused across most cases.
 _XR = v1alpha1.ModelDeployment(
     metadata=metav1.ObjectMeta(name="my-model", namespace="ml-team"),
@@ -278,6 +285,19 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         xr_two = v1alpha1.ModelDeployment(
             metadata=metav1.ObjectMeta(name="my-model", namespace="ml-team"),
             spec=v1alpha1.SpecModel(replicas=2, engines=[_ENGINE_NO_ARGS]),
+        ).model_dump(exclude_none=True, mode="json")
+
+        # A disaggregated (PrefillDecode) deployment: a Prefill and a Decode engine.
+        xr_pd = v1alpha1.ModelDeployment(
+            metadata=metav1.ObjectMeta(name="my-model", namespace="ml-team"),
+            spec=v1alpha1.SpecModel(
+                replicas=1,
+                serving=v1alpha1.Serving(mode="PrefillDecode"),
+                engines=[
+                    _ENGINE.model_copy(update={"name": "prefill", "phase": "Prefill"}),
+                    _ENGINE.model_copy(update={"name": "decode", "phase": "Decode"}),
+                ],
+            ),
         ).model_dump(exclude_none=True, mode="json")
 
         cases = [
@@ -839,6 +859,88 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                             fnv1.Result(
                                 severity=fnv1.SEVERITY_NORMAL,
                                 message="Scheduled 2 replicas across 1 clusters: cluster-a",
+                            ),
+                        ],
+                        context=structpb.Struct(),
+                    )
+                ),
+            ),
+            Case(
+                # PrefillDecode copies serving and each engine's phase onto the
+                # replica; the replica backend reads them to front the engines
+                # with an InferencePool + endpoint picker rather than a Service.
+                name="PrefillDecode copies serving and engine phases onto the replica",
+                req=_req(xr_pd, clusters=[_CLUSTER_A]),
+                want=_want(
+                    fnv1.RunFunctionResponse(
+                        meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+                        desired=fnv1.State(
+                            composite=fnv1.Resource(
+                                resource=resource.dict_to_struct({"status": {"replicas": {"total": 1, "ready": 0}}}),
+                            ),
+                            resources={
+                                "replica-cluster-a-0": fnv1.Resource(
+                                    resource=resource.dict_to_struct(
+                                        {
+                                            "apiVersion": "modelplane.ai/v1alpha1",
+                                            "kind": "ModelReplica",
+                                            "metadata": {
+                                                "name": "my-model-5ab63",
+                                                "namespace": "ml-team",
+                                                "labels": {
+                                                    "modelplane.ai/deployment": "my-model",
+                                                    "modelplane.ai/cluster": "cluster-a",
+                                                    "modelplane.ai/replica-index": "0",
+                                                },
+                                            },
+                                            "spec": {
+                                                "clusterName": "cluster-a",
+                                                "serving": {"mode": "PrefillDecode"},
+                                                "engines": _PD_REPLICA_ENGINES,
+                                            },
+                                        }
+                                    ),
+                                ),
+                                "endpoint-cluster-a-0": fnv1.Resource(
+                                    resource=resource.dict_to_struct(
+                                        {
+                                            "apiVersion": "modelplane.ai/v1alpha1",
+                                            "kind": "ModelEndpoint",
+                                            "metadata": {
+                                                "name": "my-model-5ab63",
+                                                "namespace": "ml-team",
+                                                "labels": {
+                                                    "modelplane.ai/deployment": "my-model",
+                                                    "modelplane.ai/cluster": "cluster-a",
+                                                    "modelplane.ai/replica-index": "0",
+                                                },
+                                            },
+                                            "spec": {
+                                                "url": "http://10.0.0.1/ml-team/my-model-5ab63/v1",
+                                                "rewritePath": "/ml-team/my-model-5ab63/",
+                                            },
+                                        }
+                                    ),
+                                ),
+                            },
+                        ),
+                        conditions=[
+                            fnv1.Condition(
+                                type="ReplicasScheduled",
+                                status=fnv1.STATUS_CONDITION_FALSE,
+                                reason="Scheduling",
+                            ),
+                            fnv1.Condition(
+                                type="ReplicasReady",
+                                status=fnv1.STATUS_CONDITION_FALSE,
+                                reason="ModelStarting",
+                                message="0 of 1 ready",
+                            ),
+                        ],
+                        results=[
+                            fnv1.Result(
+                                severity=fnv1.SEVERITY_NORMAL,
+                                message="Scheduled 1 replicas across 1 clusters: cluster-a",
                             ),
                         ],
                         context=structpb.Struct(),
