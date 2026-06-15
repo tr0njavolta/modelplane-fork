@@ -3,11 +3,11 @@
 //
 
 .bd-footer {
-  background: $navbar-background-color;
+  background: #{$mp-bg};
 
   p {
-    color: $navbar-link-color;
-    margin-bottom: $navbar-link-font-size;
+    color: #ffffff;
+    margin-bottom: 17px;
     text-align: left;
 
     a {
@@ -21,15 +21,15 @@
   }
 
   .footer-link {
-    color: $navbar-link-color;
-    font-size: $navbar-link-font-size;
+    color: #ffffff;
+    font-size: 17px;
     opacity: .85;
     letter-spacing: 1.1px;
     text-decoration: none;
 
     &:hover {
       opacity: 1.5;
-      color: $navbar-link-color-hover;
+      color: #CECFCF;
       text-decoration: none;
     }
   }

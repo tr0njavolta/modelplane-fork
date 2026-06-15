@@ -4,9 +4,10 @@
 $bd-callout-variants: info, warning, danger !default;
 $font-family-sans-serif:      "Inter", -apple-system, BlinkMacSystemFont, sans-serif !default;
 $font-family-monospace:       "DM Mono", "Fira Code", monospace !default;
-$line-height-base:            1.8 !default;
+// These three are set by Bootstrap before _variables.scss runs (Bootstrap
+// is imported first in docs.scss), so !default has no effect on Bootstrap's
+// output. The actual overrides live in _modelplane.scss body { font-size; line-height }.
 $font-size-root:              16px !default;
-$font-size-base:              1.125rem !default;
 $body-font-size:              16px !default;
 
 
@@ -130,17 +131,8 @@ $mp-green:        #34d399 !default;
 $mp-muted:        #8b8aae !default;
 $mp-muted-hi:     #b0afcc !default;
 
-$navbar-background-color:   #{$mp-bg} !default;
-$navbar-link-color:         #{$fog-0} !default;
-$navbar-link-color-hover:   #{$fog-200} !default;
-$navbar-link-font-size:     17px !default;
-$navbar-link-padding-left:  16px !default;
-$navbar-link-padding-right: 16px !default;
-$navbar-background:         #{$fog-1000} !default;
-
 $body-font-weight:          normal !default;
 $body-min-width:            20rem !default;
-$body-font-size:            18px !default;
 
 $color-admonition-background: transparent;
 

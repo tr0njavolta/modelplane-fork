@@ -1,26 +1,35 @@
 // Modelplane visual overrides
 
-// Antialiased font rendering — matches the marketing site's body rule and
-// makes text noticeably sharper on dark backgrounds.
+// Match website body exactly — explicit values beat Bootstrap's CSS-var approach
+// since _modelplane.scss loads after bootstrap/bootstrap in docs.scss
 body {
+  font-size: 16px;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-// Grid-line background (matches website)
+// Prevent Bootstrap's vertical-align:middle on svg from shifting nav text
+nav.site-nav a {
+  vertical-align: baseline;
+}
+
+// Grid-line background — matches website globals.css body::after exactly
 body::after {
   content: '';
   position: fixed; inset: 0; z-index: 0;
   background-image:
-    linear-gradient(rgba(255,255,255,0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px);
+    linear-gradient(rgba(255,255,255,0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.07) 1px, transparent 1px);
   background-size: 80px 80px;
   pointer-events: none;
   opacity: 0.5;
 }
 
-// Lift content above the grid
-.docs-navbar,
+// Lift layout and footer above the grid (z-index:0).
+// docs-navbar is NOT here — _navbar.scss owns position:sticky + z-index:100
+// and _modelplane.scss loads after _navbar.scss, so adding docs-navbar here
+// would silently override sticky with relative.
 .bd-layout,
 .bd-footer {
   position: relative;
@@ -134,20 +143,91 @@ body::after {
   }
 }
 
-// ── Footer simplified ─────────────────────────────────────────
+// ── Shared wrapper — matches website .wrap ────────────────────
 
-// Footer simplified
+.docs-wrap {
+  position: relative;
+  z-index: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 40px;
+
+  @media (max-width: 900px) { padding: 0 24px; }
+  @media (max-width: 640px) { padding: 0 20px; }
+}
+
+// ── Footer — website globals.css footer rules, verbatim ───────
+
 .bd-footer {
   background: #{$mp-bg} !important;
-  color: #{$mp-muted};
+  border-top: 1px solid #{$mp-border};
+  padding: 48px 0;
+  position: relative;
+  z-index: 1;
 
-  p, .footer-link {
-    color: #{$mp-muted} !important;
-    font-size: 13px;
+  // don't dim logos in dark mode
+  img { filter: none !important; }
+
+  .footer-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 24px;
   }
 
-  a.footer-link:hover {
-    color: #ffffff !important;
-    opacity: 1;
+  .footer-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .footer-logo {
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    text-decoration: none;
+  }
+
+  .footer-tagline {
+    font-size: 13px;
+    color: #{$mp-muted};
+    line-height: 1.4;
+  }
+
+  .footer-right {
+    display: flex;
+    align-items: center;
+    gap: 32px;
+
+    a {
+      font-size: 13px;
+      color: #{$mp-muted};
+      text-decoration: none;
+      transition: color 0.2s;
+      display: flex;
+      align-items: center;
+
+      svg { width: 20px; height: 20px; display: block; }
+
+      &:hover { color: #ffffff; }
+    }
+  }
+
+  .footer-by {
+    font-family: #{$font-family-monospace};
+    font-size: 12px;
+    color: #3a3a55;
+    letter-spacing: 0.06em;
+    margin-top: 24px;
+
+    a { color: #4a4a68; text-decoration: none; }
+    a:hover { color: #{$mp-muted}; }
+  }
+
+  @media (max-width: 640px) {
+    .footer-inner { flex-direction: column; gap: 24px; }
+    .footer-right { flex-wrap: wrap; gap: 20px; }
   }
 }
+

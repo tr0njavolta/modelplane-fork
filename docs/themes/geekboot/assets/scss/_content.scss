@@ -3,13 +3,12 @@
 //
 
 body {
-  letter-spacing: 0.33px;
   scroll-behavior: smooth;
 }
 
 .bd-content {
   font-size: $body-font-size;
-  line-height: 1.5em;
+  line-height: 1.6;
 
   code {
     background-color: var(--code-background);
@@ -45,7 +44,7 @@ body {
   font-size: 2rem;
   font-weight: 600;
   line-height: 2.75rem;
-  margin-top: 0px !important;
+  margin-top: 0;
 }
 
 
@@ -160,11 +159,6 @@ h3, h4, h5, h6 {
   color: var(--content-link-color);
 }
 
-// Color theme toggle
-.form-check-input:checked {
-  background-color: #{$mp-purple};
-  border-color: #{$mp-purple};
-}
 
 .ga-tag{
   color: var(--toc-font-color);

@@ -1,151 +1,145 @@
-.docs-navbar {
-  box-shadow: none;
-  border-bottom: 1px solid #{$mp-border};
-  height: 64px;
-  background: rgba(7,7,20,0.88);
+// ── Exact copy of website globals.css nav section ─────────────
+// nav.site-nav scopes to the top nav only (docs has other <nav> elements)
+
+nav.site-nav {
+  position: sticky; top: 0; z-index: 100;
+  margin: 0;
+  padding: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  background: rgba(7,7,20,0.85);
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
-  min-height: 64px;
-  padding-left: 24px;
-  padding-right: 24px;
+}
 
-  .navbar-icons{
-    svg {
-      height: 24px;
-      width: 24px;
-    }
-  }
+nav.site-nav .wrap {
+  position: relative; z-index: 1;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 16px 40px;
+  display: flex; align-items: center; justify-content: space-between;
+}
 
-  .navbar-link {
-    color: $navbar-link-color;
-    font-size: $navbar-link-font-size;
-    text-decoration: none;
-    letter-spacing: normal;
+@media (max-width: 900px) {
+  nav.site-nav .wrap { padding-left: 24px; padding-right: 24px; }
+}
 
-    &:hover {
-      opacity: 1.5;
-      text-decoration: none;
-      color: $navbar-link-color-hover;
-    }
-  }
+.nav-logo {
+  display: flex;
+  align-items: center;
+  text-decoration: none;
+}
+.nav-logo img {
+  display: block;
+  filter: none !important;
+}
 
-  // Mobile View
-  @include media-breakpoint-down(lg) {
+.nav-links {
+  display: flex; align-items: center; gap: 28px;
+  list-style: none; margin: 0; padding: 0;
+}
+.nav-links a {
+  font-size: 14px;
+  font-weight: 400;
+  color: #8b8aae;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.nav-links a:hover { color: #ffffff; }
 
-    .offcanvas-lg{
-      border: none;
-    }
+.nav-cta {
+  font-size: 14px;
+  font-weight: 500;
+  color: #070714 !important;
+  background: #AD7BFC;
+  padding: 8px 20px;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: background 0.2s, transform 0.15s, box-shadow 0.2s;
+}
+.nav-cta:hover {
+  background: #C39EFD;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(173,123,252,0.4);
+}
 
-    .offcanvas-body{
-      background: $navbar-background-color;
-      padding: 24px !important;
-    }
+.nav-hamburger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  width: 32px;
+  height: 32px;
+}
+.nav-hamburger span {
+  display: block;
+  height: 2px;
+  background: #b0afcc;
+  border-radius: 2px;
+  transition: transform 0.2s, opacity 0.2s;
+}
+.nav-hamburger.open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.nav-hamburger.open span:nth-child(2) { opacity: 0; }
+.nav-hamburger.open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
 
-    .offcanvas-header{
-      min-height: initial !important;
+.nav-dropdown {
+  display: flex;
+  flex-direction: column;
+  background: rgba(7,7,20,0.97);
+  border-top: 1px solid rgba(255,255,255,0.07);
+  padding: 16px 20px 24px;
+  gap: 4px;
+}
+.nav-dropdown a {
+  font-size: 16px;
+  font-weight: 400;
+  color: #8b8aae;
+  text-decoration: none;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.07);
+  transition: color 0.2s;
+}
+.nav-dropdown a:last-child { border-bottom: none; }
+.nav-dropdown a:hover { color: #ffffff; }
 
-      .btn-close{
-        opacity: 1 !important;
-      }
+.nav-cta-mobile {
+  margin-top: 8px;
+  color: #C39EFD !important;
+  font-weight: 600 !important;
+  border-bottom: none !important;
+}
 
-    }
+// ── Docs-only additions ────────────────────────────────────────
 
-    .navbar-toggler{
-      color: white;
-    }
+// Sidebar toggle — absolutely positioned, never a flex child
+// nav.site-nav { position: sticky } acts as containing block
+.docs-sidebar-toggle {
+  display: none;
+  position: absolute;
+  left: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  align-items: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #8b8aae;
+  padding: 4px;
+  border-radius: 4px;
+  transition: color 0.2s;
+  z-index: 1;
 
-    .navbar-brand{
-      width: initial !important;
-    }
+  svg { width: 1.25rem; height: 1.25rem; }
+  &:hover { color: #ffffff; }
+}
 
+// ── Responsive (matches website @media (max-width: 900px)) ─────
 
-    .navbar-center-links{
-      padding-top: 3rem;
-
-      .nav-item{
-        padding-bottom: 1rem;
-
-        .navbar-link{
-          font-size: 20px;
-        }
-      }
-
-    }
-
-    .navbar-icons{
-      padding-top: 2rem !important;
-
-      .nav-item{
-        padding-bottom: 1rem !important;
-      }
-
-      .icon-label{
-        display: inline !important;
-        padding-left: 1rem;
-      }
-    }
-
-    .vr{
-      display: none !important;
-    }
-
-  }
-
-  // Desktop View
-  @include media-breakpoint-up(lg) {
-
-    //spacing fixes between large screens and mobile view
-    @include media-breakpoint-down(xxl){
-      .navbar-brand{
-        width: initial !important;
-      }
-
-      .navbar-icons{
-        min-width: 0 !important;
-      }
-
-      .navbar-link{
-        padding-left: 5px !important;
-        padding-right: 5px !important;
-      }
-    }
-
-    .offcanvas{
-      display: none;
-    }
-
-    .navbar-center-links {
-      padding-bottom: 1px !important; //nudge to match www
-      margin-left: -2px;
-
-      .nav-item a{
-        padding-left: 16px;
-        padding-right: 16px;
-      }
-
-    }
-
-    .navbar-icons{
-      min-width: 375px;
-
-      .icon-label{
-        display: none;
-      }
-
-      svg {
-        height: 24px;
-        width: 24px;
-      }
-    }
-
-    .navbar-brand{
-      width: auto;
-      max-width: 220px;
-      padding-bottom: 9px !important; //nudge to match www
-      padding-top: 0px !important;
-    }
-
-
-  }
-
+@media (max-width: 900px) {
+  .nav-links { display: none; }
+  .nav-hamburger { display: flex; }
+  .docs-sidebar-toggle { display: flex; }
 }
