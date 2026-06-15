@@ -1,0 +1,6 @@
+{{ $path := .Get 0 }}
+{{ $resource := resources.Get (printf "examples/%s" $path) }}
+{{ if not $resource }}
+  {{ errorf "manifests shortcode: examples/%s not found (called from %s)" $path .Position }}
+{{ end }}
+{{ highlight $resource.Content "yaml" "linenos=false" }}
