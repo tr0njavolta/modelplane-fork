@@ -1,69 +1,98 @@
-// stylelint-disable selector-max-type
+// ── TOC — matches website .toc rules exactly ──────────────────
 
 .bd-toc {
   color: var(--toc-font-color);
 
   @include media-breakpoint-up(lg) {
     position: sticky;
-    top: 5rem;
-    right: 0;
+    top: 0;
     z-index: 2;
     height: subtract(100vh, 7rem);
     overflow-y: auto;
-    top: 0;
+    border-left: 1px solid #{$mp-border};
+    padding-left: 18px;
   }
+
+  // "On this page" heading — matches website .toc summary exactly
+  strong.h6 {
+    font-family: #{$font-family-monospace} !important;
+    font-size: 11px !important;
+    font-weight: 500 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.16em;
+    color: #{$mp-muted};
+    display: block;
+    margin-bottom: 14px;
+    // reset Bootstrap h6 overrides
+    line-height: 1.4;
+  }
+
+  // No hr separator — website doesn't use one
+  hr { display: none; }
 
   nav {
     @include font-size(.875rem);
 
     ul {
-      padding-left: 0;
-      margin-bottom: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 4px 0;
       list-style: none;
-      display: inherit;
+      margin-bottom: 0;
 
+      ul { padding-left: 0; margin-top: 0; }
+    }
 
-      ul {
-        padding-left: 1rem;
-        margin-top: .25rem;
+    li { margin-bottom: 0; }
+
+    // Matches website .toc a exactly — scoped to list items only
+    ul a {
+      color: #{$mp-muted};
+      text-decoration: none;
+      font-size: 13px;
+      line-height: 1.4;
+      display: block;
+      border-left: 2px solid transparent;
+      margin-left: -20px;
+      padding: 4px 0 4px 18px;
+      transition: color 0.18s ease, border-color 0.18s ease;
+
+      &:hover {
+        color: #{$mp-muted-hi};
+        text-decoration: none !important;
       }
 
-    }
-
-    li {
-      margin-bottom: .25rem;
-    }
-
-    a {
-      color: inherit;
-      display: inherit;
-      padding: inherit;
-
       &.active {
-        color: var(--content-link-color);
-        font-weight: 600;
-        letter-spacing: .60px;
+        color: #{$mp-purple-hi};
+        font-weight: 400;
+        letter-spacing: normal;
+        border-left-color: #{$mp-purple};
 
-        &:hover{
-          color: var(--content-link-color);;
-          text-decoration: underline !important;
+        &:hover {
+          color: #{$mp-purple-hi};
+          text-decoration: none !important;
         }
       }
 
-      &:not(:hover) {
-        text-decoration: none;
-      }
-
-      &:hover{
-        color: inherit;
-        text-decoration: underline !important;
-      }
-
-      code {
-        font: inherit;
-      }
+      code { font: inherit; }
     }
   }
+}
+
+// "Report a problem" / "View page source" — icon + text on one line
+.bd-toc nav.pt-3 div {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.bd-toc nav.pt-3 a {
+  color: #{$mp-muted};
+  font-size: 0.8125rem;
+  text-decoration: none;
+
+  &:hover { color: #ffffff; text-decoration: none !important; }
 }
 
 .bd-toc-toggle {
@@ -88,11 +117,6 @@
       background-color: var(--body-background);
       border-color: var(--toc-mobile-menu-outline);
     }
-
-    &:focus,
-    &[aria-expanded="true"] {
-      box-shadow: 0 0 0 3px rgba(var(--toc-mobile-menu-outline), .25);
-    }
   }
 }
 
@@ -102,7 +126,7 @@
       padding: 1.25rem;
       background-color: var(--toc-mobile-menu-background);
       color: var(--body-font-color);
-      border: 1px solid var(--body-font-color);
+      border: 1px solid #{$mp-border};
       font-size: 1rem;
       line-height: 2rem;
       @include border-radius(.25rem);
@@ -110,6 +134,6 @@
   }
 
   @include media-breakpoint-up(md) {
-    display: block !important; // stylelint-disable-line declaration-no-important
+    display: block !important;
   }
 }
