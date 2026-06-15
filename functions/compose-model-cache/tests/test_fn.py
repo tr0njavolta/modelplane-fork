@@ -170,7 +170,7 @@ def _job_object(pc: str, *, command: str = _HYDRATE_CMD, env: list | None = None
                     "metadata": {"name": _JOB_NAME, "namespace": "default", "labels": _LABELS},
                     "spec": {
                         "backoffLimit": 3,
-                        "ttlSecondsAfterFinished": 3600,
+                        "ttlSecondsAfterFinished": 180,
                         "template": {
                             "metadata": {"labels": _LABELS},
                             "spec": {
@@ -192,6 +192,7 @@ def _job_object(pc: str, *, command: str = _HYDRATE_CMD, env: list | None = None
                     },
                 },
             },
+            "managementPolicies": ["Observe", "Create", "Update", "LateInitialize"],
             "providerConfigRef": {"kind": "ClusterProviderConfig", "name": pc},
             "readiness": {
                 "celQuery": 'object.status.conditions.exists(c, c.type == "Complete" && c.status == "True")',
@@ -338,10 +339,9 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         # not-previously-ready -> ready transition emits the "staged" event. ---
         observed4 = {
             "pvc-cluster-a": _observed_object({"phase": "Bound"}, ready=True),
-            "hydrate-cluster-a": _observed_object({"succeeded": 1}, ready=True),
+            "hydrate-cluster-a": _observed_object({"conditions": [{"type": "Complete", "status": "True"}]}, ready=True),
         }
         pvc_ready = _pvc_object("cluster-a-pc")
-        job_ready = _job_object("cluster-a-pc")
         want4 = fnv1.RunFunctionResponse(
             meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
             desired=fnv1.State(
@@ -357,10 +357,8 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     ready=fnv1.READY_TRUE,
                 ),
                 resources={
+                    # Job dropped once Ready; only the PVC remains composed.
                     "pvc-cluster-a": fnv1.Resource(resource=resource.dict_to_struct(pvc_ready), ready=fnv1.READY_TRUE),
-                    "hydrate-cluster-a": fnv1.Resource(
-                        resource=resource.dict_to_struct(job_ready), ready=fnv1.READY_TRUE
-                    ),
                 },
             ),
             conditions=[
@@ -447,7 +445,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         # 1/2, ArtifactReady False with reason Partial, XR not ready. ---
         observed7 = {
             "pvc-a": _observed_object({"phase": "Bound"}, ready=True),
-            "hydrate-a": _observed_object({"succeeded": 1}, ready=True),
+            "hydrate-a": _observed_object({"conditions": [{"type": "Complete", "status": "True"}]}, ready=True),
             "pvc-b": _observed_object({"phase": "Bound"}, ready=True),
         }
         want7 = fnv1.RunFunctionResponse(
@@ -467,11 +465,9 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     ),
                 ),
                 resources={
+                    # Cluster a is Ready, so its Job is dropped; b is still Hydrating.
                     "pvc-a": fnv1.Resource(
                         resource=resource.dict_to_struct(_pvc_object("a-pc")), ready=fnv1.READY_TRUE
-                    ),
-                    "hydrate-a": fnv1.Resource(
-                        resource=resource.dict_to_struct(_job_object("a-pc")), ready=fnv1.READY_TRUE
                     ),
                     "pvc-b": fnv1.Resource(
                         resource=resource.dict_to_struct(_pvc_object("b-pc")), ready=fnv1.READY_TRUE
@@ -486,6 +482,53 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             context=structpb.Struct(),
         )
         want7.requirements.resources["clusters"].CopyFrom(_CLUSTERS_SELECTOR)
+
+        # --- Case 8: latch. A previously-Ready cluster whose hydration Job was
+        # dropped (and TTL-cleaned), so only the PVC is observed now. The status
+        # latch keeps phase Ready and the Job is not re-composed, PVC marked
+        # ready, summary 1/1, XR ready. Already-ready, so no transition event. ---
+        xr_ready = _cache_xr()
+        xr_ready.status = v1alpha1.Status(
+            summary=v1alpha1.Summary(ready="1/1"),
+            clusters=[v1alpha1.Cluster(name="cluster-a", phase="Ready")],
+            conditions=[
+                v1alpha1.Condition(
+                    type="Ready",
+                    status="True",
+                    reason="Available",
+                    lastTransitionTime="2026-06-08T00:00:00Z",
+                ),
+            ],
+        )
+        observed8 = {"pvc-cluster-a": _observed_object({"phase": "Bound"}, ready=True)}
+        want8 = fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        {
+                            "status": {
+                                "summary": {"ready": "1/1"},
+                                "clusters": [{"name": "cluster-a", "phase": "Ready"}],
+                            },
+                        },
+                    ),
+                    ready=fnv1.READY_TRUE,
+                ),
+                resources={
+                    # Latched Ready with the Job already dropped: only the PVC.
+                    "pvc-cluster-a": fnv1.Resource(
+                        resource=resource.dict_to_struct(_pvc_object("cluster-a-pc")), ready=fnv1.READY_TRUE
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(type="ClustersMatched", status=fnv1.STATUS_CONDITION_TRUE, reason="Matched"),
+                fnv1.Condition(type="ArtifactReady", status=fnv1.STATUS_CONDITION_TRUE, reason="Staged"),
+            ],
+            context=structpb.Struct(),
+        )
+        want8.requirements.resources["clusters"].CopyFrom(_CLUSTERS_SELECTOR)
 
         cases = [
             Case(
@@ -522,6 +565,11 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 name="one of two clusters ready reports partial",
                 req=_req(_cache_xr(), [_cluster_dict("a", "a-pc"), _cluster_dict("b", "b-pc")], observed7),
                 want=want7,
+            ),
+            Case(
+                name="hydrated cluster stays Ready after its Job is TTL-cleaned",
+                req=_req(xr_ready, [_cluster_dict("cluster-a", "cluster-a-pc")], observed8),
+                want=want8,
             ),
         ]
 
