@@ -272,24 +272,38 @@ _AI_GATEWAY = {
     },
 }
 
-_GAIE_CRDS = {
-    "apiVersion": "helm.m.crossplane.io/v1beta1",
-    "kind": "Release",
-    "spec": {
-        "forProvider": {
-            "chart": {
-                "name": "inferencepool",
-                "repository": "oci://registry.k8s.io/gateway-api-inference-extension/charts",
-                "version": "v1.0.1",
-            },
-            "namespace": "gateway-api-inference-extension",
-        },
-        "providerConfigRef": {
-            "kind": "ProviderConfig",
-            "name": _PC_NAME,
-        },
-    },
-}
+
+def _gaie_crd_desired(ready: bool) -> dict:
+    """The GAIE CRDs composed as provider-kubernetes Objects on the remote
+    cluster, built from the same vendored bundle and helper the function
+    composes so the test stays in sync. When ready is True each Object is marked
+    READY_TRUE, matching a pass where the Objects are observed Ready."""
+    out = {}
+    for doc in fn._GAIE_CRDS:
+        key = fn._gaie_crd_key(doc)
+        res = fnv1.Resource()
+        resource.update(res, fn._k8s_object(_PC_NAME, doc))
+        if ready:
+            res.ready = fnv1.READY_TRUE
+        out[key] = res
+    return out
+
+
+def _gaie_crd_observed() -> dict:
+    """Observed GAIE CRD Objects, each reporting Ready=True."""
+    out = {}
+    for doc in fn._GAIE_CRDS:
+        out[fn._gaie_crd_key(doc)] = fnv1.Resource(
+            resource=resource.dict_to_struct(
+                {
+                    "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                    "kind": "Object",
+                    "status": {"conditions": [{"type": "Ready", "status": "True"}]},
+                }
+            )
+        )
+    return out
+
 
 _GATEWAY = {
     "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
@@ -607,9 +621,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     "ai-gateway": fnv1.Resource(
                         resource=resource.dict_to_struct(_AI_GATEWAY),
                     ),
-                    "gaie-crds": fnv1.Resource(
-                        resource=resource.dict_to_struct(_GAIE_CRDS),
-                    ),
+                    **_gaie_crd_desired(ready=False),
                     "gateway": fnv1.Resource(
                         resource=resource.dict_to_struct(_GATEWAY),
                     ),
@@ -710,6 +722,8 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 ),
             ),
         )
+        for key, observed in _gaie_crd_observed().items():
+            req.observed.resources[key].CopyFrom(observed)
 
         want = fnv1.RunFunctionResponse(
             meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
@@ -733,9 +747,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     "ai-gateway": fnv1.Resource(
                         resource=resource.dict_to_struct(_AI_GATEWAY),
                     ),
-                    "gaie-crds": fnv1.Resource(
-                        resource=resource.dict_to_struct(_GAIE_CRDS),
-                    ),
+                    **_gaie_crd_desired(ready=True),
                     "gateway": fnv1.Resource(
                         resource=resource.dict_to_struct(_GATEWAY),
                     ),
