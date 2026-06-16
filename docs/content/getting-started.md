@@ -19,8 +19,8 @@ You need the following tools installed:
 - [kind](https://kind.sigs.k8s.io/)
 - [kubectl](https://kubernetes.io/docs/tasks/tools/)
 - [Helm](https://helm.sh/docs/intro/install/)
-- [Docker](https://www.docker.com/) (or a compatible credential helper) for
-  registry authentication.
+- [Docker](https://www.docker.com/) (or a compatible container runtime) for
+  kind.
 
 You also need:
 
@@ -137,21 +137,6 @@ spec:
   runtime:
     configRef:
       name: provider-helm-modelplane
----
-# Pull secret for Modelplane packages. The package registry requires
-# authentication. The next step applies the pull secret.
-apiVersion: pkg.crossplane.io/v1beta1
-kind: ImageConfig
-metadata:
-  name: modelplane-pull-secret
-spec:
-  matchImages:
-    - type: Prefix
-      prefix: xpkg.upbound.io/modelplane/
-  registry:
-    authentication:
-      pullSecretRef:
-        name: upbound-pull-secret
 EOF
 ```
 
@@ -159,17 +144,8 @@ EOF
 
 Modelplane is packaged as a Crossplane
 [Configuration](https://docs.crossplane.io/latest/concepts/packages/#configuration-packages).
-The package registry requires authentication. Create a pull secret, then install
-the Configuration. This pulls the providers and composition functions it depends
-on.
-
-```bash
-kubectl create secret docker-registry upbound-pull-secret \
-  --docker-server=xpkg.upbound.io \
-  --docker-username='<robot-id>' \
-  --docker-password='<robot-token>' \
-  -n crossplane-system
-```
+Install the Configuration. This pulls the providers and composition functions it
+depends on.
 
 ```bash
 kubectl apply -f - <<'EOF'
