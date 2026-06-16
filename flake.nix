@@ -171,7 +171,6 @@
         in
         {
           fix = apps.fix { };
-          generate = apps.generate { inherit crossplane pkgs; };
           build-crossplane = apps.buildCrossplane {
             inherit crossplane functionsPkg;
             dockerCredentialUp = pkgs.upbound;
@@ -220,9 +219,8 @@
               echo "Modelplane development shell"
               echo ""
               echo "  nix flake check               nix run .#fix"
-              echo "  nix run .#generate            nix run .#build-crossplane"
-              echo "  nix run .#push-crossplane     nix run .#docs-serve"
-              echo "  nix run .#docs-generate"
+              echo "  nix run .#build-crossplane    nix run .#push-crossplane"
+              echo "  nix run .#docs-serve          nix run .#docs-generate"
               echo ""
             '';
           };

@@ -48,38 +48,26 @@
     );
   };
 
-  # Regenerate schemas from XRDs and dependencies. The Crossplane CLI writes
-  # language bindings to schemas/; only schemas/python/ is committed to git.
-  generate =
-    { crossplane, pkgs }:
-    {
-      type = "app";
-      meta.description = "Regenerate schemas from XRDs and dependencies";
-      program = pkgs.lib.getExe (
-        pkgs.writeShellApplication {
-          name = "modelplane-generate";
-          runtimeInputs = [
-            crossplane
-            pkgs.upbound
-            pkgs.findutils
-          ];
-          inheritPath = false;
-          text = ''
-            crossplane dependency update-cache
-            find schemas/python/models -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-            echo "Done. Review changes with 'git diff schemas/python/'."
-          '';
-        }
-      );
-    };
-
   # Build the Crossplane project. On Linux, materialises Nix-built function
   # runtime images into _output/functions/ before invoking the CLI. The CLI
   # loads them via the Tarball function source in crossplane-project.yaml.
   #
-  # docker-credential-up is needed because `crossplane project build` calls
-  # `crossplane dependency update-cache` to resolve providers and CRDs from
-  # xpkg.upbound.io, which requires authentication.
+  # This is also the schema generation entrypoint. crossplane project build
+  # generates the Pydantic models under schemas/python/ from both the XRDs in
+  # apis/ and the project's dependency CRDs, and writes schemas/.lock.json.
+  # (crossplane dependency update-cache, which the build calls internally, only
+  # regenerates the dependency half; the XRD-derived models are written by the
+  # build itself.)
+  #
+  # Schema generation is additive: it overwrites the files it generates but
+  # never removes models or lock entries for XRDs or dependencies that have been
+  # dropped or renamed. We delete schemas/ first so the result reflects only the
+  # current XRDs and dependencies. Everything under schemas/ is generated (the
+  # per-language bindings and the language-agnostic .lock.json), so it's safe to
+  # remove wholesale and let the build recreate it.
+  #
+  # docker-credential-up remains available for resolving any dependencies that
+  # require registry authentication.
   buildCrossplane =
     {
       crossplane,
@@ -88,7 +76,7 @@
     }:
     {
       type = "app";
-      meta.description = "Build the Crossplane project";
+      meta.description = "Build the Crossplane project and regenerate schemas";
       program = pkgs.lib.getExe (
         pkgs.writeShellApplication {
           name = "modelplane-build-crossplane";
@@ -112,6 +100,7 @@
                 ''
             )
             + ''
+              rm -rf schemas
               crossplane project build "$@"
             '';
         }
