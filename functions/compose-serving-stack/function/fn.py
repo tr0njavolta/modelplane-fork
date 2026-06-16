@@ -759,6 +759,8 @@ class Composer:
         condition_ready = [
             "cert-manager",
             "envoy-gateway",
+            "ai-gateway-crds",
+            "ai-gateway",
             "prometheus",
             "leader-worker-set",
             "node-feature-discovery",

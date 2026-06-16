@@ -696,17 +696,18 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 ),
             ),
         )
-        req.observed.resources["cert-manager"].CopyFrom(
-            fnv1.Resource(
-                resource=resource.dict_to_struct(
-                    {
-                        "apiVersion": "helm.m.crossplane.io/v1beta1",
-                        "kind": "Release",
-                        "status": {"conditions": [{"type": "Ready", "status": "True"}]},
-                    }
+        for r in ("cert-manager", "ai-gateway-crds", "ai-gateway"):
+            req.observed.resources[r].CopyFrom(
+                fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        {
+                            "apiVersion": "helm.m.crossplane.io/v1beta1",
+                            "kind": "Release",
+                            "status": {"conditions": [{"type": "Ready", "status": "True"}]},
+                        }
+                    ),
                 ),
-            ),
-        )
+            )
         req.observed.resources["gateway"].CopyFrom(
             fnv1.Resource(
                 resource=resource.dict_to_struct(
@@ -743,9 +744,11 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     ),
                     "ai-gateway-crds": fnv1.Resource(
                         resource=resource.dict_to_struct(_AI_GATEWAY_CRDS),
+                        ready=fnv1.READY_TRUE,
                     ),
                     "ai-gateway": fnv1.Resource(
                         resource=resource.dict_to_struct(_AI_GATEWAY),
+                        ready=fnv1.READY_TRUE,
                     ),
                     **_gaie_crd_desired(ready=True),
                     "gateway": fnv1.Resource(
