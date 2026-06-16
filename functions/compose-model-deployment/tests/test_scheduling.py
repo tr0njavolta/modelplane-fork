@@ -1108,17 +1108,16 @@ def _gang(
 
 
 class TestScheduleMembers(unittest.TestCase):
-    """Tests for per-member placement: same-pool preference, splits, and
-    claimless members."""
+    """Tests for per-member placement: single-pool engines, rejection when no
+    pool fits, and claimless ride-along members."""
 
     def test_members(self) -> None:
         cases = [
             Case(
-                name="one pool satisfying every member is preferred over a split",
+                name="a single pool satisfying every member hosts the whole engine",
                 # The leader's request matches both pools; the worker's only
-                # matches big. Placing the leader greedily (pool order) would
-                # put it on small and split the gang; the whole-engine pass
-                # must put both members on big.
+                # matches big. The whole-engine pass must put both members on
+                # big - the one pool that satisfies them all.
                 deployment=_deployment(
                     engines=[
                         _gang(
@@ -1161,10 +1160,12 @@ class TestScheduleMembers(unittest.TestCase):
                 ],
             ),
             Case(
-                name="members with disjoint requirements split across pools",
+                name="members no single pool satisfies are not scheduled",
                 # The leader only fits big (>= 200Gi); the worker only fits
-                # small (< 200Gi). No single pool satisfies both, so the gang
-                # splits.
+                # small (< 200Gi). No single pool satisfies both. The scheduler
+                # never splits an engine across pools - it can't tell whether
+                # big and small share a fabric - so the engine is rejected and
+                # the replica goes unplaced (#149).
                 deployment=_deployment(
                     engines=[
                         _gang(
@@ -1183,24 +1184,78 @@ class TestScheduleMembers(unittest.TestCase):
                     )
                 ],
                 all_replicas=[],
+                want=[],
+            ),
+            Case(
+                name="a gang too big for its only matching pool is rejected",
+                # Both members match only big (>= 141Gi); small (40Gi) matches
+                # neither. big has one free node but the gang needs two. The
+                # engine doesn't fit any single pool, so it's rejected; with big
+                # the only cluster the replica goes unplaced.
+                deployment=_deployment(
+                    engines=[
+                        _gang(
+                            [_request(cel_exprs=[_MEM_141])],
+                            [_request(cel_exprs=[_MEM_141])],
+                        )
+                    ]
+                ),
+                clusters=[
+                    _cluster(
+                        "cluster-a",
+                        pools=[
+                            _pool("small", nodes=8, devices=[_gpu_device(memory="40Gi")]),
+                            _pool("big", nodes=1, devices=[_gpu_device(memory="141Gi")]),
+                        ],
+                    )
+                ],
+                all_replicas=[],
+                want=[],
+            ),
+            Case(
+                name="a gang too big for one cluster's pool lands whole on another",
+                # Same gang. cluster-a's matching pool has only one free node
+                # (too few for the two-member gang), so the scheduler rejects
+                # cluster-a and places the whole gang on cluster-b, whose pool
+                # has room for both members.
+                deployment=_deployment(
+                    engines=[
+                        _gang(
+                            [_request(cel_exprs=[_MEM_141])],
+                            [_request(cel_exprs=[_MEM_141])],
+                        )
+                    ]
+                ),
+                clusters=[
+                    _cluster(
+                        "cluster-a",
+                        gateway_address="10.0.0.1",
+                        pools=[
+                            _pool("small", nodes=8, devices=[_gpu_device(memory="40Gi")]),
+                            _pool("big", nodes=1, devices=[_gpu_device(memory="141Gi")]),
+                        ],
+                    ),
+                    _cluster(
+                        "cluster-b",
+                        gateway_address="10.0.0.2",
+                        pools=[_pool("big", nodes=2, devices=[_gpu_device(memory="141Gi")])],
+                    ),
+                ],
+                all_replicas=[],
                 want=[
                     scheduling.Candidate(
-                        name="cluster-a",
+                        name="cluster-b",
                         index=0,
-                        gateway_address="10.0.0.1",
+                        gateway_address="10.0.0.2",
                         engines=[
                             scheduling.EnginePlacement(
                                 name=_ENGINE,
                                 members=[
                                     scheduling.MemberPlacement(
-                                        role="Leader",
-                                        pool="big",
-                                        device_requests=[_resolved(cel_exprs=[_MEM_200])],
+                                        role="Leader", pool="big", device_requests=[_resolved()]
                                     ),
                                     scheduling.MemberPlacement(
-                                        role="Worker",
-                                        pool="small",
-                                        device_requests=[_resolved(cel_exprs=[_MEM_LT_200])],
+                                        role="Worker", pool="big", device_requests=[_resolved()]
                                     ),
                                 ],
                             )
