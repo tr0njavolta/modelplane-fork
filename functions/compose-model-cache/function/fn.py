@@ -50,6 +50,21 @@ REMOTE_NS = "default"
 HYDRATION_IMAGE = "python:3.11-slim"
 HYDRATION_MOUNT = "/mnt/artifact"
 
+# ttlSecondsAfterFinished governs how long the completed Job (and its
+# PVC-pinning pod) lingers before its TTL controller cascade-deletes both. Keep
+# it short so a just-deleted cache's PVC isn't pinned for long - but above
+# provider-kubernetes' observe interval, so the function still catches the Job's
+# success (to latch Ready and drop the Job) before the TTL fires.
+_JOB_TTL_SECONDS = 180
+
+# Every management policy except Delete. Once a cluster is Ready the Job is
+# dropped from the composition; without Delete, dropping orphans the external Job
+# instead of deleting it, so its own TTL controller cascade-cleans the completed
+# pod that pins the PVC - whereas Crossplane's delete would orphan that pod. (No
+# "all but Delete" shorthand exists, and deletionPolicy: Orphan is ignored once
+# managementPolicies is on.) Re-adding the Job after a flap is a cheap skip.
+_JOB_MANAGEMENT = ["Observe", "Create", "Update", "LateInitialize"]
+
 # Per-source default RWX storage class, mirroring the InferenceCluster XRD
 # defaults (GKE/Existing -> Filestore-backed modelplane-rwx; EKS -> EFS-backed
 # modelplane-rwx-efs). Used only when a cluster omits its cache block entirely:
@@ -142,9 +157,13 @@ class Composer:
         if not self.resolve_inputs():
             return
         matched = self.match_clusters()
-        for cluster in matched:
-            self.compose_cluster_resources(cluster)
+        # Derive each cluster's phase first (from observed state), then compose:
+        # a hydrated cluster's Job is composed Observe-only so Crossplane doesn't
+        # recreate it after the TTL controller cleans it.
         per_cluster_phase = [(c.metadata.name, self.derive_cluster_phase(c.metadata.name)) for c in matched]
+        phase_by_name = dict(per_cluster_phase)
+        for cluster in matched:
+            self.compose_cluster_resources(cluster, phase_by_name[cluster.metadata.name])
         self.mark_ready_resources(per_cluster_phase)
         self.write_status(matched, per_cluster_phase)
         self.derive_conditions(matched, per_cluster_phase)
@@ -184,20 +203,26 @@ class Composer:
         """Clusters that have finished provisioning (providerConfigRef set)."""
         return [c for c in self.clusters if c.status and c.status.providerConfigRef and c.status.providerConfigRef.name]
 
-    def compose_cluster_resources(self, cluster: icv1alpha1.InferenceCluster) -> None:
-        """Always emit the PVC + Job for a matched cluster (never gate on
-        readiness — omitting an Object tells Crossplane to delete it, which
-        would re-trigger hydration on every dependency flap)."""
+    def compose_cluster_resources(self, cluster: icv1alpha1.InferenceCluster, phase: str) -> None:
+        """Compose the PVC always, and the hydration Job until the cluster is Ready.
+
+        Once Ready the Job is dropped: with _JOB_MANAGEMENT (no Delete) that
+        orphans the external Job rather than deleting it, so its own TTL
+        controller cascade-cleans the Job and the completed pod pinning the PVC -
+        instead of Crossplane orphaning the pod. Readiness is latched in the XR
+        status, so dropping the Job doesn't regress it, and a flap that re-adds
+        it is a cheap idempotent skip."""
         pc = cluster.status.providerConfigRef.name
         name = cluster.metadata.name
         resource.update(
             self.rsp.desired.resources[self._pvc_key(name)],
             self._wrap_remote(pc, self._pvc_manifest(cluster), _PVC_READY_CEL),
         )
-        resource.update(
-            self.rsp.desired.resources[self._job_key(name)],
-            self._wrap_remote(pc, self._job_manifest(), _JOB_READY_CEL),
-        )
+        if phase != PHASE_READY:
+            resource.update(
+                self.rsp.desired.resources[self._job_key(name)],
+                self._wrap_remote(pc, self._job_manifest(), _JOB_READY_CEL, management_policies=_JOB_MANAGEMENT),
+            )
 
     def _pvc_manifest(self, cluster: icv1alpha1.InferenceCluster) -> dict:
         hf = self.xr.spec.huggingFace
@@ -213,17 +238,24 @@ class Composer:
             },
         }
 
-    def _wrap_remote(self, provider_config: str, manifest: dict, cel_query: str) -> k8sobjv1alpha1.Object:
-        return k8sobjv1alpha1.Object(
-            spec=k8sobjv1alpha1.Spec(
-                providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
-                    kind="ClusterProviderConfig",
-                    name=provider_config,
-                ),
-                readiness=k8sobjv1alpha1.Readiness(policy="DeriveFromCelQuery", celQuery=cel_query),
-                forProvider=k8sobjv1alpha1.ForProvider(manifest=manifest),
+    def _wrap_remote(
+        self,
+        provider_config: str,
+        manifest: dict,
+        cel_query: str,
+        management_policies: list[str] | None = None,
+    ) -> k8sobjv1alpha1.Object:
+        spec = k8sobjv1alpha1.Spec(
+            providerConfigRef=k8sobjv1alpha1.ProviderConfigRef(
+                kind="ClusterProviderConfig",
+                name=provider_config,
             ),
+            readiness=k8sobjv1alpha1.Readiness(policy="DeriveFromCelQuery", celQuery=cel_query),
+            forProvider=k8sobjv1alpha1.ForProvider(manifest=manifest),
         )
+        if management_policies is not None:
+            spec.managementPolicies = management_policies
+        return k8sobjv1alpha1.Object(spec=spec)
 
     # --- naming (must stay in sync with backends/base.cache_pvc_name) ---
     # Both sides share resource.child_name("modelcache", namespace, name).
@@ -252,7 +284,7 @@ class Composer:
             "metadata": {"name": self._job_name(), "namespace": REMOTE_NS, "labels": self._labels()},
             "spec": {
                 "backoffLimit": 3,
-                "ttlSecondsAfterFinished": 3600,
+                "ttlSecondsAfterFinished": _JOB_TTL_SECONDS,
                 "template": {
                     "metadata": {"labels": self._labels()},
                     "spec": {
@@ -282,11 +314,29 @@ class Composer:
         job_status = self._observed_status(self._job_key(cluster_name))
         if any(c.get("type") == "Failed" and c.get("status") == "True" for c in job_status.get("conditions", [])):
             return PHASE_FAILED
-        if int(job_status.get("succeeded", 0) or 0) >= 1 and pvc_bound:
+        # Latch Ready: a hydrated cluster stays Ready even once the Job (and its
+        # completed, PVC-pinning pod) has been cleaned and no longer reports its
+        # Complete condition. Reading the prior phase from the observed XR status
+        # keeps readiness stable across that cleanup. Ready still requires the PVC
+        # to be Bound, so if the PVC is lost the cache drops back to Pending
+        # rather than reporting a stale Ready.
+        job_complete = any(
+            c.get("type") == "Complete" and c.get("status") == "True" for c in job_status.get("conditions", [])
+        )
+        hydrated = job_complete or self._was_ready(cluster_name)
+        if pvc_bound and hydrated:
             return PHASE_READY
         if pvc_bound:
             return PHASE_HYDRATING
         return PHASE_PENDING
+
+    def _was_ready(self, cluster_name: str) -> bool:
+        """Whether the previous reconcile already reported this cluster Ready,
+        read from the observed XR status."""
+        status = self.xr.status
+        if not status or not status.clusters:
+            return False
+        return any(c.name == cluster_name and c.phase == PHASE_READY for c in status.clusters)
 
     def _observed_status(self, key: str) -> dict:
         """Remote resource status echoed back under Object.status.atProvider.manifest.status."""
@@ -304,8 +354,13 @@ class Composer:
         PVC/Job's Ready condition (PVC Bound, Job Complete) is reflected onto the
         observed Object. Runs after compose_cluster_resources() so the desired
         entries exist."""
-        for name, _ in per_cluster_phase:
-            for key in (self._pvc_key(name), self._job_key(name)):
+        for name, phase in per_cluster_phase:
+            # The Job is only composed until Ready (then dropped), so don't mark
+            # a key we didn't compose - accessing it would create a phantom entry.
+            keys = [self._pvc_key(name)]
+            if phase != PHASE_READY:
+                keys.append(self._job_key(name))
+            for key in keys:
                 observed = self.req.observed.resources.get(key)
                 if observed and resource.get_condition(observed.resource, "Ready").status == "True":
                     self.rsp.desired.resources[key].ready = fnv1.READY_TRUE
