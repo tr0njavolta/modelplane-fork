@@ -48,9 +48,9 @@
     );
   };
 
-  # Build the Crossplane project. On Linux, materialises Nix-built function
-  # runtime images into _output/functions/ before invoking the CLI. The CLI
-  # loads them via the Tarball function source in crossplane-project.yaml.
+  # Build the Crossplane project. Materialises the Nix-built function runtime
+  # images into _output/functions/ before invoking the CLI, which loads them
+  # via the Tarball function source in crossplane-project.yaml.
   #
   # This is also the schema generation entrypoint. crossplane project build
   # generates the Pydantic models under schemas/python/ from both the XRDs in
@@ -86,23 +86,14 @@
             pkgs.coreutils
           ];
           inheritPath = false;
-          text =
-            (
-              if functionsPkg != null then
-                ''
-                  mkdir -p _output
-                  rm -f _output/functions
-                  ln -s ${functionsPkg} _output/functions
-                ''
-              else
-                ''
-                  echo "Note: function image builds are only supported on Linux." >&2
-                ''
-            )
-            + ''
-              rm -rf schemas
-              crossplane project build "$@"
-            '';
+          text = ''
+            mkdir -p _output
+            rm -f _output/functions
+            ln -s ${functionsPkg} _output/functions
+
+            rm -rf schemas
+            crossplane project build "$@"
+          '';
         }
       );
     };
