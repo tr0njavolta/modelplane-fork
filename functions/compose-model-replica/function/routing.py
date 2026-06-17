@@ -34,16 +34,49 @@ _LABEL_INFERENCE_SERVING = "llm-d.ai/inference-serving"
 
 # EndpointPickerConfig for the disaggregated profile. The apiVersion is the GIE
 # group the EPP binary registers (inference.networking.x-k8s.io/v1alpha1).
+#
+# The decider in disagg-profile-handler is what makes a request disaggregate: it
+# runs the prefill profile, picks a prefill endpoint, and the handler sets the
+# x-prefiller-host-port header the routing sidecar uses to send the prefill phase
+# there (KV then flows prefill->decode over NIXL). The selective
+# prefix-based-pd-decider disaggregates only when a request's uncached suffix is
+# at least nonCachedTokens long, so short or cache-hot prompts skip the prefill
+# hop (and its KV-transfer cost) and serve decode-only.
+#
+# Three things must line up or it silently never disaggregates, and the EPP
+# image we run (llm-d-inference-scheduler v0.8.0, embedding
+# gateway-api-inference-extension v1.5.0) makes the defaults wrong on every one:
+#   1. nonCachedTokens defaults to 0, which the decider treats as "disabled"
+#      (always decode-only). Set it explicitly.
+#   2. The decider reads a PrefixCacheMatchInfo attribute that prefix-cache-scorer
+#      no longer produces (GIE v1.5.0 split production into a separate plugin and
+#      made prepare-data default-on, so the old `prepareDataPlugins` feature gate
+#      the v0.8.0 docs still mention is *unregistered* and crashes the EPP). The
+#      producer is now an explicit plugin: approx-prefix-cache-producer.
+#   3. That producer defaults to autoTune: true, which leaves its block size 0
+#      and never populates the attribute. Pin autoTune: false + blockSizeTokens.
+# (Verified live: with this config the prefill engine's request_prefill_time
+# counter increments for long prompts and stays flat for short ones; with the
+# defaults it stayed at zero for everything.)
 _EPP_CONFIG_YAML = """\
 apiVersion: inference.networking.x-k8s.io/v1alpha1
 kind: EndpointPickerConfig
 plugins:
+- type: approx-prefix-cache-producer
+  parameters:
+    autoTune: false
+    blockSizeTokens: 16
+    maxPrefixBlocksToMatch: 256
+    lruCapacityPerServer: 31250
+- type: prefix-cache-scorer
+- type: disagg-headers-handler
+- type: queue-scorer
 - type: prefill-filter
 - type: decode-filter
 - type: max-score-picker
-- type: prefix-cache-scorer
-- type: queue-scorer
 - type: prefix-based-pd-decider
+  parameters:
+    nonCachedTokens: 16
 - type: disagg-profile-handler
   parameters:
     deciders:
@@ -53,10 +86,18 @@ schedulingProfiles:
   plugins:
   - pluginRef: prefill-filter
   - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+  - pluginRef: queue-scorer
+    weight: 1
 - name: decode
   plugins:
   - pluginRef: decode-filter
   - pluginRef: max-score-picker
+  - pluginRef: prefix-cache-scorer
+    weight: 2
+  - pluginRef: queue-scorer
+    weight: 1
 """
 
 

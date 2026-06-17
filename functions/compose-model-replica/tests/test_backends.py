@@ -711,6 +711,23 @@ class TestDisaggregated(unittest.TestCase):
         self.assertEqual(pool["kind"], "InferencePool")
         self.assertEqual(pool["spec"]["endpointPickerRef"]["name"], "r-epp")
 
+    def test_epp_config_arms_the_pd_decider(self):
+        """PrefillDecode silently serves decode-only unless the PD decider is armed.
+
+        Selective prefix-based-pd-decider needs all of: nonCachedTokens > 0 (0 =
+        disabled), the approx-prefix-cache-producer plugin that populates the
+        attribute it reads, and that producer pinned to autoTune: false (the
+        true default never populates). And it must NOT carry the prepareDataPlugins
+        feature gate, which the v0.8.0 EPP image rejects and crashloops on.
+        """
+        cfg = self._apply()["epp-config"].spec.forProvider.manifest["data"]["pd-epp-config.yaml"]
+        self.assertIn("prefix-based-pd-decider", cfg)
+        self.assertIn("nonCachedTokens: 16", cfg)
+        self.assertIn("approx-prefix-cache-producer", cfg)
+        self.assertIn("autoTune: false", cfg)
+        self.assertNotIn("nonCachedTokens: 0", cfg)
+        self.assertNotIn("prepareDataPlugins", cfg)
+
     def test_epp_role_watches_inferenceobjectives(self):
         """The picker watches InferenceObjectives (GIE x-k8s.io group); the Role must allow it."""
         rules = self._apply()["epp-role"].spec.forProvider.manifest["rules"]
