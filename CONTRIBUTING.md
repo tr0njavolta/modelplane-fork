@@ -77,12 +77,16 @@ single function live in that function's `function/` package alongside `fn.py`.
 
 The Pydantic models in `schemas/python/` are generated from the XRDs under
 `apis/` and the project's dependency CRDs. They're committed to git so tests and
-type checking don't need to run the Crossplane CLI first. Regenerate them after
-changing an XRD or bumping a dependency:
+type checking don't need to run the Crossplane CLI first. Building the project
+regenerates them, so regenerate them by building after changing an XRD or
+bumping a dependency:
 
 ```bash
-nix run .#generate
+nix run .#build-crossplane
 ```
+
+The build deletes and recreates the whole `schemas/python/` tree, so models for
+XRDs or dependencies you've removed don't linger.
 
 ### Tests
 
