@@ -183,6 +183,16 @@ def _disaggregated(
     pd-sidecar to decode, and adds the InferencePool, endpoint picker, and an
     HTTPRoute pointing at the pool. The engine workloads are reused as-is apart
     from the label/sidecar decoration.
+
+    Engine-image prerequisite: PrefillDecode needs the engine image to ship the
+    NIXL runtime. vLLM's NixlConnector (and SGLang's PD transfer) import the
+    `nixl` package, which the base vllm/vllm-openai image does NOT include —
+    engines crashloop at startup with "NIXL is not available". Use a
+    kv-connector-enabled image: build vLLM with `INSTALL_KV_CONNECTORS=true`
+    (installs nixl + lmcache + mooncake, per vLLM's requirements/kv_connectors.txt)
+    or use a pre-built one such as lmcache/vllm-openai. Engine images are the
+    user's (#137), so Modelplane can't bundle this; it is a deployment
+    prerequisite, not something the composition provides.
     """
     name = replica.metadata.name
     prefill = next(e for e in replica.spec.engines if e.phase == "Prefill")
