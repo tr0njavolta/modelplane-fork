@@ -141,7 +141,17 @@ let
         };
       wheels = map (p: hostWheel p.src) (builtins.filter isWheel resolved);
       sources = map (p: p.src) (builtins.filter (p: !isWheel p) resolved);
-      python = targetPkgs.python312;
+
+      # uv needs an interpreter it can run, to resolve the install and to build
+      # our pure-Python source packages under --no-build-isolation. It must not
+      # be the target arch's interpreter: uv queries it by executing it, which
+      # fails (Exec format error) when the target arch isn't the build host's
+      # and there's no emulation. We use the build host's CPython instead, of
+      # the same minor version as the target's, and let --python-platform and
+      # --python-version describe the target. --target writes a flat layout that
+      # doesn't depend on the resolving interpreter's install scheme, so the
+      # result is the same wherever it's built.
+      hostPython = pkgs.python312;
     in
     pkgs.runCommand "${name}-${arch}-site-packages"
       {
@@ -158,14 +168,15 @@ let
         # source builds.
         export PYTHONPATH=${buildBackends}/${buildBackends.sitePackages}
 
-        # --python points at the target interpreter so uv reads its install
-        # layout (paths, site-packages) from there rather than the Python-less
-        # sandbox; --python-platform selects the wheels.
+        # --python is the build-host interpreter uv runs to resolve the install;
+        # --python-platform and --python-version describe the target image's
+        # arch and Python, selecting the wheels uv lays out.
         uv pip install \
           --no-deps --offline --no-cache --link-mode=copy \
           --no-build-isolation \
-          --python ${python}/bin/python${pythonVersion} \
+          --python ${hostPython}/bin/python${pythonVersion} \
           --python-platform ${uvPlatform targetPkgs arch} \
+          --python-version ${pythonVersion} \
           --target $out \
           wheels/*.whl ${lib.concatStringsSep " " (map toString sources)}
       '';
