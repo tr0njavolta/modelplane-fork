@@ -132,7 +132,7 @@ kind: Configuration
 metadata:
   name: modelplane
 spec:
-  package: xpkg.upbound.io/modelplane/modelplane:v0.1.0-rc.0
+  package: xpkg.upbound.io/modelplane/modelplane:{{<version>}}
 EOF
 ```
 
