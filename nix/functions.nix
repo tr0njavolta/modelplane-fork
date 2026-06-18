@@ -124,7 +124,22 @@ let
       # filename (the Nix store hash prefix breaks uv's version parsing), a
       # source tree is passed as-is.
       isWheel = p: (p ? src) && (p.src ? name);
-      wheels = map (p: p.src) (builtins.filter isWheel resolved);
+
+      # uv2nix builds each wheel's src with the target arch's fetchurl, so the
+      # download derivation carries system = the target arch. A wheel download is
+      # a fixed-output derivation - content-addressed and byte-identical on every
+      # system - but Nix still refuses to *build* one whose system doesn't match
+      # the host. On an x86_64 host with no aarch64 substitute available that
+      # leaves the arm64 image unbuildable. Re-fetch each wheel with the host's
+      # fetchurl, preserving name, url, and hash: same output path, but a
+      # derivation that builds on whatever host we're on.
+      hostWheel =
+        src:
+        pkgs.fetchurl {
+          inherit (src) name url;
+          hash = src.outputHash;
+        };
+      wheels = map (p: hostWheel p.src) (builtins.filter isWheel resolved);
       sources = map (p: p.src) (builtins.filter (p: !isWheel p) resolved);
       python = targetPkgs.python312;
     in
