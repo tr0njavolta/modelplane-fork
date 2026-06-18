@@ -362,4 +362,11 @@ disabled?
 [Bb]ackend
 usually
 SKU
+SKUs
+T4
+A100
 as-is
+hardcode
+hardcoding
+hardcodes
+[Bb]ootstrap
