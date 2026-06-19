@@ -91,15 +91,30 @@ def _observed_object(manifest_status: dict, *, ready: bool = False) -> dict:
     return obj
 
 
+def _auth_secret(*, data: dict[str, str] | None = None) -> dict:
+    """The control-plane authSecret as Crossplane returns it in a required-
+    resource set: a core/v1 Secret with base64 `data`."""
+    return {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {"name": "hf-token", "namespace": "ml-team"},
+        "type": "Opaque",
+        "data": {"HF_TOKEN": _TOKEN_B64} if data is None else data,
+    }
+
+
 def _req(
     xr: v1alpha1.ModelCache,
     clusters: list[dict],
     observed: dict[str, dict] | None = None,
+    auth: dict | None = None,
 ) -> fnv1.RunFunctionRequest:
     """Build a request the way the repo's other function tests do.
 
     - XR goes in observed.composite via dict_to_struct(model_dump(mode="json")).
     - Resolved clusters go in the `clusters` required-resource set.
+    - `auth`, when given, is the resolved control-plane Secret in the
+      `auth-secret` required-resource set.
     - `observed` maps a desired-resource key -> an observed Object envelope.
     """
     req = fnv1.RunFunctionRequest(
@@ -109,9 +124,15 @@ def _req(
             ),
         ),
     )
-    for c in clusters:
-        req.required_resources["clusters"].items.append(
-            fnv1.Resource(resource=resource.dict_to_struct(c)),
+    # Touch the key so a resolved-but-empty match (clusters == []) is present
+    # with no items, the way Crossplane returns it - distinct from an unresolved
+    # requirement, whose key is absent.
+    req.required_resources["clusters"].items.extend(
+        fnv1.Resource(resource=resource.dict_to_struct(c)) for c in clusters
+    )
+    if auth is not None:
+        req.required_resources["auth-secret"].items.append(
+            fnv1.Resource(resource=resource.dict_to_struct(auth)),
         )
     for key, obj in (observed or {}).items():
         req.observed.resources[key].resource.update(obj)
@@ -123,6 +144,15 @@ def _req(
 _CLUSTERS_SELECTOR = fnv1.ResourceSelector(
     api_version="modelplane.ai/v1alpha1",
     kind="InferenceCluster",
+)
+
+# When the cache references an authSecret, the function requires that Secret by
+# name from the XR's namespace; the response echoes this selector.
+_AUTH_SELECTOR = fnv1.ResourceSelector(
+    api_version="v1",
+    kind="Secret",
+    match_name="hf-token",
+    namespace="ml-team",
 )
 
 # The hydration shell script the Job runs (no revision, no auth secret).
@@ -140,7 +170,12 @@ _HYDRATE_CMD_REVISION = (
 
 _PVC_NAME = "modelcache-ml-team-qwen-17db2"
 _JOB_NAME = "modelcache-ml-team-qwen-hydrate-256ec"
+_AUTH_NAME = "modelcache-ml-team-qwen-auth-ae01b"
 _LABELS = {"modelplane.ai/modelcache": "qwen"}
+
+# The token data the control-plane authSecret carries, base64 as the API server
+# stores it. Propagated verbatim into the workload-cluster Secret's data.
+_TOKEN_B64 = "aGYtdG9rZW4tdmFsdWU="
 
 
 def _pvc_object(pc: str, *, storage_class: str = "modelplane-rwx") -> dict:
@@ -210,6 +245,26 @@ def _job_object(pc: str, *, command: str = _HYDRATE_CMD, env: list | None = None
     }
 
 
+def _auth_object(pc: str) -> dict:
+    """The workload-cluster Secret Object propagating the HF token. No readiness
+    block: a Secret has no status, so the Object uses default readiness."""
+    return {
+        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+        "kind": "Object",
+        "spec": {
+            "forProvider": {
+                "manifest": {
+                    "apiVersion": "v1",
+                    "kind": "Secret",
+                    "metadata": {"name": _AUTH_NAME, "namespace": "default", "labels": _LABELS},
+                    "data": {"HF_TOKEN": _TOKEN_B64},
+                },
+            },
+            "providerConfigRef": {"kind": "ClusterProviderConfig", "name": pc},
+        },
+    }
+
+
 class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
     """Tests for FunctionRunner.RunFunction."""
 
@@ -219,7 +274,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
     def setUpClass(cls) -> None:
         cls.runner = fn.FunctionRunner()
 
-    async def test_compose(self) -> None:
+    async def test_compose(self) -> None:  # noqa: PLR0915
         """The function composes a ModelCache."""
         # --- Case 1: GKE cluster, first pass. Composes the RWX PVC + hydration
         # Job per matched cluster; nothing observed yet so phase is Pending and
@@ -257,12 +312,14 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         want1.requirements.resources["clusters"].CopyFrom(_CLUSTERS_SELECTOR)
 
         # --- Case 2: GKE cluster with a pinned revision + auth secret. The Job
-        # command gains --revision and an HF_TOKEN env from the secret. ---
+        # command gains --revision, and the function propagates the token to a
+        # workload-cluster Secret (auth-cluster-a) whose name the Job's HF_TOKEN
+        # env references - not the user's control-plane Secret name. ---
         xr2 = _cache_xr(revision="main", authSecret=v1alpha1.AuthSecret(name="hf-token"))
         env2 = [
             {
                 "name": "HF_TOKEN",
-                "valueFrom": {"secretKeyRef": {"name": "hf-token", "key": "HF_TOKEN"}},
+                "valueFrom": {"secretKeyRef": {"name": _AUTH_NAME, "key": "HF_TOKEN"}},
             },
         ]
         want2 = fnv1.RunFunctionResponse(
@@ -279,6 +336,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     ),
                 ),
                 resources={
+                    "auth-cluster-a": fnv1.Resource(resource=resource.dict_to_struct(_auth_object("cluster-a-pc"))),
                     "pvc-cluster-a": fnv1.Resource(resource=resource.dict_to_struct(_pvc_object("cluster-a-pc"))),
                     "hydrate-cluster-a": fnv1.Resource(
                         resource=resource.dict_to_struct(
@@ -300,6 +358,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             context=structpb.Struct(),
         )
         want2.requirements.resources["clusters"].CopyFrom(_CLUSTERS_SELECTOR)
+        want2.requirements.resources["auth-secret"].CopyFrom(_AUTH_SELECTOR)
 
         # --- Case 3: EKS cluster reporting an EFS RWX class on status.cache. The
         # PVC sources its storageClassName from status.cache (modelplane-rwx-efs),
@@ -539,6 +598,174 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         )
         want8.requirements.resources["clusters"].CopyFrom(_CLUSTERS_SELECTOR)
 
+        # --- Case 9: authSecret referenced but not yet resolved. The function
+        # requires both the clusters and the auth Secret, then returns early
+        # (no resources, status, or conditions) until Crossplane resolves the
+        # Secret and re-calls it. ---
+        xr9 = _cache_xr(authSecret=v1alpha1.AuthSecret(name="hf-token"))
+        want9 = fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(),
+            context=structpb.Struct(),
+        )
+        want9.requirements.resources["clusters"].CopyFrom(_CLUSTERS_SELECTOR)
+        want9.requirements.resources["auth-secret"].CopyFrom(_AUTH_SELECTOR)
+
+        # --- Case 10: authSecret resolved but the Secret lacks the referenced
+        # key (here it carries OTHER, not HF_TOKEN). The PVC still composes - it
+        # doesn't depend on the token, so a cache isn't pruned for a missing one
+        # - but the hydration Job and token Secret are held back. ArtifactReady
+        # is False with reason AuthSecretMissing, and a warning names the Secret
+        # and key so the user can fix it instead of seeing the XR stall. ---
+        want10 = fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        {
+                            "status": {
+                                "summary": {"ready": "0/1"},
+                                "clusters": [{"name": "cluster-a", "phase": "Pending"}],
+                            },
+                        },
+                    ),
+                ),
+                resources={
+                    "pvc-cluster-a": fnv1.Resource(resource=resource.dict_to_struct(_pvc_object("cluster-a-pc"))),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(type="ClustersMatched", status=fnv1.STATUS_CONDITION_TRUE, reason="Matched"),
+                fnv1.Condition(type="ArtifactReady", status=fnv1.STATUS_CONDITION_FALSE, reason="AuthSecretMissing"),
+            ],
+            results=[
+                fnv1.Result(
+                    severity=fnv1.SEVERITY_WARNING,
+                    message="authSecret ml-team/hf-token is missing or has no key 'HF_TOKEN'",
+                ),
+                fnv1.Result(
+                    severity=fnv1.SEVERITY_NORMAL,
+                    message="Staging Qwen/Qwen3-0.6B to 1 clusters: cluster-a",
+                ),
+            ],
+            context=structpb.Struct(),
+        )
+        want10.requirements.resources["clusters"].CopyFrom(_CLUSTERS_SELECTOR)
+        want10.requirements.resources["auth-secret"].CopyFrom(_AUTH_SELECTOR)
+
+        # --- Case 11: Ready cluster with an authSecret. The token is only needed
+        # while hydrating, so once the cluster is Ready the auth Secret is dropped
+        # alongside the Job (only the PVC remains composed), even though the
+        # control-plane Secret still resolves. Keeps the token from lingering on
+        # the inference cluster after hydration. ---
+        xr11 = _cache_xr(authSecret=v1alpha1.AuthSecret(name="hf-token"))
+        observed11 = {
+            "auth-cluster-a": _observed_object({}, ready=True),
+            "pvc-cluster-a": _observed_object({"phase": "Bound"}, ready=True),
+            "hydrate-cluster-a": _observed_object({"conditions": [{"type": "Complete", "status": "True"}]}, ready=True),
+        }
+        want11 = fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        {
+                            "status": {
+                                "summary": {"ready": "1/1"},
+                                "clusters": [{"name": "cluster-a", "phase": "Ready"}],
+                            },
+                        },
+                    ),
+                    ready=fnv1.READY_TRUE,
+                ),
+                resources={
+                    # Ready: the auth Secret and Job are both dropped, only the PVC remains.
+                    "pvc-cluster-a": fnv1.Resource(
+                        resource=resource.dict_to_struct(_pvc_object("cluster-a-pc")), ready=fnv1.READY_TRUE
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(type="ClustersMatched", status=fnv1.STATUS_CONDITION_TRUE, reason="Matched"),
+                fnv1.Condition(type="ArtifactReady", status=fnv1.STATUS_CONDITION_TRUE, reason="Staged"),
+            ],
+            results=[
+                fnv1.Result(severity=fnv1.SEVERITY_NORMAL, message="Artifact staged on all 1 clusters"),
+            ],
+            context=structpb.Struct(),
+        )
+        want11.requirements.resources["clusters"].CopyFrom(_CLUSTERS_SELECTOR)
+        want11.requirements.resources["auth-secret"].CopyFrom(_AUTH_SELECTOR)
+
+        # --- Case 12: token rotated away after a cache is Ready. A latched-Ready
+        # cluster whose authSecret now resolves without the key. The PVC keeps
+        # composing (and stays Ready via the status latch) rather than being
+        # pruned, and because hydration is already done the missing token is
+        # neither reported (ArtifactReady stays Staged) nor warned. ---
+        xr12 = _cache_xr(authSecret=v1alpha1.AuthSecret(name="hf-token"))
+        xr12.status = v1alpha1.Status(
+            summary=v1alpha1.Summary(ready="1/1"),
+            clusters=[v1alpha1.Cluster(name="cluster-a", phase="Ready")],
+            conditions=[
+                v1alpha1.Condition(
+                    type="Ready",
+                    status="True",
+                    reason="Available",
+                    lastTransitionTime="2026-06-08T00:00:00Z",
+                ),
+            ],
+        )
+        observed12 = {"pvc-cluster-a": _observed_object({"phase": "Bound"}, ready=True)}
+        want12 = fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        {
+                            "status": {
+                                "summary": {"ready": "1/1"},
+                                "clusters": [{"name": "cluster-a", "phase": "Ready"}],
+                            },
+                        },
+                    ),
+                    ready=fnv1.READY_TRUE,
+                ),
+                resources={
+                    "pvc-cluster-a": fnv1.Resource(
+                        resource=resource.dict_to_struct(_pvc_object("cluster-a-pc")), ready=fnv1.READY_TRUE
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(type="ClustersMatched", status=fnv1.STATUS_CONDITION_TRUE, reason="Matched"),
+                fnv1.Condition(type="ArtifactReady", status=fnv1.STATUS_CONDITION_TRUE, reason="Staged"),
+            ],
+            context=structpb.Struct(),
+        )
+        want12.requirements.resources["clusters"].CopyFrom(_CLUSTERS_SELECTOR)
+        want12.requirements.resources["auth-secret"].CopyFrom(_AUTH_SELECTOR)
+
+        # --- Case 13: authSecret missing AND no clusters matched. NoClusters is
+        # the dominant signal - the cache can't progress regardless of the token
+        # - so both conditions report NoClusters and the missing token is neither
+        # reported nor warned. ---
+        xr13 = _cache_xr(authSecret=v1alpha1.AuthSecret(name="hf-token"))
+        want13 = fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct({"status": {"summary": {"ready": "0/0"}, "clusters": []}}),
+                ),
+            ),
+            conditions=[
+                fnv1.Condition(type="ClustersMatched", status=fnv1.STATUS_CONDITION_FALSE, reason="NoClusters"),
+                fnv1.Condition(type="ArtifactReady", status=fnv1.STATUS_CONDITION_FALSE, reason="NoClusters"),
+            ],
+            context=structpb.Struct(),
+        )
+        want13.requirements.resources["clusters"].CopyFrom(_CLUSTERS_SELECTOR)
+        want13.requirements.resources["auth-secret"].CopyFrom(_AUTH_SELECTOR)
+
         cases = [
             Case(
                 name="GKE cluster first pass composes RWX PVC and hydration Job",
@@ -547,7 +774,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             ),
             Case(
                 name="HuggingFace revision and auth secret wire --revision and HF_TOKEN",
-                req=_req(xr2, [_cluster_dict("cluster-a", "cluster-a-pc")]),
+                req=_req(xr2, [_cluster_dict("cluster-a", "cluster-a-pc")], auth=_auth_secret()),
                 want=want2,
             ),
             Case(
@@ -579,6 +806,54 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 name="hydrated cluster stays Ready after its Job is TTL-cleaned",
                 req=_req(xr_ready, [_cluster_dict("cluster-a", "cluster-a-pc")], observed8),
                 want=want8,
+            ),
+            Case(
+                name="authSecret unresolved requires it and returns early",
+                req=_req(xr9, [_cluster_dict("cluster-a", "cluster-a-pc")]),
+                want=want9,
+            ),
+            Case(
+                name="authSecret resolved without the referenced key composes PVC and warns",
+                req=_req(
+                    xr9,
+                    [_cluster_dict("cluster-a", "cluster-a-pc")],
+                    auth=_auth_secret(data={"OTHER": _TOKEN_B64}),
+                ),
+                want=want10,
+            ),
+            Case(
+                name="authSecret resolved with an empty token value composes PVC and warns",
+                req=_req(
+                    xr9,
+                    [_cluster_dict("cluster-a", "cluster-a-pc")],
+                    auth=_auth_secret(data={"HF_TOKEN": ""}),
+                ),
+                want=want10,
+            ),
+            Case(
+                name="Ready cluster drops the auth Secret with the Job",
+                req=_req(
+                    xr11,
+                    [_cluster_dict("cluster-a", "cluster-a-pc")],
+                    observed11,
+                    auth=_auth_secret(),
+                ),
+                want=want11,
+            ),
+            Case(
+                name="token rotated away after Ready keeps the PVC and stays Ready",
+                req=_req(
+                    xr12,
+                    [_cluster_dict("cluster-a", "cluster-a-pc")],
+                    observed12,
+                    auth=_auth_secret(data={"OTHER": _TOKEN_B64}),
+                ),
+                want=want12,
+            ),
+            Case(
+                name="authSecret missing with no clusters reports NoClusters not AuthSecretMissing",
+                req=_req(xr13, [], auth=_auth_secret(data={"OTHER": _TOKEN_B64})),
+                want=want13,
             ),
         ]
 

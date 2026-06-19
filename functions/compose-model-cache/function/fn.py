@@ -25,6 +25,7 @@ CONDITION_REASON_HYDRATING = "Hydrating"
 CONDITION_REASON_STAGED = "Staged"
 CONDITION_REASON_PARTIAL = "Partial"
 CONDITION_REASON_FAILED = "Failed"
+CONDITION_REASON_AUTH_SECRET_MISSING = "AuthSecretMissing"
 
 # CEL readiness queries: each wrapped Object derives its own Ready condition
 # from the remote resource's status (DeriveFromCelQuery), so mark_ready_resources
@@ -89,12 +90,16 @@ _HYDRATED_MARKER = f"{HYDRATION_MOUNT}/.modelplane-hydrated"
 _SKIP_IF_HYDRATED = f"if [ -f {_HYDRATED_MARKER} ]; then echo 'already hydrated, skipping'; exit 0; fi; "
 
 
-def _hf_hydration(hf) -> tuple[list[dict], str]:
+def _hf_hydration(hf, auth_secret_name: str | None) -> tuple[list[dict], str]:
     """Return (env, shell command) for a HuggingFace source.
 
     Uses `hf download` (huggingface_hub 1.x; `huggingface-cli` is removed).
     The marker is touched only after a successful download (set -e aborts the
     chain on failure, so a failed pull never marks the cache complete).
+
+    When the cache references an authSecret, HF_TOKEN is read from the
+    propagated workload-cluster Secret (auth_secret_name), not the user's
+    control-plane Secret name - the two live on different clusters.
     """
     env: list[dict] = []
     if hf.authSecret:
@@ -103,7 +108,7 @@ def _hf_hydration(hf) -> tuple[list[dict], str]:
                 "name": "HF_TOKEN",
                 "valueFrom": {
                     "secretKeyRef": {
-                        "name": hf.authSecret.name,
+                        "name": auth_secret_name,
                         "key": hf.authSecret.key or "HF_TOKEN",
                     }
                 },
@@ -140,6 +145,17 @@ class Composer:
         self.rsp = rsp
         self.xr = v1alpha1.ModelCache(**resource.struct_to_dict(req.observed.composite.resource))
         self.clusters: list[icv1alpha1.InferenceCluster] = []
+        # The referenced authSecret key -> its base64 token value, read from the
+        # control-plane Secret. Populated by resolve_inputs() once the XR
+        # references an authSecret and that key is present; empty otherwise.
+        self.auth_data: dict[str, str] = {}
+
+    def _auth_missing(self) -> bool:
+        """Whether the XR references an authSecret whose token couldn't be
+        resolved. compose() only runs past resolve_inputs() once the auth
+        requirement (if any) is resolved, so an empty auth_data here means the
+        Secret was found-but-empty or absent, not merely unresolved."""
+        return self.xr.spec.huggingFace.authSecret is not None and not self.auth_data
 
     def compose(self):
         if not self.resolve_inputs():
@@ -158,12 +174,16 @@ class Composer:
         self.emit_events(matched, per_cluster_phase)
 
     def resolve_inputs(self) -> bool:
-        """Require all InferenceClusters matching the (optional) selector.
+        """Require the InferenceClusters and (if set) the authSecret.
 
-        Returns False when Crossplane hasn't resolved the requirement yet;
+        Returns False when Crossplane hasn't resolved a requirement yet;
         Crossplane re-calls the function once it's available. A resolved-but-
-        empty match flows through (match_clusters() -> NoClusters condition).
+        empty cluster match flows through (match_clusters() -> NoClusters
+        condition).
         """
+        # Require everything up front so Crossplane resolves the requirements in
+        # parallel and re-calls us once they're available.
+
         # require_resources with no match field matches every InferenceCluster;
         # narrow only when the user sets a clusterSelector.
         match_labels = None
@@ -177,15 +197,57 @@ class Composer:
             match_labels=match_labels,
         )
 
+        # When the cache references an authSecret, require that Secret from the
+        # XR's own namespace on the control plane. Its token is propagated to
+        # each workload cluster (compose_cluster_resources) so the hydration Job
+        # finds it; without resolving it first we can't materialize it remotely.
+        auth = self.xr.spec.huggingFace.authSecret
+        if auth:
+            response.require_resources(
+                self.rsp,
+                name="auth-secret",
+                api_version="v1",
+                kind="Secret",
+                match_name=auth.name,
+                namespace=self.xr.metadata.namespace,
+            )
+
         # get_required_resources returns [] both when unresolved AND when
         # resolved-empty; the requirement key presence is the SDK-blessed way
-        # to tell them apart (see crossplane.function.request docstring).
+        # to tell them apart (see crossplane.function.request docstring). Wait
+        # for both to resolve before composing.
         if "clusters" not in self.req.required_resources:
+            return False
+        if auth and "auth-secret" not in self.req.required_resources:
             return False
         self.clusters = [
             icv1alpha1.InferenceCluster.model_validate(c) for c in request.get_required_resources(self.req, "clusters")
         ]
+
+        # Resolve the token best-effort: a missing one doesn't block the PVC,
+        # only the hydration Job and token Secret (see _resolve_auth_data).
+        if auth:
+            self._resolve_auth_data(auth, request.get_required_resource(self.req, "auth-secret"))
+
         return True
+
+    def _resolve_auth_data(self, auth, secret: dict | None) -> None:
+        """Read the token from the resolved control-plane authSecret into
+        self.auth_data, copying its base64 `data` verbatim (re-encoding would
+        corrupt it).
+
+        Best-effort: the caller proceeds either way. A resolved Secret that's
+        missing, or whose referenced key is absent or empty, leaves auth_data
+        empty (an empty value is as broken as a missing key - the Job would run
+        with an empty HF_TOKEN). That gates the hydration Job and token Secret
+        out while leaving the PVC - which doesn't depend on the token - to
+        compose, so an already-staged cache isn't pruned when its token is later
+        rotated away. derive_conditions surfaces the misconfiguration only when
+        it actually blocks progress."""
+        key = auth.key or "HF_TOKEN"
+        data = (secret.get("data") if secret else {}) or {}
+        if data.get(key):
+            self.auth_data = {key: data[key]}
 
     def match_clusters(self) -> list[icv1alpha1.InferenceCluster]:
         """Clusters ready to cache onto: provisioned (providerConfigRef set)
@@ -213,7 +275,26 @@ class Composer:
             self.rsp.desired.resources[self._pvc_key(name)],
             self._wrap_remote(pc, self._pvc_manifest(cluster), _PVC_READY_CEL),
         )
-        if phase != PHASE_READY:
+        # The PVC (above) composes regardless of auth: it doesn't depend on the
+        # token, so a cache whose token is later rotated away keeps its staged
+        # weights. The hydration Job and its token Secret need the token, so
+        # they're held back until it's available - composing the Job against an
+        # absent Secret would just fail its pod.
+        if phase != PHASE_READY and not self._auth_missing():
+            # The token Secret is composed before the Job that consumes it, and
+            # dropped alongside the Job once the cluster is Ready. Unlike the Job
+            # (orphaned via _JOB_MANAGEMENT, then TTL-cleaned), the Secret keeps
+            # default management policies, so dropping it DELETES it from the
+            # inference cluster. That's deliberate: the token is only needed
+            # while hydrating, so removing it afterwards limits its exposure. A
+            # flap back to hydrating re-composes it, and the provider re-creates
+            # it before the Job pod reads it. The Secret has no status, so it
+            # uses default readiness (Ready once synced).
+            if self.auth_data:
+                resource.update(
+                    self.rsp.desired.resources[self._auth_key(name)],
+                    self._wrap_remote(pc, self._auth_secret_manifest()),
+                )
             resource.update(
                 self.rsp.desired.resources[self._job_key(name)],
                 self._wrap_remote(pc, self._job_manifest(), _JOB_READY_CEL, management_policies=_JOB_MANAGEMENT),
@@ -233,11 +314,25 @@ class Composer:
             },
         }
 
+    def _auth_secret_manifest(self) -> dict:
+        """The workload-cluster Secret carrying the propagated HF token.
+
+        Namespace-qualified name in REMOTE_NS, matching the PVC/Job, so caches
+        from different control-plane namespaces don't collide. `data` carries the
+        referenced authSecret key with its base64 value copied verbatim - the
+        hydration Job's env reads that same key from it."""
+        return {
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "metadata": {"name": self._auth_secret_name(), "namespace": REMOTE_NS, "labels": self._labels()},
+            "data": self.auth_data,
+        }
+
     def _wrap_remote(
         self,
         provider_config: str,
         manifest: dict,
-        cel_query: str,
+        cel_query: str | None = None,
         management_policies: list[str] | None = None,
     ) -> k8sobjv1alpha1.Object:
         spec = k8sobjv1alpha1.Spec(
@@ -245,9 +340,13 @@ class Composer:
                 kind="ClusterProviderConfig",
                 name=provider_config,
             ),
-            readiness=k8sobjv1alpha1.Readiness(policy="DeriveFromCelQuery", celQuery=cel_query),
             forProvider=k8sobjv1alpha1.ForProvider(manifest=manifest),
         )
+        # A CEL query derives Ready from the wrapped resource's status; resources
+        # without a meaningful status (the Secret) omit it and use the provider's
+        # default readiness (Ready once the Object is synced).
+        if cel_query is not None:
+            spec.readiness = k8sobjv1alpha1.Readiness(policy="DeriveFromCelQuery", celQuery=cel_query)
         if management_policies is not None:
             spec.managementPolicies = management_policies
         return k8sobjv1alpha1.Object(spec=spec)
@@ -262,17 +361,23 @@ class Composer:
     def _job_name(self) -> str:
         return resource.child_name("modelcache", self.xr.metadata.namespace, self.xr.metadata.name, "hydrate")
 
+    def _auth_secret_name(self) -> str:
+        return resource.child_name("modelcache", self.xr.metadata.namespace, self.xr.metadata.name, "auth")
+
     def _pvc_key(self, cluster_name: str) -> str:
         return f"pvc-{cluster_name}"
 
     def _job_key(self, cluster_name: str) -> str:
         return f"hydrate-{cluster_name}"
 
+    def _auth_key(self, cluster_name: str) -> str:
+        return f"auth-{cluster_name}"
+
     def _labels(self) -> dict[str, str]:
         return {"modelplane.ai/modelcache": self.xr.metadata.name}
 
     def _job_manifest(self) -> dict:
-        env, command = _hf_hydration(self.xr.spec.huggingFace)
+        env, command = _hf_hydration(self.xr.spec.huggingFace, self._auth_secret_name())
         return {
             "apiVersion": "batch/v1",
             "kind": "Job",
@@ -343,18 +448,23 @@ class Composer:
         return manifest.get("status", {}) or {}
 
     def mark_ready_resources(self, per_cluster_phase) -> None:
-        """Mark PVC + Job Objects ready from each Object's own Ready condition.
+        """Mark composed Objects ready from each Object's own Ready condition.
 
-        The Objects carry a DeriveFromCelQuery readiness policy, so the wrapped
-        PVC/Job's Ready condition (PVC Bound, Job Complete) is reflected onto the
-        observed Object. Runs after compose_cluster_resources() so the desired
+        The PVC and Job carry a DeriveFromCelQuery readiness policy, so the
+        wrapped resource's Ready condition (PVC Bound, Job Complete) is reflected
+        onto the observed Object; the auth Secret uses default readiness (Ready
+        once synced). Runs after compose_cluster_resources() so the desired
         entries exist."""
         for name, phase in per_cluster_phase:
-            # The Job is only composed until Ready (then dropped), so don't mark
-            # a key we didn't compose - accessing it would create a phantom entry.
+            # Mirror compose_cluster_resources: only mark the keys it composed.
+            # The Job and token Secret are composed until Ready (then dropped),
+            # and held back entirely while the token is missing. Marking a key we
+            # didn't compose would create a phantom entry.
             keys = [self._pvc_key(name)]
-            if phase != PHASE_READY:
+            if phase != PHASE_READY and not self._auth_missing():
                 keys.append(self._job_key(name))
+                if self.auth_data:
+                    keys.append(self._auth_key(name))
             for key in keys:
                 observed = self.req.observed.resources.get(key)
                 if observed and resource.get_condition(observed.resource, "Ready").status == "True":
@@ -392,8 +502,29 @@ class Composer:
                 reason=CONDITION_REASON_MATCHED,
             ),
         )
+        # A missing token holds back the Job and token Secret, so a cluster that
+        # isn't already Ready can't make progress. Report that over the
+        # phase-derived reason, which would otherwise just say Hydrating without
+        # explaining why nothing is happening, and warn naming the Secret and
+        # key. A cache that's already fully Ready doesn't need the token, so a
+        # token rotated away after hydration is neither reported nor warned.
         ready_count = sum(1 for _, p in per_cluster_phase if p == PHASE_READY)
-        if any(p == PHASE_FAILED for _, p in per_cluster_phase):
+        if self._auth_missing() and ready_count != len(matched):
+            auth = self.xr.spec.huggingFace.authSecret
+            key = auth.key or "HF_TOKEN"
+            response.set_conditions(
+                self.rsp,
+                resource.Condition(
+                    typ=CONDITION_TYPE_ARTIFACT_READY,
+                    status="False",
+                    reason=CONDITION_REASON_AUTH_SECRET_MISSING,
+                ),
+            )
+            response.warning(
+                self.rsp,
+                f"authSecret {self.xr.metadata.namespace}/{auth.name} is missing or has no key {key!r}",
+            )
+        elif any(p == PHASE_FAILED for _, p in per_cluster_phase):
             response.set_conditions(
                 self.rsp,
                 resource.Condition(typ=CONDITION_TYPE_ARTIFACT_READY, status="False", reason=CONDITION_REASON_FAILED),
