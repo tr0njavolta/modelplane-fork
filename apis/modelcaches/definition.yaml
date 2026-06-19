@@ -60,8 +60,9 @@ spec:
                     type: object
                     description: >-
                       Optional Secret holding an HF token for gated or
-                      private repos. Resolved on the workload cluster at
-                      hydration time.
+                      private repos. Names a Secret in the ModelCache's
+                      own namespace; Modelplane propagates it to each
+                      matched cluster for the hydration Job to read.
                     required: [name]
                     properties:
                       name:

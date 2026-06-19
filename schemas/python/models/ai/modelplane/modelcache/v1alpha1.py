@@ -53,7 +53,7 @@ class AuthSecret(BaseModel):
 class HuggingFace(BaseModel):
     authSecret: AuthSecret | None = None
     """
-    Optional Secret holding an HF token for gated or private repos. Resolved on the workload cluster at hydration time.
+    Optional Secret holding an HF token for gated or private repos. Names a Secret in the ModelCache's own namespace; Modelplane propagates it to each matched cluster for the hydration Job to read.
     """
     repo: constr(min_length=1)
     """
