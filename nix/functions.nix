@@ -179,6 +179,21 @@ let
           --python-version ${pythonVersion} \
           --target $out \
           wheels/*.whl ${lib.concatStringsSep " " (map toString sources)}
+
+        # uv writes console-script wrappers under bin/ whose shebang points at
+        # --python, i.e. the build-host interpreter. That interpreter is the
+        # build host's arch, not the image's, so shipping bin/ would drag a
+        # second, wrong-arch CPython (and its glibc) into the image. The image
+        # runs `python -m function.main`, never these wrappers, so drop them.
+        rm -rf $out/bin
+
+        # uv records each source install's provenance in a PEP 610
+        # direct_url.json under .dist-info, as a file:// URL into the workspace
+        # source tree (the flake's `self`). Nix scans the output for store
+        # paths, finds that hash, and drags the entire repository - apis, design
+        # docs, the docs site - into the image's runtime closure as a "source"
+        # layer. Nothing reads this metadata at runtime, so drop it.
+        find $out -name direct_url.json -path '*.dist-info/*' -delete
       '';
 
   mkFunctionImage =
