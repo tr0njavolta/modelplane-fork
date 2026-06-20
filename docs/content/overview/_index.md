@@ -18,6 +18,47 @@ for your inference fleet. It's built on [Crossplane](https://crossplane.io) and
 requires it: platform teams and developers describe what they want as Kubernetes
 resources, and Modelplane composes the infrastructure and deployments to match.
 
+## Deploy a model
+
+Once a platform team has registered a cluster, an ML team deploys a model with one
+manifest:
+
+```yaml
+apiVersion: modelplane.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: qwen-demo
+  namespace: ml-team
+spec:
+  replicas: 1
+  engines:
+  - name: qwen
+    members:
+    - role: Standalone
+      nodeSelector:
+        devices:
+        - name: gpu
+          count: 1
+          selectors:
+          - cel: device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
+      template:
+        spec:
+          containers:
+          - name: engine
+            image: vllm/vllm-openai:v0.7.3
+            args: ["--model=Qwen/Qwen2.5-0.5B-Instruct"]
+```
+
+Modelplane schedules the replica onto a cluster with a free GPU and exposes one
+OpenAI-compatible endpoint for it:
+`http://<gateway>/ml-team/qwen-demo/v1/chat/completions`.
+
+{{< cardgroup >}}
+{{< card title="Get started" href="/getting-started/" cta="Deploy on a real fleet" >}}
+Go from nothing to a live OpenAI-compatible endpoint in about 45 minutes.
+{{< /card >}}
+{{< /cardgroup >}}
+
 ## Built for the fleet
 
 Modelplane's capabilities are all fleet-centric. A serving engine runs a model,
