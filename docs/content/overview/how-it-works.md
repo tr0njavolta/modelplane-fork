@@ -8,7 +8,7 @@ Modelplane runs as a control plane on its own cluster, above the inference
 clusters that actually serve models. It's built on [Crossplane](https://crossplane.io):
 platform teams and developers describe what they want as Kubernetes resources, and
 Modelplane composes the clusters, schedules replicas, and exposes endpoints to
-match. This page is the high-altitude tour. The [Concepts]({{< ref "/concepts" >}})
+match. This page is the high-altitude tour. The [Concepts]({{< ref "/overview/concepts" >}})
 page covers each resource in full.
 
 ## The two-team boundary
@@ -93,6 +93,6 @@ through one stable endpoint. Scale the deployment up or down and the same loop
 re-converges.
 
 For the full resource reference, including multi-node inference, disaggregation,
-and cache backends, read [Concepts]({{< ref "/concepts" >}}). To do it yourself,
+and cache backends, read [Concepts]({{< ref "/overview/concepts" >}}). To do it yourself,
 start with [Getting started]({{< ref "/getting-started" >}}).
 <!-- vale write-good.Passive = YES -->

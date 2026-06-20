@@ -76,9 +76,11 @@
       "content toc";
     grid-template-rows: auto 1fr;
     // Content capped near its measure; the "On this page" rail sits right
-    // alongside it and gets noticeably more room than before.
+    // alongside it. Centre the content+rail group in the main area so the
+    // whitespace is balanced between the left nav and the right edge.
     grid-template-columns: minmax(0, 52rem) 17rem;
     column-gap: 2.5rem;
+    justify-content: center;
   }
 
   &.no-toc{

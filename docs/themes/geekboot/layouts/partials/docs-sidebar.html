@@ -34,20 +34,31 @@
     {{ range $allItems }}
       {{ if and (ne . $root) (ne .Params.product "crds") (not .Params.tocHidden) }}
         {{ if .IsSection }}
-          <div class="nav-section-static">
-            <a class="nav-section-link{{ if eq . $current }} active{{ end }}" href="{{ .Permalink }}">{{ .Title }}</a>
-          </div>
-          {{ with .Pages.ByWeight }}
+          {{ $section := . }}
+          <div class="nav-group">
+            {{/* Non-clickable text label; content lives in the sub-pages below. */}}
+            <div class="nav-group-label">{{ .Params.navLabel | default .Title }}</div>
             <div class="nav-children">
-              {{ range . }}
+              {{/* Sections with real landing content expose it as a first child. */}}
+              {{ with .Params.navLanding }}
+                <a class="bd-links d-flex{{ if eq $section $current }} active{{ end }}" href="{{ $section.Permalink }}">{{ . }}</a>
+              {{ end }}
+              {{ range $section.Pages.ByWeight }}
                 {{ if not .Params.tocHidden }}
                   <a class="bd-links d-flex{{ if eq . $current }} active{{ end }}" href="{{ .Permalink }}">{{ .Title }}</a>
                 {{ end }}
               {{ end }}
             </div>
-          {{ end }}
+          </div>
         {{ else }}
-          <a class="nav-section-link nav-top-link{{ if eq . $current }} active{{ end }}" href="{{ .Permalink }}">{{ .Title }}</a>
+          {{/* Standalone top-level page (e.g. Concepts): render like a section —
+               a label with the page as its single entry — so it matches. */}}
+          <div class="nav-group">
+            <div class="nav-group-label">{{ .Params.navLabel | default .Title }}</div>
+            <div class="nav-children">
+              <a class="bd-links d-flex{{ if eq . $current }} active{{ end }}" href="{{ .Permalink }}">{{ .Params.linkTitle | default .Title }}</a>
+            </div>
+          </div>
         {{ end }}
       {{ end }}
     {{ end }}

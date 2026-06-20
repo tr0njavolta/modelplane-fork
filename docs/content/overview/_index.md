@@ -2,6 +2,7 @@
 title: Overview
 weight: 5
 description: What Modelplane is, why it exists, and how it works.
+navLanding: "Introduction"
 ---
 <!-- vale write-good.Passive = NO -->
 Modelplane is the open source control plane for AI inference. It sits above your
@@ -44,6 +45,6 @@ clusters, so the models, the data, and the infrastructure stay yours.
 It builds on [Crossplane](https://crossplane.io): platform teams describe their
 GPU fleet as resources, developers describe a deployment, and Modelplane composes
 the clusters, schedules replicas, and exposes one OpenAI-compatible endpoint per
-service. The [Concepts]({{< ref "/concepts" >}}) page covers every resource and
+service. The [Concepts]({{< ref "/overview/concepts" >}}) page covers every resource and
 how they relate.
 <!-- vale write-good.Passive = YES -->
