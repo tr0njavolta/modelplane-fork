@@ -80,13 +80,23 @@ clusters, so the models, the data, and the infrastructure stay yours.
 
 ## Start here
 
-This Overview is the place to start.
+This Overview is the place to start. Read it top to bottom and you'll understand
+what Modelplane is and how it works, with the rest of the docs a click away.
 
-- [Why Modelplane]({{< ref "/overview/why" >}}): the problem it solves, and how it
-  compares to building inference yourself or buying it as a service.
-- [How Modelplane works]({{< ref "/overview/how-it-works" >}}): the architecture, the
-  two-team boundary, and what happens when you deploy a model.
-- [Concepts]({{< ref "/overview/concepts" >}}): every resource and how they relate.
+{{< cardgroup cols="2" >}}
+{{< card title="Why Modelplane" href="/overview/why/" >}}
+The problem it solves, and how it compares to building inference yourself or buying it as a service.
+{{< /card >}}
+{{< card title="How Modelplane works" href="/overview/how-it-works/" >}}
+The architecture, the two-team boundary, and what happens when you deploy a model.
+{{< /card >}}
+{{< card title="Concepts" href="/overview/concepts/" >}}
+Every resource in the API and how they relate.
+{{< /card >}}
+{{< card title="FAQ" href="/overview/faq/" >}}
+Short answers to the questions practitioners ask first.
+{{< /card >}}
+{{< /cardgroup >}}
 
 When you're ready to deploy, [Getting started]({{< ref "/getting-started" >}}) takes
 you from nothing to a live OpenAI-compatible endpoint in about 45 minutes.
