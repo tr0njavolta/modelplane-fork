@@ -27,11 +27,15 @@
   // paint on the next load. The active segment is shown via CSS keyed off
   // <html color-theme>, so no JS class toggling is needed.
   (function () {
-    // Clicking anywhere on the switch toggles the theme.
+    // Clicking a segment selects that theme explicitly; clicking the track
+    // between segments falls back to toggling.
     document.querySelectorAll('.theme-switch').forEach(function (sw) {
-      sw.addEventListener('click', function () {
+      sw.addEventListener('click', function (event) {
         var root = document.documentElement;
-        var next = root.getAttribute('color-theme') === 'dark' ? 'light' : 'dark';
+        var opt = event.target.closest('.theme-switch-opt[data-theme]');
+        var next = opt
+          ? opt.getAttribute('data-theme')
+          : (root.getAttribute('color-theme') === 'dark' ? 'light' : 'dark');
         root.setAttribute('color-theme', next);
         try { localStorage.setItem('darkSwitch', next); } catch (e) {}
       });
@@ -51,18 +55,27 @@
       btn.classList.add('copied');
       setTimeout(function () { btn.classList.remove('copied'); }, 1500);
     }
+    // Copy text to the clipboard, guarding for environments where the
+    // Clipboard API is unavailable (non-secure contexts, older browsers) or
+    // where the write is rejected, so a failure never throws or logs noise.
+    function copyToClipboard(text, btn) {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) return;
+      navigator.clipboard.writeText(text).then(function () {
+        flashCopied(btn);
+      }).catch(function () {});
+    }
     document.querySelectorAll('.code-card__copy').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var body = btn.closest('.code-card').querySelector('.code-card__body');
         if (!body) return;
-        navigator.clipboard.writeText(body.innerText).then(function () { flashCopied(btn); });
+        copyToClipboard(body.innerText, btn);
       });
     });
     document.querySelectorAll('.code-card__apply').forEach(function (btn) {
       btn.addEventListener('click', function () {
         var text = btn.getAttribute('data-copy');
         if (!text) return;
-        navigator.clipboard.writeText(text).then(function () { flashCopied(btn); });
+        copyToClipboard(text, btn);
       });
     });
   })();
