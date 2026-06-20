@@ -15,7 +15,7 @@ The documentation MCP server lets an assistant search these docs and read any pa
 
 The server URL is:
 
-```
+```plaintext
 https://docs.modelplane.ai/mcp
 ```
 
@@ -66,7 +66,7 @@ The **Copy page** menu on every page also has **Connect to Cursor** and **Connec
 
 Every page is also published as raw Markdown. Add `index.md` to any page URL:
 
-```
+```plaintext
 https://docs.modelplane.ai/models/model-deployment/index.md
 ```
 
@@ -83,6 +83,7 @@ For tools that index a whole site, the docs publish the [`llms.txt`](https://llm
 
 The **Copy page** menu next to each title has these actions:
 
+{{< table >}}
 | Action | What it does |
 |---|---|
 | Copy page | Copies the page as Markdown to your clipboard. |
@@ -90,3 +91,4 @@ The **Copy page** menu next to each title has these actions:
 | Copy MCP Server | Copies the MCP server URL to your clipboard. |
 | Connect to Cursor | Installs the MCP server in Cursor. |
 | Connect to VS Code | Installs the MCP server in VS Code. |
+{{< /table >}}
