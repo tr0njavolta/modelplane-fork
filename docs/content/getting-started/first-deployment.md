@@ -88,26 +88,24 @@ kubectl wait configuration/modelplane --for=condition=Healthy --timeout=5m
 Create an AWS credentials file:
 
 {{< editCode >}}
-```ini {copy-lines="all"}
+```ini
 [default]
 aws_access_key_id = $@<aws_access_key>$@
 aws_secret_access_key = $@<aws_secret_key>$@
 ```
 {{< /editCode >}}
 
-{{< editCode >}}
-
 Create a Kubernetes secret:
 
-```ini
+{{< editCode >}}
+```bash
 kubectl create secret generic aws-creds \
   --from-file=credentials=$@</path/to/aws-credentials>$@ \
   -n crossplane-system
 ```
+{{< /editCode >}}
 
 Apply the `ClusterProviderConfig` referencing your secret:
-
-{{< /editCode >}}
 
 {{< manifests "getting-started/clusterproviderconfig-aws.yaml" >}}
 {{< /tab >}}
@@ -116,26 +114,26 @@ Apply the `ClusterProviderConfig` referencing your secret:
 
 
 Create a Kubernetes secret:
-{{< editCode >}}
 
-```ini
+{{< editCode >}}
+```bash
 kubectl create secret generic gcp-creds \
   --from-file=credentials=$@<path/to/gcp-key>$@.json \
   -n crossplane-system
 ```
-
 {{< /editCode >}}
 
-Download the `ClusterProviderConfig`, set `projectID` to your GCP project, and
-apply it:
+Apply the `ClusterProviderConfig`, setting `projectID` to your GCP project:
 
 {{< manifests path="getting-started/clusterproviderconfig-gke.yaml" apply="false" >}}
 
+{{< editCode >}}
 ```bash
-curl -O {{< manifest-url "getting-started/clusterproviderconfig-gke.yaml" >}}
-# Edit clusterproviderconfig-gke.yaml: set projectID to your GCP project.
-kubectl apply -f clusterproviderconfig-gke.yaml
+curl -fsSL {{< manifest-url "getting-started/clusterproviderconfig-gke.yaml" >}} \
+  | sed 's/my-gcp-project/$@<your-gcp-project>$@/' \
+  | kubectl apply -f -
 ```
+{{< /editCode >}}
 
 {{< /tab >}}
 
@@ -175,16 +173,17 @@ kubectl wait --for=condition=Ready ic/eks-us-east --timeout=20m
 {{< /tab >}}
 
 {{< tab "GKE" >}}
-Download the manifest, set the cluster's `project` to your GCP project, and
-apply it:
+Apply the manifest, setting the cluster's `project` to your GCP project:
 
 {{< manifests path="getting-started/gke/platform.yaml" apply="false" >}}
 
+{{< editCode >}}
 ```bash
-curl -O {{< manifest-url "getting-started/gke/platform.yaml" >}}
-# Edit platform.yaml: set spec.cluster.gke.project to your GCP project.
-kubectl apply -f platform.yaml
+curl -fsSL {{< manifest-url "getting-started/gke/platform.yaml" >}} \
+  | sed 's/my-gcp-project/$@<your-gcp-project>$@/' \
+  | kubectl apply -f -
 ```
+{{< /editCode >}}
 
 Modelplane provisions the cluster. This takes about 15 minutes:
 

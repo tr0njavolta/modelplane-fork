@@ -49,11 +49,13 @@ cache.
 
 {{< manifests path="examples/qwen3-coder/inference-cluster.yaml" apply="false" >}}
 
+{{< editCode >}}
 ```bash
-curl -O {{< manifest-url "examples/qwen3-coder/inference-cluster.yaml" >}}
-# Edit inference-cluster.yaml: set capacityReservationId to your reservation.
-kubectl apply -f inference-cluster.yaml
+curl -fsSL {{< manifest-url "examples/qwen3-coder/inference-cluster.yaml" >}} \
+  | sed 's/cr-0123456789abcdef0/$@<your-reservation-id>$@/' \
+  | kubectl apply -f -
 ```
+{{< /editCode >}}
 {{< /tab >}}
 {{< tab "Single-node (FP8)" >}}
 {{< manifests "examples/qwen3-coder/inference-class-fp8.yaml" >}}
@@ -90,11 +92,13 @@ FP8 weights need four such nodes.
 
 {{< manifests path="examples/kimi-k2/inference-cluster.yaml" apply="false" >}}
 
+{{< editCode >}}
 ```bash
-curl -O {{< manifest-url "examples/kimi-k2/inference-cluster.yaml" >}}
-# Edit inference-cluster.yaml: set capacityReservationId to your reservation.
-kubectl apply -f inference-cluster.yaml
+curl -fsSL {{< manifest-url "examples/kimi-k2/inference-cluster.yaml" >}} \
+  | sed 's/cr-0123456789abcdef0/$@<your-reservation-id>$@/' \
+  | kubectl apply -f -
 ```
+{{< /editCode >}}
 
 ### Deployment
 

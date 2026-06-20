@@ -37,16 +37,17 @@ up](#clean-up)).
 {{< /tab >}}
 {{< tab "GKE" >}}
 Register two more clusters with a bigger hardware class: `A100` (`40 Gi`).
-Download the manifest, set each cluster's `project` to your GCP project, and
-apply it:
+Apply the manifest, setting each cluster's `project` to your GCP project:
 
 {{< manifests path="getting-started/gke/platform-scale.yaml" apply="false" >}}
 
+{{< editCode >}}
 ```bash
-curl -O {{< manifest-url "getting-started/gke/platform-scale.yaml" >}}
-# Edit platform-scale.yaml: set spec.cluster.gke.project to your GCP project.
-kubectl apply -f platform-scale.yaml
+curl -fsSL {{< manifest-url "getting-started/gke/platform-scale.yaml" >}} \
+  | sed 's/my-gcp-project/$@<your-gcp-project>$@/g' \
+  | kubectl apply -f -
 ```
+{{< /editCode >}}
 
 {{< hint "note" >}}
 `a2-highgpu-1g` runs ~$3.50/hr on demand. Two of them plus the `L4` from Part 1 is a
