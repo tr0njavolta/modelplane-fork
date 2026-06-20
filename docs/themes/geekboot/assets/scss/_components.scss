@@ -238,13 +238,30 @@ a.mp-card,
 .mp-lane--ml .mp-lane-title { color: #{$mp-purple-hi}; }
 
 .mp-chip {
-  font-family: #{$font-family-monospace};
-  font-size: 0.82rem;
-  padding: 6px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 12px;
   background: transparent;
   border: 1px solid var(--mp-card-border);
-  border-radius: 6px;
+  border-radius: 8px;
+  text-decoration: none;
+  transition: border-color 0.2s;
 }
+a.mp-chip:hover { border-color: var(--mp-card-border-hi); text-decoration: none; }
+
+.mp-chip-name {
+  font-family: #{$font-family-monospace};
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--body-font-color, inherit);
+}
+.mp-chip-desc {
+  font-size: 0.78rem;
+  line-height: 1.35;
+  color: var(--mp-card-muted);
+}
+
 .mp-lane--platform .mp-chip { border-color: rgba(0, 220, 232, 0.30); }
 .mp-lane--ml .mp-chip { border-color: rgba(154, 94, 252, 0.30); }
 
