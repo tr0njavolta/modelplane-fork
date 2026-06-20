@@ -1,17 +1,11 @@
 # Points the GCP provider at the credentials Secret you created. Named default,
 # so InferenceClusters with a GKE source use it without further configuration.
-#
-# Set projectID to your own GCP project before applying:
-#
-#   curl -O https://modelplane.ai/docs/latest/examples/getting-started/clusterproviderconfig-gke.yaml
-#   # edit clusterproviderconfig-gke.yaml: set projectID
-#   kubectl apply -f clusterproviderconfig-gke.yaml
 apiVersion: gcp.m.upbound.io/v1beta1
 kind: ClusterProviderConfig
 metadata:
   name: default
 spec:
-  projectID: my-gcp-project
+  projectID: my-gcp-project  # replace with your GCP project
   credentials:
     source: Secret
     secretRef:

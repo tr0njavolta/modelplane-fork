@@ -36,9 +36,17 @@ up](#clean-up)).
 {{< /hint >}}
 {{< /tab >}}
 {{< tab "GKE" >}}
-Register two more clusters with a bigger hardware class: `A100` (`40 Gi`):
+Register two more clusters with a bigger hardware class: `A100` (`40 Gi`).
+Download the manifest, set each cluster's `project` to your GCP project, and
+apply it:
 
-{{< manifests "getting-started/gke/platform-scale.yaml" >}}
+{{< manifests path="getting-started/gke/platform-scale.yaml" apply="false" >}}
+
+```bash
+curl -O {{< manifest-url "getting-started/gke/platform-scale.yaml" >}}
+# Edit platform-scale.yaml: set spec.cluster.gke.project to your GCP project.
+kubectl apply -f platform-scale.yaml
+```
 
 {{< hint "note" >}}
 `a2-highgpu-1g` runs ~$3.50/hr on demand. Two of them plus the `L4` from Part 1 is a
