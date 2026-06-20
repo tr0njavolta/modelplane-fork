@@ -240,42 +240,11 @@ a.mp-card,
 
 .mp-example-code pre { margin: 0; border-radius: 0; }
 
-// ── Persona path cards ────────────────────────────────────────
-.mp-personas {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 16px;
-  margin: 1.5rem 0;
-}
-
-.mp-persona {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 20px;
-  background: var(--mp-card-bg);
-  border: 1px solid var(--mp-card-border);
-  border-radius: 10px;
-  text-decoration: none;
-  transition: border-color 0.2s, transform 0.2s;
-
-  &:hover { border-color: var(--mp-card-border-hi); transform: translateY(-2px); text-decoration: none; }
-}
-
-.mp-persona-role {
-  font-size: 1.05rem;
-  font-weight: 700;
-  letter-spacing: -0.01em;
-  color: var(--bs-body-color, inherit);
-}
-.mp-persona--platform .mp-persona-role { color: #{$mp-cyan}; }
-.mp-persona--developer .mp-persona-role { color: #{$mp-purple-hi}; }
-
-.mp-persona-desc { font-size: 0.9rem; color: var(--mp-card-muted); }
-
-.mp-persona-cta { font-size: 0.85rem; font-weight: 600; margin-top: auto; }
-.mp-persona--platform .mp-persona-cta { color: #{$mp-cyan}; }
-.mp-persona--developer .mp-persona-cta { color: #{$mp-purple-hi}; }
+// Accent variants (card shortcode): color the title and arrow by role.
+.mp-card--platform .mp-card-title,
+.mp-card--platform .mp-card-link { color: #{$mp-cyan}; }
+.mp-card--developer .mp-card-title,
+.mp-card--developer .mp-card-link { color: #{$mp-purple-hi}; }
 
 // ── Inline persona badge ──────────────────────────────────────
 .mp-badge {
@@ -310,13 +279,12 @@ a.mp-card,
 [color-theme="light"] {
   // Brand accents need darker shades to stay legible on white (the dark-mode
   // purple/sky/green wash out at WCAG-AA contrast).
-  .mp-persona--developer .mp-persona-role,
-  .mp-persona--developer .mp-persona-cta,
+  .mp-card--developer .mp-card-title,
   .mp-badge--developer,
   .mp-card-link { color: #{$mp-purple-dark}; }
 
-  .mp-persona--platform .mp-persona-role,
-  .mp-persona--platform .mp-persona-cta,
+  .mp-card--platform .mp-card-title,
+  .mp-card--platform .mp-card-link,
   .mp-badge--platform,
   .mp-status--preview { color: #{$aqua-700}; }
 

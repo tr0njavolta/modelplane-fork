@@ -57,7 +57,14 @@ providers, all behind one endpoint.
 Modelplane draws a clear boundary between the people who run the infrastructure
 and the people who ship models on it, and gives each a role-shaped API.
 
-{{< personas >}}
+{{< cardgroup cols="2" >}}
+{{< card title="I run the platform" href="/platform/" accent="platform" cta="Platform docs" >}}
+Provision clusters across clouds, define hardware classes, and set the capacity and policy the fleet runs within.
+{{< /card >}}
+{{< card title="I deploy models" href="/models/" accent="developer" cta="Model docs" >}}
+Declare a model, expose it as one OpenAI-compatible service, and route traffic across replicas and endpoints.
+{{< /card >}}
+{{< /cardgroup >}}
 
 **Platform teams** manage the inference infrastructure: hardware definitions,
 capacity, cost, governance, and policy. **Developers** and ML engineers deploy
