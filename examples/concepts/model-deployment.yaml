@@ -8,7 +8,7 @@
 apiVersion: modelplane.ai/v1alpha1
 kind: ModelDeployment
 metadata:
-  name: qwen-demo
+  name: qwen3-8b
   namespace: ml-team
 spec:
   # Number of ModelReplicas to fan out to. Each replica is a complete
@@ -24,7 +24,7 @@ spec:
   # Standalone member, one pod - the simplest shape. The engine composes to a
   # Deployment fronted by a Service.
   engines:
-  - name: qwen
+  - name: qwen3-8b
     members:
     # A Standalone member is a single self-contained engine pod. Its template
     # carries the container named "engine" - the inference engine; its image,
@@ -43,18 +43,22 @@ spec:
         - name: gpu
           count: 1
           selectors:
-          # Qwen2.5-0.5B needs very little VRAM; 20Gi comfortably selects an L4
-          # without over-constraining. A larger model would ask for more memory
-          # or a specific architecture here. This CEL is real DRA CEL: the
-          # scheduler matches it against the pool's declared device, and DRA
-          # matches it again against the GPU's ResourceSlice when it binds the
-          # claim.
+          # Qwen3-8B fits comfortably on an L4; 20Gi selects one without
+          # over-constraining. A larger model would ask for more memory or a
+          # specific architecture here. This CEL is real DRA CEL: the scheduler
+          # matches it against the pool's declared device, and DRA matches it
+          # again against the GPU's ResourceSlice when it binds the claim.
           - cel: |
               device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
       template:
         spec:
           containers:
           - name: engine
-            image: vllm/vllm-openai:v0.7.3
+            image: vllm/vllm-openai:v0.23.0
             args:
-            - "--model=Qwen/Qwen2.5-0.5B-Instruct"
+            - "--model=Qwen/Qwen3-8B"
+            - "--served-model-name=qwen"
+            - "--reasoning-parser=qwen3"
+            - "--default-chat-template-kwargs={\"enable_thinking\": false}"
+            - "--enable-auto-tool-choice"
+            - "--tool-call-parser=hermes"
