@@ -4,9 +4,10 @@
       content: "$ "
   }
 
-  // Style for highlighted lines when hovering over copy button
+  // Style for highlighted lines when hovering over copy button. Theme-aware so
+  // it stays a subtle tint (not a dark block) in light mode.
   .copyHover {
-    background-color: #{$fog-800};
+    background-color: var(--nav-highlight-color);
   }
 
   // Code box div
@@ -88,7 +89,7 @@
             scroll-margin-top: 90px;
             &:hover{
               // text-decoration: none !important;
-              color: #fff;
+              color: var(--body-font-color);
               font-weight: 800;
               text-decoration: none !important;
             }

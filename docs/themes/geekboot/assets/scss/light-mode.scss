@@ -14,9 +14,9 @@
         text-decoration: none;
     }
 
-    // Single code lines inside text. Code blocks are in _code_theme_light.scss
-    --code-background: #{$fog-1000}20;
-    --code-color: #{$fog-1000};
+    // Inline code within text: purple text, no background.
+    --code-background: transparent;
+    --code-color: #{$mp-purple-dark};
     --code-line-number-color: #{$mp-purple-dark};
 
     //Tabs

@@ -174,6 +174,7 @@
     font-weight: 600;
     border-radius: 6px;
     color: var(--body-font-color);
+    text-decoration: none !important;
 
     &:hover, &:focus {
       background: var(--nav-highlight-color);

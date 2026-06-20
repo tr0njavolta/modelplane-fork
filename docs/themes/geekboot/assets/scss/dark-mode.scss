@@ -6,8 +6,8 @@
     --anchor-link-color: #{$mp-muted};
     --rss-icon-fill: #{$mp-purple};
 
-    // Single code lines inside text. Code blocks are in _code_theme_dark.scss
-    --code-background: rgba(255,255,255,0.07);
+    // Inline code within text: purple text, no background.
+    --code-background: transparent;
     --code-color: #{$mp-purple-hi};
     --code-line-number-color: #{$mp-cyan};
 

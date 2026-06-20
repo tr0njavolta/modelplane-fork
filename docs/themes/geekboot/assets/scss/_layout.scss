@@ -52,7 +52,7 @@
 }
 
 .bd-main-grid {
-  padding: 18px;
+  padding: 0.4rem 18px 24px;
 
   @include media-breakpoint-down(lg) {
     max-width: 760px;
@@ -75,7 +75,10 @@
       "intro   toc"
       "content toc";
     grid-template-rows: auto 1fr;
-    grid-template-columns: 4fr 1fr;
+    // Content capped near its measure; the "On this page" rail sits right
+    // alongside it and gets noticeably more room than before.
+    grid-template-columns: minmax(0, 52rem) 17rem;
+    column-gap: 2.5rem;
   }
 
   &.no-toc{
@@ -92,6 +95,7 @@
 
 .bd-intro {
   grid-area: intro;
+  padding-bottom: 1.5rem;
 }
 
 .bd-toc {
