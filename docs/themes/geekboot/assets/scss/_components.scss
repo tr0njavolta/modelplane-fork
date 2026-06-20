@@ -327,7 +327,12 @@
 // Copy lives in the card header (and we don't want it on plain blocks either) —
 // hide the JS-injected floating copy button everywhere. The base rule lives
 // inside :root[color-theme="…"], so the override has to match that specificity.
+// `.bd-clipboard` is injected by JS at runtime, so it isn't in hugo_stats.json;
+// the purgecss-ignore guard keeps this rule from being stripped in production
+// (which is why the button reappeared on Vercel but not in `hugo server`).
+/* purgecss start ignore */
 :root[color-theme="light"] .highlight .bd-clipboard,
 :root[color-theme="dark"] .highlight .bd-clipboard {
   display: none !important;
 }
+/* purgecss end ignore */
