@@ -152,7 +152,7 @@ cluster. The platform and model docs cover each one in full.
 | [ModelDeployment]({{< ref "/models/model-deployment" >}}) | ML team | A model to serve: its engine(s), replica count, and an optional cache. |
 | [ModelService]({{< ref "/models/model-service" >}}) | ML team | One OpenAI-compatible endpoint, weighted across the endpoints it selects. |
 | [ModelCache]({{< ref "/models/model-cache" >}}) | ML team | Model weights staged once per cluster on shared storage. |
-| [ModelReplica]({{< ref "/models/model-replica" >}}) | Modelplane | One complete serving instance on a specific cluster. |
+| [ModelReplica]({{< ref "/models/model-deployment" >}}) | Modelplane | One complete serving instance on a specific cluster. |
 | [ModelEndpoint]({{< ref "/models/model-endpoint" >}}) | Modelplane | A reachable endpoint; one per replica, or created manually for an external provider. |
 
 {{< cardgroup cols="2" >}}
