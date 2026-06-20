@@ -143,6 +143,31 @@
   &:hover { color: #{$mp-purple}; text-decoration: none; }
 }
 
+// Whole-card link variant (card shortcode): the anchor is the card.
+a.mp-card,
+.mp-card--link {
+  text-decoration: none;
+  transition: border-color 0.2s, transform 0.2s;
+  &:hover { border-color: var(--mp-card-border-hi); transform: translateY(-2px); text-decoration: none; }
+}
+
+.mp-card-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  fill: currentColor;
+  color: #{$mp-purple-hi};
+}
+
+// Fixed-column overrides for cardgroup; collapse to one column on small screens.
+.mp-cards--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.mp-cards--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.mp-cards--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+@media (max-width: 600px) {
+  .mp-cards[class*="mp-cards--"] { grid-template-columns: 1fr; }
+}
+
 // ── Prev / next page navigation ───────────────────────────────
 .mp-pagination {
   display: flex;
