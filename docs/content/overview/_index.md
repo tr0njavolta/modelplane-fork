@@ -10,7 +10,7 @@ inference clusters across cloud, neocloud, and on-premise, and turns a fleet of
 GPU clusters into a single place to serve models. Platform teams set policy and
 capacity; developers declare a model and get a serving endpoint. Modelplane
 continuously reconciles the whole fleet: provisioning, scheduling, autoscaling,
-routing, and caching. All of it runs entirely under your control.
+routing, and caching. It all runs under your control.
 
 This Overview is the place to start. It answers three questions:
 
@@ -39,7 +39,7 @@ the other's job.
 
 Modelplane is the fleet-level control plane *above* the inference engine. It
 doesn't compete with vLLM or Dynamo; it manages them across clusters. It isn't a
-managed inference service either: Modelplane is open source and runs in your own
+managed inference service either. Modelplane is open source and runs in your own
 clusters, so the models, the data, and the infrastructure stay yours.
 
 It builds on [Crossplane](https://crossplane.io): platform teams describe their

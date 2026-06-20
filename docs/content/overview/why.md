@@ -16,7 +16,7 @@ Most teams take one of two paths, and each costs something.
 
 - **Build it yourself on Kubernetes.** You keep full control, but you own all the
   glue: cluster provisioning, GPU scheduling, autoscaling, gateways, and caching,
-  across every cloud you touch. That's a platform to build and maintain, not a
+  across every cloud you use. That's a platform to build and maintain, not a
   feature.
 - **Buy managed inference as a service.** You skip the glue, but you give up
   control: your models and traffic run on someone else's infrastructure, you take
@@ -41,7 +41,7 @@ Modelplane reconciles the rest.
   and builds on open [Crossplane](https://crossplane.io), so there's
   no proprietary control plane to lock into.
 
-## Where it is today
+## Where it stands today
 
 Modelplane is at v0.1: early, focused, and moving fast. What ships today provisions
 GKE and EKS (and runs on any cluster you bring), schedules and scales replicas,

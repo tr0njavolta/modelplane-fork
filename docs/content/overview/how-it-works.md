@@ -67,10 +67,10 @@ Once the resources exist, Modelplane keeps the fleet matching them. Five concern
 run continuously:
 
 1. **Provisioning.** From an `InferenceCluster`, Modelplane creates a full GKE or
-   EKS cluster and its GPU node pools, or onboards a cluster you bring on any
-   Kubernetes, and installs the serving stack on each.
+   EKS cluster and its GPU node pools, or brings in a cluster you already run on
+   any Kubernetes, and installs the serving stack on each.
 2. **Scheduling.** A two-level scheduler places work. The fleet scheduler pins each
-   `ModelReplica` to a cluster and node pool whose GPUs satisfy the model's device
+   `ModelReplica` to a cluster and node pool whose GPUs meet the model's device
    requests; the cluster's own scheduler, with Dynamic Resource Allocation (DRA),
    then binds the GPUs to the serving pods.
 3. **Autoscaling.** Replicas are the scaling axis. Scaling a `ModelDeployment`'s
