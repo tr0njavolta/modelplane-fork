@@ -197,7 +197,8 @@ a.mp-card,
 }
 
 .mp-pagination-label { font-size: 0.75rem; color: var(--mp-card-muted); }
-.mp-pagination-title { font-weight: 600; color: #{$mp-purple-hi}; }
+// Match the standard content link color (purple), without the underline.
+.mp-pagination-title { font-weight: 600; color: var(--content-link-color); }
 
 @media (max-width: 600px) {
   .mp-pagination { flex-direction: column; }
