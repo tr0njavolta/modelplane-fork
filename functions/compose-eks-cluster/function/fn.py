@@ -28,6 +28,8 @@ authorised on the cluster. Downstream consumers only need the kubeconfig;
 no per-cluster AWS identity has to be wired into provider-kubernetes.
 """
 
+from typing import Literal
+
 import grpc
 from crossplane.function import logging, resource, response
 from crossplane.function.proto.v1 import run_function_pb2 as fnv1
@@ -67,7 +69,12 @@ from models.io.upbound.m.aws.iam.rolepolicyattachment import v1beta1 as rpav1bet
 # this Crossplane would keep reverting desiredSize to nodeCount and fight it.
 # (initProvider is a beta feature gated on enumerating management policies — the
 # default "*" still reconciles forProvider, defeating the purpose.)
-_NODE_GROUP_MANAGEMENT = ["Observe", "Create", "Update", "Delete"]
+_NODE_GROUP_MANAGEMENT: list[Literal["Observe", "Create", "Update", "Delete", "LateInitialize", "*"]] = [
+    "Observe",
+    "Create",
+    "Update",
+    "Delete",
+]
 
 # Management policies that exclude Delete, used for resources installed on the
 # workload cluster (the RWX StorageClass Object, the autoscaler and EFA DRA

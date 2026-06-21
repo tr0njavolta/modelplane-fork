@@ -68,7 +68,7 @@ def _xr() -> v1alpha1.EKSCluster:
                     gpu=v1alpha1.Gpu(
                         acceleratorType="nvidia-l4",
                     ),
-                    zones=["us-west-2a", "us-west-2b"],
+                    zones=[v1alpha1.Zone("us-west-2a"), v1alpha1.Zone("us-west-2b")],
                 ),
             ],
         ),
@@ -104,7 +104,7 @@ def _xr_capacity_block() -> v1alpha1.EKSCluster:
                     capacityBlock=v1alpha1.CapacityBlock(
                         capacityReservationId=_CAPACITY_RESERVATION_ID,
                     ),
-                    zones=["us-west-2a"],
+                    zones=[v1alpha1.Zone("us-west-2a")],
                 ),
             ],
         ),
@@ -200,7 +200,7 @@ def _xr_efa() -> v1alpha1.EKSCluster:
                         acceleratorType="nvidia-h200",
                     ),
                     fabric="EFA",
-                    zones=["us-west-2a"],
+                    zones=[v1alpha1.Zone("us-west-2a")],
                 ),
             ],
         ),
