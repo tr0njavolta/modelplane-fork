@@ -306,7 +306,7 @@ class Composer:
             _helm_release(
                 chart=_TRAEFIK_CHART,
                 repo=_TRAEFIK_REPO,
-                version=self.xr.spec.traefik.version,
+                version=self.xr.spec.traefik.version,  # ty: ignore[unresolved-attribute]  # XRD guarantees traefik when backend is Traefik, the only backend
                 namespace=_TRAEFIK_NAMESPACE,
                 provider_config=_PC_NAME,
                 values={
