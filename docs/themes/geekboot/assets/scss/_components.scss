@@ -265,6 +265,54 @@ a.mp-chip:hover { border-color: var(--mp-card-border-hi); text-decoration: none;
 .mp-lane--platform .mp-chip { border-color: rgba(0, 220, 232, 0.30); }
 .mp-lane--ml .mp-chip { border-color: rgba(154, 94, 252, 0.30); }
 
+// ── FAQ disclosure ────────────────────────────────────────────
+.mp-faq {
+  margin: 0.6rem 0;
+  background: var(--mp-card-bg);
+  border: 1px solid var(--mp-card-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.mp-faq-q {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.8rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  list-style: none;
+  transition: color 0.15s;
+
+  &::-webkit-details-marker { display: none; }
+
+  // Chevron: points down when collapsed, up when open.
+  &::after {
+    content: "";
+    margin-left: auto;
+    flex-shrink: 0;
+    width: 0.55rem;
+    height: 0.55rem;
+    border-right: 2px solid var(--mp-card-muted);
+    border-bottom: 2px solid var(--mp-card-muted);
+    transform: rotate(45deg);
+    transition: transform 0.2s;
+  }
+
+  &:hover { color: var(--content-link-color); }
+}
+
+.mp-faq[open] > .mp-faq-q { color: var(--content-link-color); }
+.mp-faq[open] > .mp-faq-q::after { transform: rotate(-135deg); }
+
+.mp-faq-a {
+  padding: 0 1rem 0.85rem;
+  color: var(--body-font-color);
+
+  > :first-child { margin-top: 0; }
+  > :last-child { margin-bottom: 0; }
+}
+
 // ── Example-from-source block ─────────────────────────────────
 .mp-example {
   margin: 1.25rem 0;
