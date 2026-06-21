@@ -248,7 +248,6 @@ class Composer:
                     ),
                     writeConnectionSecretToRef=clusterv1beta1.WriteConnectionSecretToRef(
                         name=_kubeconfig_secret_name(self.xr),
-                        namespace=self.xr.metadata.namespace,  # ty: ignore[unresolved-attribute]  # metadata is always set on resources read from the API server
                     ),
                 ),
             ),
@@ -302,7 +301,7 @@ class Composer:
             )
 
             if pool.zones:
-                np.spec.forProvider.nodeLocations = pool.zones
+                np.spec.forProvider.nodeLocations = [zone.root for zone in pool.zones]
 
             resource.update(
                 self.rsp.desired.resources[f"nodepool-{pool.name}"],
@@ -363,7 +362,6 @@ class Composer:
                     ),
                     writeConnectionSecretToRef=sakeyv1beta1.WriteConnectionSecretToRef(
                         name=_sa_key_secret_name(self.xr),
-                        namespace=self.xr.metadata.namespace,  # ty: ignore[unresolved-attribute]  # metadata is always set on resources read from the API server
                     ),
                 ),
             ),
