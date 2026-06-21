@@ -38,9 +38,11 @@ which Modelplane assumes are solely for its use.
 
 ## Cache storage
 
-To override the default ReadWriteMany StorageClass Modelplane uses for
-[ModelCache]({{< ref "models/model-cache.md#custom-cache-backends" >}}) PVCs on
-this cluster, set `cluster.<source>.cache.storageClassName`. See
+On provisioned `GKE` and `EKS` clusters, the ReadWriteMany StorageClass
+Modelplane uses for
+[ModelCache]({{< ref "models/model-cache.md#custom-cache-backends" >}}) PVCs is
+auto-provisioned. On an `Existing` cluster, name the StorageClass you created in
+`cluster.existing.cache.storageClassName`. See
 [Custom cache backends]({{< ref "models/model-cache.md#custom-cache-backends" >}})
-for details.
+for how storage is provided on each.
 <!-- vale write-good.Passive = YES -->

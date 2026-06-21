@@ -79,8 +79,10 @@ via `spec.modelCacheRef.name`, since every pod in the gang mounts it.
 
 Disaggregation runs on the multi-node (llm-d) path. A request is routed to a
 prefill instance and then to the decode instance holding its KV cache by the same
-endpoint picker that fronts multi-node serving. A deployment without a `prefill`
-block is unified serving and is unaffected.
+endpoint picker that fronts multi-node serving. Set `spec.serving.mode` to
+`PrefillDecode` and mark each engine's `phase` as `Prefill` or `Decode` to enable
+it. A deployment that omits `spec.serving` (or leaves `mode` as the default
+`Unified`) is unified serving and is unaffected.
 
 Disaggregation pays off for large models under load with strict latency targets
 and long context. For small models or low traffic the KV-transfer overhead
