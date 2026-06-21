@@ -268,10 +268,3 @@ def _attribute_value(entry: dict):
             return celpy.json_to_cel(entry[field])
     # No supported value: upstream returns "unsupported attribute value" error.
     raise ValueError("unsupported attribute value")
-
-
-def compile_selector(expr: str | None) -> Program | None:
-    """Compile a DRA CEL selector, or None if there is none."""
-    if not expr:
-        return None
-    return Program(expr)
