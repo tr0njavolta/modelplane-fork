@@ -42,8 +42,6 @@ class FunctionRunner(grpcv1.FunctionRunnerServiceServicer):
 
         rsp = response.to(req)
 
-        _ = v1alpha1.InferenceClass(**resource.struct_to_dict(req.observed.composite.resource))
-
         resource.update_status(rsp.desired.composite, v1alpha1.Status())
         response.set_conditions(rsp, resource.Condition(typ="Accepted", status="True", reason="Available"))
         rsp.desired.composite.ready = fnv1.READY_TRUE
