@@ -5,17 +5,25 @@
   weight. Flattening that tree here lets prev/next flow across section
   boundaries, just like reading top to bottom in the sidebar.
 
-  Pagination stays within a tab: the Examples tab flows through its own recipes,
-  and the Documentation tab excludes Examples (and the Reference tab's CRDs).
+  Pagination stays within a tab: Examples flows through its own recipes,
+  Reference flows through its type pages, and Documentation excludes both.
 
   Opt a page out with `paginationHidden: true` in its front matter.
 */}}
 {{ $current := . }}
 {{ $root := .Site.Home }}
 {{ $ex := .Site.GetPage "/examples" }}
+{{ $ref := .Site.GetPage "/reference" }}
 {{ $isExamples := and $ex (eq $current.Section "examples") }}
+{{ $isRef := and $ref (eq $current.Section "reference") }}
 {{ $ordered := slice }}
-{{ if $isExamples }}
+{{ if $isRef }}
+  {{ with $ref }}
+    {{ range .Pages.ByWeight }}
+      {{ if not .Params.tocHidden }}{{ $ordered = $ordered | append . }}{{ end }}
+    {{ end }}
+  {{ end }}
+{{ else if $isExamples }}
   {{ with $ex }}
     {{ if .Params.navLanding }}{{ $ordered = $ordered | append . }}{{ end }}
     {{ range .Pages.ByWeight }}
@@ -25,7 +33,7 @@
 {{ else }}
   {{ range (slice $root | append $root.RegularPages | append $root.Sections).ByWeight }}
     {{ $item := . }}
-    {{ if and (ne $item $root) (ne $item.Params.product "crds") (ne $item $ex) (not $item.Params.tocHidden) }}
+    {{ if and (ne $item $root) (ne $item $ref) (ne $item $ex) (not $item.Params.tocHidden) }}
       {{ if $item.IsSection }}
         {{ if $item.Params.navLanding }}{{ $ordered = $ordered | append $item }}{{ end }}
         {{ range $item.Pages.ByWeight }}

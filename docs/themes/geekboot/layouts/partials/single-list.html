@@ -1,9 +1,10 @@
-{{ $ref := index (where .Site.RegularPages "Params.product" "crds") 0 }}
+{{ $ref := .Site.GetPage "/reference" }}
 {{ $ex := .Site.GetPage "/examples" }}
-{{ $isRef := eq .Params.product "crds" }}
+{{ $isRef := and $ref (eq .Section "reference") }}
 {{ $isExamples := and $ex (eq .Section "examples") }}
+{{ $isCrd := eq .Params.product "crd" }}
 {{/* Whether this page shows an "On this page" rail (drives the centred no-toc layout). */}}
-{{ $hasToc := or (eq .Params.product "crds") (and (ne .Page.Params.toc false) (gt (len .TableOfContents) 40)) }}
+{{ $hasToc := or $isCrd (and (ne .Page.Params.toc false) (gt (len .TableOfContents) 40)) }}
 <div class="bd-layout docs-container" data-bs-spy="scroll" data-bs-target="#TableOfContents" data-bs-threshold="0,1" data-bs-root-margin="0% 0% -75%">
   <aside class="bd-sidebar">
     <div class="offcanvas-lg offcanvas-start bd-sidebar-container" tabindex="-1" id="bdSidebar" aria-labelledby="bdSidebarLabel">
@@ -116,7 +117,7 @@
           }
           </script>
         </div>
-        <h1 class="bd-title mb-0" id="content">{{ .Title | markdownify }}
+        <h1 class="bd-title mb-0" id="content">{{ .Title | markdownify }}{{ if $isCrd }} <span class="api-ref__crd-tag">Custom Resource</span>{{ end }}
           {{ if eq .Page.Title "Release Notes" }}
             {{ with .OutputFormats.Get "rss" -}}
               <a href="{{.Permalink}}"><svg xmlns="http://www.w3.org/2000/svg" height="18" width="18" class="rss-icon" viewBox="0 0 448 512"><path d="M64 32C28.7 32 0 60.7 0 96V416c0 35.3 28.7 64 64 64H384c35.3 0 64-28.7 64-64V96c0-35.3-28.7-64-64-64H64zM96 136c0-13.3 10.7-24 24-24c137 0 248 111 248 248c0 13.3-10.7 24-24 24s-24-10.7-24-24c0-110.5-89.5-200-200-200c-13.3 0-24-10.7-24-24zm0 96c0-13.3 10.7-24 24-24c83.9 0 152 68.1 152 152c0 13.3-10.7 24-24 24s-24-10.7-24-24c0-57.4-46.6-104-104-104c-13.3 0-24-10.7-24-24zm0 120a32 32 0 1 1 64 0 32 32 0 1 1 -64 0z"/></svg></a>
@@ -134,8 +135,8 @@
     </div>
 
       <div class="bd-toc mt-3 mb-5 my-lg-0 ps-xl-3 mb-lg-5">
-        {{ if eq $.Params.Product "crds" }}
-          {{ partial "crds-toc" . }}
+        {{ if $isCrd }}
+          {{ partial "crd-toc" . }}
         {{ else if (ne .Page.Params.toc false) }}
         {{ if gt (len .TableOfContents) 40 }}
           <button class="btn btn-link p-md-0 mb-2 mb-md-0 text-decoration-none bd-toc-toggle d-md-none" type="button" data-bs-toggle="collapse" data-bs-target="#tocContents" aria-expanded="false" aria-controls="tocContents">
@@ -165,8 +166,11 @@
         <div class="bd-content-inner">
         {{ if eq $.Params.Product "Release Notes" }}
           {{ partial "release-notes" . }}
-        {{ else if eq $.Params.Product "crds" }}
-          {{ partial "crds" . }}
+        {{ else if $isCrd }}
+          {{ partial "crd-single" . }}
+          {{ partial "page-pagination" . }}
+        {{ else if eq .Params.product "reference" }}
+          {{ partial "crd-index" . }}
         {{ else }}
           {{ .Content }}
           {{ partial "page-pagination" . }}
