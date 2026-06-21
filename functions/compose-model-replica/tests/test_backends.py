@@ -24,6 +24,7 @@ Dynamo stub are dispatch/behaviour tests below the table.
 
 import dataclasses
 import unittest
+from typing import Any
 
 from crossplane.function import resource
 from function import routing
@@ -106,7 +107,7 @@ def _gang_engine(
             container.args = args
         if command is not None:
             container.command = command
-        kwargs = {
+        kwargs: dict[str, Any] = {
             "role": role,
             "nodePoolName": pool,
             "template": v1alpha1.Template(spec=v1alpha1.Spec(containers=[container])),
@@ -351,7 +352,7 @@ _LLMD_WANT = {
 @dataclasses.dataclass
 class Case:
     name: str
-    backend: object
+    backend: base.Backend
     engine: v1alpha1.Worker
     want: dict
 
@@ -483,17 +484,23 @@ class TestBackendManifests(unittest.TestCase):
                 replica = _replica(engines=[engine])
                 out = backend.build(replica, engine, _PC, base.serving_label(replica))
                 serving = out["model-serving-main"].spec.readiness
+                assert serving is not None
                 self.assertEqual(serving.policy, "DeriveFromCelQuery")
                 self.assertEqual(serving.celQuery, base.AVAILABLE_CEL)
                 for key, obj in out.items():
                     if key.startswith("resource-claim"):
-                        self.assertEqual(obj.spec.readiness.policy, "SuccessfulCreate")
+                        readiness = obj.spec.readiness
+                        assert readiness is not None
+                        self.assertEqual(readiness.policy, "SuccessfulCreate")
 
     def test_serving_readiness_policies(self):
         replica = _replica()
         out = base.serving_resources(replica, _PC)
-        self.assertEqual(out["model-service"].spec.readiness.policy, "SuccessfulCreate")
-        self.assertEqual(out["model-route"].spec.readiness.policy, "SuccessfulCreate")
+        service_readiness = out["model-service"].spec.readiness
+        route_readiness = out["model-route"].spec.readiness
+        assert service_readiness is not None and route_readiness is not None
+        self.assertEqual(service_readiness.policy, "SuccessfulCreate")
+        self.assertEqual(route_readiness.policy, "SuccessfulCreate")
 
     def test_multiple_device_requests_single_container_claim(self):
         # resources.claims is a list-map keyed on name alone, so N device
@@ -515,7 +522,9 @@ class TestBackendManifests(unittest.TestCase):
         template = out["resource-claim-main-standalone"].spec.forProvider.manifest
         template_requests = template["spec"]["spec"]["devices"]["requests"]
         self.assertEqual([r["name"] for r in template_requests], ["gpu", "nic"])
-        self.assertEqual(out["resource-claim-main-standalone"].spec.readiness.policy, "SuccessfulCreate")
+        claim_readiness = out["resource-claim-main-standalone"].spec.readiness
+        assert claim_readiness is not None
+        self.assertEqual(claim_readiness.policy, "SuccessfulCreate")
 
     def test_claimless_leader_gets_no_claim(self):
         # A coordinator-only leader (e.g. a vLLM DP head running
@@ -761,7 +770,7 @@ class TestDisaggregated(unittest.TestCase):
             engine = next(c for c in pod["containers"] if c["name"] == "engine")
             self.assertIn("/dev/shm", [m["mountPath"] for m in engine["volumeMounts"]])
             host = next((e for e in engine["env"] if e["name"] == "VLLM_NIXL_SIDE_CHANNEL_HOST"), None)
-            self.assertIsNotNone(host, f"{role} missing VLLM_NIXL_SIDE_CHANNEL_HOST")
+            assert host is not None, f"{role} missing VLLM_NIXL_SIDE_CHANNEL_HOST"
             self.assertEqual(host["valueFrom"]["fieldRef"]["fieldPath"], "status.podIP")
             self.assertIn("VLLM_NIXL_SIDE_CHANNEL_PORT", [e["name"] for e in engine["env"]])
 

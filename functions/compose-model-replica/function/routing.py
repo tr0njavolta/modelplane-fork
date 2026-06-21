@@ -217,7 +217,10 @@ def _disaggregated(
     current tag. Engine images are the user's (#137), so Modelplane can't bundle
     this; it is a deployment prerequisite, not something the composition provides.
     """
-    name = replica.metadata.name  # ty: ignore[unresolved-attribute]  # metadata is always set on resources read from the API server
+    assert (
+        replica.metadata is not None and replica.metadata.name is not None
+    )  # set on resources read from the API server
+    name = replica.metadata.name
     prefill = next(e for e in replica.spec.engines if e.phase == "Prefill")
     decode = next(e for e in replica.spec.engines if e.phase == "Decode")
 

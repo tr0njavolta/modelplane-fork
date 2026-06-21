@@ -56,18 +56,6 @@ _BACKENDS = {
 }
 
 
-def _inference_cluster(
-    ic: icv1alpha1.InferenceCluster,
-) -> icv1alpha1.InferenceCluster:
-    """Return a copy with status fields defaulted."""
-    ic = ic.model_copy(deep=True)
-    ic.status = ic.status or icv1alpha1.Status()
-    ic.status.providerConfigRef = ic.status.providerConfigRef or icv1alpha1.ProviderConfigRef()
-    ic.status.gateway = ic.status.gateway or icv1alpha1.Gateway()
-    ic.status.gpuPools = ic.status.gpuPools or []
-    return ic
-
-
 class FunctionRunner(grpcv1.FunctionRunnerServiceServicer):
     """A FunctionRunner handles gRPC RunFunctionRequests."""
 
@@ -128,9 +116,9 @@ class Composer:
             response.normal(self.rsp, "Waiting for cluster to be resolved")
             return False
 
-        self.ic = _inference_cluster(icv1alpha1.InferenceCluster.model_validate(ic_dict))
+        self.ic = icv1alpha1.InferenceCluster.model_validate(ic_dict)
 
-        if not self.ic.status.providerConfigRef.name:
+        if not (self.ic.status and self.ic.status.providerConfigRef and self.ic.status.providerConfigRef.name):
             response.set_conditions(
                 self.rsp,
                 resource.Condition(
@@ -157,6 +145,9 @@ class Composer:
         surface serving.mode selects: a Service (Unified) or an InferencePool +
         endpoint picker (PrefillDecode).
         """
+        # resolve_inputs runs first and returns False unless the cluster's
+        # status.providerConfigRef.name is set, so it's present here.
+        assert self.ic and self.ic.status and self.ic.status.providerConfigRef and self.ic.status.providerConfigRef.name
         pc = self.ic.status.providerConfigRef.name
         label = base.serving_label(self.xr)
         composed: dict[str, k8sobjv1alpha1.Object] = {}

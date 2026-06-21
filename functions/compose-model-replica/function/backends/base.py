@@ -15,18 +15,28 @@
 """Backend dispatch for compose-model-replica.
 
 A backend turns a ModelReplica + its InferenceCluster into the cluster-level
-serving resources. Backends return provider-kubernetes Objects and/or
-provider-helm Releases; the dispatcher (fn.py) applies them to the response.
+serving resources. Backends return provider-kubernetes Objects; the dispatcher
+(fn.py) applies them to the response.
 """
+
+from typing import Protocol
 
 from crossplane.function import resource
 from models.ai.modelplane.modelreplica import v1alpha1
-from models.io.crossplane.m.helm.release import v1beta1 as helmv1beta1
 from models.io.crossplane.m.kubernetes.object import v1alpha1 as k8sobjv1alpha1
 
-# A composed resource is either a provider-kubernetes Object or a
-# provider-helm Release. fn.py writes these into the response by key.
-ComposedResource = k8sobjv1alpha1.Object | helmv1beta1.Release
+
+class Backend(Protocol):
+    """Composes a replica engine's cluster-level serving resources."""
+
+    def build(
+        self,
+        replica: v1alpha1.ModelReplica,
+        engine,
+        provider_config: str,
+        serving_label: str,
+    ) -> dict[str, k8sobjv1alpha1.Object]: ...
+
 
 # Backend identifiers.
 NATIVE = "native"
@@ -305,7 +315,7 @@ def serving_label(replica: v1alpha1.ModelReplica) -> str:
     The replica name, so the shared Service selects every engine's leader and
     Standalone pods.
     """
-    return replica.metadata.name  # ty: ignore[unresolved-attribute]  # metadata is always set on resources read from the API server
+    return replica.metadata.name  # ty: ignore[unresolved-attribute, invalid-return-type]  # metadata is always set on resources read from the API server
 
 
 def engine_container(member):
