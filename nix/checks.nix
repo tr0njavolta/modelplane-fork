@@ -86,6 +86,28 @@ in
         touch $out/.python-checks-passed
       '';
 
+  # Fail if any hand-written source file is missing its Apache 2.0 license
+  # header. Scoped to the files we author: the composition functions and the
+  # docs manifest validator. Generated models under schemas/python carry their
+  # own codegen banner, and config (*.toml) and vendored upstream CRDs (*.yaml)
+  # are excluded. addlicense -check only reads, so it runs against the store
+  # path directly. Run 'nix run .#fix' to add any missing headers.
+  license =
+    pkgs.runCommand "modelplane-license-check"
+      {
+        nativeBuildInputs = [ pkgs.addlicense ];
+      }
+      ''
+        cd ${self}
+        addlicense -check \
+          -ignore '**/*.toml' \
+          -ignore '**/*.yaml' \
+          -ignore '**/*.yml' \
+          functions/ docs/utils/validate/ nix.sh docs/vercel-build.sh
+        mkdir -p $out
+        touch $out/.license-check-passed
+      '';
+
   shell-lint =
     pkgs.runCommand "modelplane-shell-lint"
       {
