@@ -453,7 +453,7 @@ class Composer:
             _helm_release(
                 chart="cert-manager",
                 repo="https://charts.jetstack.io",
-                version=v.certManager,
+                version=v.certManager,  # ty: ignore[invalid-argument-type]  # XRD defaults this version and forbids null
                 namespace="cert-manager",
                 provider_config=_pc_name(self.xr),
                 values={"crds": {"enabled": True, "keep": False}},
@@ -479,7 +479,7 @@ class Composer:
             _helm_release(
                 chart="gateway-helm",
                 repo="oci://docker.io/envoyproxy",
-                version=v.envoyGateway,
+                version=v.envoyGateway,  # ty: ignore[invalid-argument-type]  # XRD defaults this version and forbids null
                 namespace="envoy-gateway-system",
                 provider_config=_pc_name(self.xr),
                 labels={_LABEL_RESOURCE: "envoy-gateway"},
@@ -578,7 +578,7 @@ class Composer:
         v = self.xr.spec.versions or v1alpha1.Versions()
         resource.update(
             self.rsp.desired.resources["prometheus"],
-            _prometheus_release(v.prometheus, _pc_name(self.xr)),
+            _prometheus_release(v.prometheus, _pc_name(self.xr)),  # ty: ignore[invalid-argument-type]  # XRD defaults this version and forbids null
         )
 
     def compose_leader_worker_set(self):
@@ -593,7 +593,7 @@ class Composer:
             _helm_release(
                 chart="lws",
                 repo="oci://registry.k8s.io/lws/charts",
-                version=v.leaderWorkerSet,
+                version=v.leaderWorkerSet,  # ty: ignore[invalid-argument-type]  # XRD defaults this version and forbids null
                 namespace="lws-system",
                 provider_config=_pc_name(self.xr),
             ),
@@ -613,7 +613,7 @@ class Composer:
             _helm_release(
                 chart="node-feature-discovery",
                 repo="oci://registry.k8s.io/nfd/charts",
-                version=v.nodeFeatureDiscovery,
+                version=v.nodeFeatureDiscovery,  # ty: ignore[invalid-argument-type]  # XRD defaults this version and forbids null
                 namespace="node-feature-discovery",
                 provider_config=_pc_name(self.xr),
             ),
@@ -650,7 +650,7 @@ class Composer:
             _helm_release(
                 chart="dra-driver-nvidia-gpu",
                 repo="oci://registry.k8s.io/dra-driver-nvidia/charts",
-                version=v.nvidiaDraDriver,
+                version=v.nvidiaDraDriver,  # ty: ignore[invalid-argument-type]  # XRD defaults this version and forbids null
                 namespace=_DRA_DRIVER_NAMESPACE,
                 provider_config=_pc_name(self.xr),
                 values=dra_values,
