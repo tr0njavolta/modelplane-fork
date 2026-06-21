@@ -4,56 +4,68 @@ weight: 10
 description: The problem Modelplane solves and how it compares to the alternatives.
 ---
 <!-- vale write-good.Passive = NO -->
-Open-weight models are becoming the default for serious inference. Cost control,
-governance, and data sovereignty all push organizations away from hosted
-proprietary APIs and toward running open-weight models on infrastructure they
-own. Kubernetes is where that runs, and platform teams are now asked to provide
-GPU inference to their ML teams the same way they already provide cloud
-infrastructure.
+Open-weight models are becoming the choice for organizations: they can be
+post-trained, including with reinforcement learning, to compete with frontier
+models, and they put cost, governance, and data sovereignty back under the
+organization's control. As they do, platform teams are 
+increasingly asked to provide GPU inference to their ML and development teams the 
+same way they already provide cloud infrastructure.
 
-## Serving one model is solved. The fleet isn't.
+## Kubernetes is becoming the default orchestrator
 
-Inside a single cluster, the open ecosystem is strong. vLLM, SGLang, and others 
-serve models. LeaderWorkerSet runs multi-node topologies. Dynamic Resource Allocation
-(DRA) binds GPUs to pods. llm-d adds model-aware routing and prefill/decode
-coordination. NVIDIA Dynamo brings KV-cache management and GPU-to-GPU weight
-transfer. Running a model on one Kubernetes cluster is, increasingly, a solved
-problem.
+Kubernetes is rapidly becoming the default orchestrator for inference. The broader 
+cloud-native community is investing heavily to make it a first-class platform for
+AI workloads, adding device-aware scheduling, multi-node inference, distributed
+serving, and accelerator management. The major open source inference projects are
+converging on it, among them vLLM, SGLang, NVIDIA Dynamo, llm-d, Ray, Slurm,
+KubeAI, and Kueue. Neoclouds like Baseten and CoreWeave have standardized on
+Kubernetes for their own operations. Inside a single cluster, the open ecosystem
+is now strong.
 
-The hard part is the fleet. GPU capacity is scarce and scattered: some in a
-hyperscaler, some on a neocloud, some on hardware you already own, across more
-than one region. Serving models on it means scheduling each model to the right
-hardware, routing traffic across clusters to a stable endpoint, accounting for
-capacity fleet-wide, and giving ML teams self-service without giving up
-governance. These problems sit *above* any single cluster. Every team that serves
-models at scale ends up building it themselves, in private.
+## Inference is a fleet problem
 
-## What Modelplane does instead
+But inference almost always runs across more than one cluster. Accelerator
+availability scatters capacity across hardware types, providers, and regions.
+Sovereignty and compliance pin workloads to specific locations. Operators run
+across multiple clouds and on-premise environments. Very large clusters
+concentrate failure and risk, so fleets of smaller clusters are often preferable,
+and inference workloads don't bin-pack the way other workloads do.
 
-Modelplane is the fleet control plane you'd otherwise build, as open source that
-runs in your own clusters. You describe your GPU fleet and your models as
-Kubernetes resources, and Modelplane reconciles the rest. It's the same move
-platform teams already made with [Crossplane](https://crossplane.io) for cloud
-infrastructure, applied one layer down to inference.
+So inference grows into a fleet, and a new set of problems appears above any
+single cluster:
 
-- **One fleet, many clouds.** Modelplane treats every cluster, cloud, and region
-  as one pool. It provisions clusters or runs on existing clusters on cloud, 
-  neocloud, or on-premise.
-- **One endpoint per service.** Every model is exposed through a single
-  OpenAI-compatible endpoint, with weighted routing for canary and A/B rollouts
-  across replicas, and fallback to external providers when you want it.
-- **A clean team boundary.** Platform teams set capacity and policy once;
-  developers deploy against it without filing tickets for infrastructure.
-- **Yours, end to end.** The models, the data, and the clusters stay under your
-  control. Modelplane is [Apache 2.0](https://github.com/modelplaneai/modelplane/blob/main/LICENSE)
-  and neutral across models, engines, accelerators, and clouds, so there's no
-  proprietary control plane to lock into.
+- Deciding where each model runs across available capacity.
+- Optimizing placement across heterogeneous accelerators.
+- Failing over across clouds and regions.
+- Routing by cost, latency, and sovereignty requirements.
+- Provisioning new capacity as demand grows.
+- Caching and distributing model weights across the fleet.
+- Managing the lifecycle of models, clusters, and infrastructure as one system.
 
-## Next steps
+Open source addresses pieces of this but none brings all the pieces together in a
+fleet-wide system of record that manages placement, caching, capacity, policy, and
+routing across an entire fleet. The labs, hyperscalers, and managed providers have
+all solved these problems in a proprietary way, but the open equivalent does not
+yet exist.
+
+## Modelplane extends Kubernetes to manage the fleet
+
+Modelplane does for the fleet what Kubernetes does for the cluster. It's the open
+source control plane above your inference clusters across cloud, neocloud, and
+on-premise: it places model deployments, autoscales replicas, provisions and
+manages the infrastructure underneath, caches and distributes model weights, and
+routes inference through one unified gateway with fallback to managed providers.
+It turns "I need this model served" into a stable endpoint for any ML team.
+
+Modelplane composes the ecosystem rather than replacing it, and stays neutral
+across models, accelerators, clouds, and serving stacks. It's built on
+[Crossplane](https://crossplane.io) and extends Kubernetes to manage inference
+at the fleet level. Modelplane is open source, Apache 2 licensed, and we plan to
+donate it to a neutral open source foundation later this year.
 
 {{< cardgroup cols="2" >}}
 {{< card title="How Modelplane works" href="/overview/how-it-works/" >}}
-The architecture, the two-team boundary, and what happens when you deploy a model.
+The architecture, the resources, and what happens when you deploy a model.
 {{< /card >}}
 {{< card title="FAQ" href="/overview/faq/" >}}
 How Modelplane compares to cluster orchestrators and managed providers, and what it requires.
