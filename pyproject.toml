@@ -15,6 +15,9 @@ members = ["functions/*", "schemas/python"]
 [dependency-groups]
 dev = [
   "crossplane-function-sdk-python>=0.14.0",
+  # Type stubs for the dynamically generated protobuf modules, so ty can
+  # resolve the Struct and Duration types the functions and tests use.
+  "types-protobuf>=4.24",
 ]
 
 [tool.ruff]
@@ -63,3 +66,11 @@ max-args = 8
 # main.py is the click CLI entrypoint: boolean flags are idiomatic, and it
 # catches Exception at the top level to report startup failures cleanly.
 "functions/*/function/main.py" = ["FBT001", "BLE001"]
+
+[tool.ty.environment]
+# The functions target Python 3.12 (see tool.ruff target-version).
+python-version = "3.12"
+
+[tool.ty.src]
+# The generated Pydantic models aren't under our control and aren't checked.
+exclude = ["schemas/python"]
