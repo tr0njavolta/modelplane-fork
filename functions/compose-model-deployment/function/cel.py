@@ -89,6 +89,8 @@ surfaced via CELCompileError.
 
 from __future__ import annotations
 
+import typing
+
 import celpy
 from celpy import celtypes
 
@@ -160,7 +162,10 @@ class Program:
         # turns CELCompileError into an InvalidNodeSelector condition.
         try:
             ast = env.compile(expr)
-            self._prgm = env.program(ast, functions=_FUNCTIONS)
+            # celpy types extension functions as returning only its base value
+            # union, which excludes the Quantity and Semver types our functions
+            # return, so it rejects _FUNCTIONS despite celpy supporting them.
+            self._prgm = env.program(ast, functions=_FUNCTIONS)  # ty: ignore[invalid-argument-type]
         except Exception as e:
             raise CELCompileError(str(e)) from e
 
@@ -230,7 +235,7 @@ def _device_activation(device: dict) -> celtypes.MapType:
     attributes = _DefaultMap()
     for name, raw in device.get("attributes", {}).items():
         domain, ident = _split_qualified(name, driver)
-        bucket = attributes.setdefault(celtypes.StringType(domain), celtypes.MapType())
+        bucket = typing.cast(celtypes.MapType, attributes.setdefault(celtypes.StringType(domain), celtypes.MapType()))
         bucket[celtypes.StringType(ident)] = _attribute_value(raw)
     out[celtypes.StringType("attributes")] = attributes
 
@@ -240,8 +245,9 @@ def _device_activation(device: dict) -> celtypes.MapType:
         if value is None:
             continue
         domain, ident = _split_qualified(name, driver)
-        bucket = capacity.setdefault(celtypes.StringType(domain), celtypes.MapType())
-        bucket[celtypes.StringType(ident)] = quantity.quantity(value)
+        bucket = typing.cast(celtypes.MapType, capacity.setdefault(celtypes.StringType(domain), celtypes.MapType()))
+        # celpy's MapType value type excludes the Quantity extension type.
+        bucket[celtypes.StringType(ident)] = quantity.quantity(value)  # ty: ignore[invalid-assignment]
     out[celtypes.StringType("capacity")] = capacity
 
     return out
