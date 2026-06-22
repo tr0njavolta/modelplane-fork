@@ -476,3 +476,9 @@ Crusoe
 Civo
 K3s
 edixos
+
+# On-premises NVIDIA systems
+DGX
+BasePOD
+SuperPOD
+Run:ai
