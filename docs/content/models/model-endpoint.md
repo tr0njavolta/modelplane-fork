@@ -18,13 +18,6 @@ schema, and `ModelService` treats them the same:
   `modelplane.ai/deployment` label puts the external endpoint behind the same
   service as that deployment's replicas, for overflow or break-glass routing.
 
-Each endpoint composes a Kubernetes `Service` and an `EndpointSlice` on the
-control plane. The `EndpointSlice`'s address type follows the `url`'s host: an IP
-address when it's a literal IP (a cluster gateway, typically), or an FQDN when
-it's a hostname (an external provider, typically). `ModelEndpoint` surfaces the
-`Service` name in `status.routing.backendName` so `ModelService` can reference it
-as a backend in its `HTTPRoute`.
-
 Modelplane routes to a manual endpoint's `url` as-is. v0.1 doesn't attach
 credentials, so an external endpoint that needs an API key isn't supported yet.
 <!-- vale write-good.Passive = YES -->

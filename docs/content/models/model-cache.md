@@ -6,14 +6,11 @@ description: Stage model weights on cluster storage before serving.
 <!-- vale write-good.Passive = NO -->
 **API:** [`modelplane.ai/v1alpha1` · ModelCache]({{< ref "/reference/modelcaches" >}})
 
-A `ModelCache` stages a model artifact on workload-cluster storage as a
-first-class resource. Modelplane composes a ReadWriteMany PVC on each matched
-cluster and hydrates it once with a Job that fetches the artifact from the
-configured source. `ModelDeployments` reference a cache via
-`spec.modelCacheRef.name`; the cache's PVC is mounted at `/mnt/models`
-read-write into every serving pod automatically, shared across the LWS gang of a
-multi-node engine. The engine reads weights locally from the mount instead of
-fetching them at boot.
+A `ModelCache` stages a model's weights on shared workload-cluster storage,
+fetched once from the configured source rather than downloaded again on every pod
+start. `ModelDeployments` reference a cache via `spec.modelCacheRef.name`, and
+Modelplane mounts it at `/mnt/models` in every serving pod, shared across the
+pods of a multi-node engine. The engine reads weights locally from the mount.
 
 
 Without a cache, the engine fetches the model at pod startup, so the
@@ -47,13 +44,10 @@ The cache PVC needs a `ReadWriteMany` (RWX) StorageClass on the workload cluster
 What the platform admin must set up depends on the cloud:
 <!-- vale Google.Acronyms = YES -->
 
-- **GKE:** auto-provisioned. Modelplane composes the `modelplane-rwx` Filestore
-  StorageClass and enables `file.googleapis.com`. Nothing for the admin to do.
-- **EKS:** auto-provisioned. Modelplane composes an EFS file system with a mount
-  target in each node subnet, the EFS storage driver (its IAM role bound through
-  Pod Identity), and a `modelplane-rwx-efs` StorageClass pinned to the file
-  system. Nothing for the admin to do. EFS is elastic, so the cache's `sizeGiB`
-  is informational on EKS: the PVC API still requires a size, but EFS ignores it.
+- **GKE:** auto-provisioned on Filestore. Nothing for the admin to do.
+- **EKS:** auto-provisioned on EFS. Nothing for the admin to do. EFS is elastic,
+  so the cache's `sizeGiB` is informational on EKS: the PVC API still requires a
+  size, but EFS ignores it.
 - **Existing:** bring-your-own. The admin creates a `ReadWriteMany` StorageClass
   on the cluster and names it in `cluster.existing.cache.storageClassName`. See
   [Custom cache backends](#custom-cache-backends).
