@@ -80,7 +80,7 @@ kubectl run -i --rm curl-test \
   --env="ADDRESS=$ADDRESS" \
   -- sh -c 'curl -v "$ADDRESS/v1/chat/completions" \
   -H "Content-Type: application/json" \
-  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"messages\":[{\"role\":\"user\",\"content\":\"What is the squre root of pi?\"}],\"max_tokens\":100}"'
+  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"messages\":[{\"role\":\"user\",\"content\":\"What is Kubernetes in one sentence?\"}],\"max_tokens\":100}"'
 ```
 
 The request routes to the replica on the cluster Modelplane placed it on.
@@ -88,31 +88,27 @@ You should get a response in a few seconds:
 
 ```json {nocopy=true}
 {
-  "id": "chatcmpl-a26fc9ab-a7e6-4000-a349-286227102d57",
-  "object": "chat.completion",
-  "created": 1782139786,
+  "id": "chatcmpl-c88b1429-067d-40a5-971c-ab9c54153c26",
   "model": "Qwen/Qwen2.5-0.5B-Instruct",
   "choices": [
     {
-      "index": 0,
       "message": {
         "role": "assistant",
-        "content": "The square root of pi (π) is approximately 
-        1.77245385090551602779409473109902323386.
-        This value can be obtained through various mathematical methods or 
-        algorithms designed to compute the square root of π. The precision and 
-        accuracy of this value depend on the computational resources available 
-        and the method used for calculation.",
+        "content": "Kubernetes (K8s) is an open-source platform for automating 
+        the deployment, scaling, and management of containerized applications. 
+        It provides scalable orchestration capabilities that enable developers 
+        to deploy complex applications quickly and efficiently across various environments."
       },
-      "finish_reason": "stop",
+      "finish_reason": "stop"
     }
   ],
   "usage": {
     "prompt_tokens": 37,
-    "completion_tokens": 93,
-    "total_tokens": 130,
-  },
+    "completion_tokens": 48,
+    "total_tokens": 85
+  }
 }
+
 ```
 
 ## Next step
