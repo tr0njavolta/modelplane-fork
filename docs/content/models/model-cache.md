@@ -34,8 +34,8 @@ Each cache has:
 The cache mounts at `/mnt/models` on every consuming pod; engine container args
 should reference this path (`--model=/mnt/models` for vLLM).
 
-`ModelCache` is required for multi-node deployments and optional for single-node
-cold-start optimization.
+`ModelCache` is recommended for multi-node deployments and optional for
+single-node cold-start optimization.
 
 ## Storage prerequisites
 

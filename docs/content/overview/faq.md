@@ -148,7 +148,7 @@ KEDA work without anything extra. There's no per-pod autoscaling inside a cluste
 A `ModelCache` stages weights once per cluster on shared (ReadWriteMany) storage,
 and every pod reads them locally. Pods don't re-download on each start, and
 concurrent starts don't race. It hydrates from Hugging Face today, is optional for
-single-node deployments, and is required for multi-node ones.
+single-node deployments, and is recommended for multi-node ones.
 {{< /qa >}}
 
 ## The project

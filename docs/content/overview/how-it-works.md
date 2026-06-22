@@ -141,9 +141,9 @@ re-converges.
 A single-node deployment composes to a Kubernetes Deployment fronted by a
 service. When a model is too large for one node, an engine becomes a gang: a
 `Leader` member and one or more `Worker` members that Modelplane composes into a
-LeaderWorkerSet, serving the model together across nodes. Gang deployments stage
-their weights through a `ModelCache`, which is required once more than one pod
-loads the same model.
+LeaderWorkerSet, serving the model together across nodes. Gang deployments
+should stage their weights through a `ModelCache`, so the pods share one copy
+instead of each pulling the same model.
 
 Disaggregated serving splits prefill and decode into separate engines
 (`serving.mode: PrefillDecode`) that run on the same cluster and hand off the KV

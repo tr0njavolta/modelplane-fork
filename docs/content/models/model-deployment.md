@@ -48,8 +48,9 @@ and a `Worker` whose `worker.nodes` expands to that many worker pods, one per
 node. The pods serve the model together; how the model splits across them
 (tensor, pipeline, data, or expert parallelism) is up to your engine flags.
 
-A gang requires a [`ModelCache`]({{< ref "model-cache.md" >}}) via
-`spec.modelCacheRef`, since every pod mounts the same weights.
+A gang should use a [`ModelCache`]({{< ref "model-cache.md" >}}) via
+`spec.modelCacheRef`, so every pod mounts the same weights instead of each
+pulling its own.
 
 ```yaml {nocopy=true}
 modelCacheRef:
@@ -224,7 +225,7 @@ autoscaling.
 | Topology | Use when | How you set it |
 |----------|----------|----------------|
 | Single-node | The model fits on one node's GPUs | One `Standalone` member (the default) |
-| Multi-node | The model is too large for one node | A `Leader` and one or more `Worker` members, plus `modelCacheRef` |
+| Multi-node | The model is too large for one node | A `Leader` and one or more `Worker` members, ideally with a `modelCacheRef` |
 | Disaggregated serving | Large model, heavy load, strict latency, long context | `serving.mode: PrefillDecode` with two phase engines |
 
 ## Examples
