@@ -98,18 +98,6 @@ spec:
 
 Endpoints with different path layouts coexist behind the one URL.
 
-The route matches the `/<namespace>/<service>/` prefix and forwards everything
-below it to the engine, so the endpoint speaks whatever API the engine serves.
-OpenAI compatibility comes from the engines, not the route. An engine that also exposes
-another protocol is reachable on the same URL: a vLLM replica that serves the
-Anthropic Messages API answers on `/v1/messages`, so a client that speaks it
-(including Claude Code, via `ANTHROPIC_BASE_URL`) talks to it directly. The
-engine's operational paths come through the same way: `/health` and the
-Prometheus `/metrics` are reachable on the service URL. The prefill/decode and
-caching routers parse OpenAI-format request bodies, so an endpoint that serves
-another shape uses a plain `ModelService` with even weighting rather than those
-routers.
-
 ## Sending a request
 
 The service's public address is on `status.address`, in the form
@@ -119,9 +107,9 @@ The service's public address is on `status.address`, in the form
 ADDRESS=$(kubectl get ms qwen -n ml-team -o jsonpath='{.status.address}')
 ```
 
-It's an OpenAI-compatible endpoint, so append the OpenAI path and send a request.
-The `model` field is the name the engine serves (its `--served-model-name`, or the
-model's Hugging Face id if you didn't set one):
+Append the OpenAI path and send a request. The `model` field is the name the
+engine serves (its `--served-model-name`, or the model's Hugging Face id if you
+didn't set one):
 
 ```bash
 curl "$ADDRESS/v1/chat/completions" \
@@ -131,6 +119,23 @@ curl "$ADDRESS/v1/chat/completions" \
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
+
+## Alternate APIs
+
+We call the endpoint OpenAI-compatible because the engines are, not because
+Modelplane imposes it. The route matches the `/<namespace>/<service>/` prefix and
+forwards everything below it to the engine untouched, so any API the engine serves
+is reachable on the same URL.
+
+Take a vLLM replica that also serves the Anthropic Messages API. It answers on
+`.../v1/messages`, so a client that speaks it (including Claude Code, via
+`ANTHROPIC_BASE_URL`) talks to it directly. The engine's operational paths come
+through the same way: `.../health` and the Prometheus `.../metrics` are reachable
+on the service URL.
+
+One boundary: the caching and prefill/decode routers parse OpenAI-format request
+bodies to do their work. An endpoint that serves another API shape uses a plain
+`ModelService` with even weighting rather than those routers.
 
 ## Example
 
