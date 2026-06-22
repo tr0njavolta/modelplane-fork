@@ -180,9 +180,20 @@ blockquote {
 // Many-column matrices (e.g. the provider support table): keep every cell on a
 // single line so the table keeps its natural width and the wrapper scrolls,
 // rather than wrapping each column into a tall, cramped block on small screens.
+// Hug the table's natural width rather than stretching to fill the measure.
+// Once the long repo slugs became icons the table no longer needed the full
+// width, and stretching dumped the slack into the Accelerators column, leaving
+// it oversized. fit-content keeps the box tight on desktop while max-width and
+// the wrapper's overflow-x still let it scroll on narrow screens.
+.table-responsive--matrix {
+  width: fit-content;
+  max-width: 100%;
+}
 .table-responsive--matrix .table {
-  // Single line per cell, and tighter vertical padding so rows holding pills and
-  // icons don't read as oversized. Middle-align keeps pills centred in the row.
+  // Content-sized columns (no stretch), single line per cell, and tighter
+  // vertical padding so rows holding pills and icons don't read as oversized.
+  // Middle-align keeps pills centred in the row.
+  width: auto;
   th, td { white-space: nowrap; padding-top: 6px; padding-bottom: 6px; vertical-align: middle; }
 }
 
