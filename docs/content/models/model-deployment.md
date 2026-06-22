@@ -41,61 +41,6 @@ engines:
   - role: Standalone        # one pod, one node
 ```
 
-## Asking for the GPUs you need
-
-You don't name a cluster or a GPU model. Instead each member's `nodeSelector`
-lists the hardware its pods need, and Modelplane finds a node pool that has it.
-The platform team publishes node pools as `InferenceClass` resources, each
-describing the devices its nodes carry. Your request is matched against them.
-
-A request names a device (`gpu`), how many of it each pod needs (`count`), and
-one or more `selectors` the device must match:
-
-```yaml {nocopy=true}
-nodeSelector:
-  devices:
-  - name: gpu
-    count: 1                # one GPU per pod
-    selectors:
-    - cel: |
-        device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("40Gi")) >= 0
-```
-
-Each selector is a single line of CEL, a small expression language, that returns
-true or false for one device. The part in brackets, `"gpu.nvidia.com"`, is the
-GPU vendor's driver. The fields after it, like `memory` or `architecture`, are
-what the platform team published for that device. You're saying "match a GPU
-whose memory is at least 40Gi."
-
-A few things you can match on:
-
-```yaml {nocopy=true}
-selectors:
-# At least 40Gi of GPU memory. quantity() parses Kubernetes quantities like
-# "40Gi" so they compare numerically; >= 0 means "left is at least right".
-- cel: device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("40Gi")) >= 0
-# A specific GPU architecture.
-- cel: device.attributes["gpu.nvidia.com"].architecture == "Hopper"
-# A minimum CUDA compute capability. semver() compares version strings.
-- cel: device.attributes["gpu.nvidia.com"].cudaComputeCapability.compareTo(semver("9.0.0")) >= 0
-```
-
-A device has to match every selector in the request. Give two selectors to mean
-"Hopper, with at least 80Gi."
-
-To see what's available to match against, list the classes the platform team has
-published and look at the devices each one declares:
-
-```bash
-kubectl get inferenceclass
-kubectl describe inferenceclass gke-l4-1x-g2
-```
-
-The `describe` output shows each device's driver, attributes (like
-`architecture`), and capacity (like `memory`), which are exactly the keys your
-selectors read. If a selector asks for something no published class offers, the
-deployment won't schedule.
-
 ## Multi-node
 
 When a model is too large for one node's GPUs, make the engine a gang: a `Leader`
@@ -151,6 +96,106 @@ package, so disaggregated engines crash at startup with `NIXL is not available`
 on an image that lacks it. Recent vanilla `vllm/vllm-openai` images include NIXL,
 so pin a current tag rather than an old one. The engine image is yours to choose,
 so this is a prerequisite Modelplane does not bundle for you.
+
+## Requesting GPUs
+
+You don't name a cluster or a GPU model. Instead each member's `nodeSelector`
+lists the hardware its pods need, and Modelplane finds a node pool that has it.
+The platform team publishes node pools as `InferenceClass` resources, each
+describing the devices its nodes carry. Your request is matched against them.
+
+A request names a device (`gpu`), how many of it each pod needs (`count`), and
+one or more `selectors` the device must match:
+
+```yaml {nocopy=true}
+nodeSelector:
+  devices:
+  - name: gpu
+    count: 1                # one GPU per pod
+    selectors:
+    - cel: |
+        device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("40Gi")) >= 0
+```
+
+Each selector is a single line of CEL, a small expression language, that returns
+true or false for one device. The part in brackets, `"gpu.nvidia.com"`, is the
+GPU vendor's driver. The fields after it, like `memory` or `architecture`, are
+what the platform team published for that device. This one says "match a GPU
+whose memory is at least 40Gi." A device has to match every selector in the
+request. Give two selectors to mean "Hopper, with at least 80Gi."
+
+### Requesting more than one device
+
+`devices` is a list, so a member can ask for distinct kinds of hardware at once,
+each its own entry with its own `count` and `selectors`. A node pool matches the
+member only when it satisfies every entry. This is how you ask for both a GPU and
+a fast NIC on the same node:
+
+```yaml {nocopy=true}
+nodeSelector:
+  devices:
+  - name: gpu
+    count: 8
+    selectors:
+    - cel: device.attributes["gpu.nvidia.com"].architecture == "Hopper"
+  - name: nic
+    count: 1
+    selectors:
+    - cel: device.attributes["nic.nvidia.com"].linkType == "infiniband"
+```
+
+### What you can match on
+
+Each selector is evaluated against one device and must return a boolean. The
+device exposes three things:
+
+- `device.driver`: the device's driver, a string.
+- `device.attributes["<driver>"].<name>`: a typed attribute (string, bool, int,
+  or version), such as `architecture` or `cudaComputeCapability`.
+- `device.capacity["<driver>"].<name>`: a capacity quantity, such as `memory`.
+
+Two helpers build comparable values: `quantity()` parses Kubernetes quantities
+like `"40Gi"`, and `semver()` parses versions like `"9.0.0"`. Both support
+`compareTo` (which orders two values), `isGreaterThan`, and `isLessThan`. Combine
+selectors with the usual CEL operators (`==`, `!=`, `>=`, `&&`, `||`).
+
+```yaml {nocopy=true}
+selectors:
+# Capacity: at least 40Gi of GPU memory. >= 0 reads as "left is at least right".
+- cel: device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("40Gi")) >= 0
+# Attribute equality: a specific architecture.
+- cel: device.attributes["gpu.nvidia.com"].architecture == "Hopper"
+# Version attribute: a minimum CUDA compute capability.
+- cel: device.attributes["gpu.nvidia.com"].cudaComputeCapability.isGreaterThan(semver("8.9.0"))
+# Driver: match any device from a given driver.
+- cel: device.driver == "gpu.nvidia.com"
+# Presence: only match a device that publishes a given domain.
+- cel: '"gpu.nvidia.com" in device.attributes'
+# Two conditions in one selector.
+- cel: |
+    device.attributes["gpu.nvidia.com"].architecture == "Hopper" &&
+    device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("80Gi")) >= 0
+```
+
+This is the Kubernetes DRA device selector expression surface. The
+Kubernetes-specific CEL extension libraries (such as regular expressions and IP
+address helpers) aren't available. Selectors in practice are attribute and
+capacity comparisons like those above.
+
+### Seeing what's available
+
+To see what you can match against, list the classes the platform team has
+published and look at the devices each one declares:
+
+```bash
+kubectl get inferenceclass
+kubectl describe inferenceclass gke-l4-1x-g2
+```
+
+The `describe` output shows each device's driver, attributes (like
+`architecture`), and capacity (like `memory`), which are exactly the keys your
+selectors read. If a selector asks for something no published class offers, the
+deployment won't schedule.
 
 ## Sizing a deployment
 
