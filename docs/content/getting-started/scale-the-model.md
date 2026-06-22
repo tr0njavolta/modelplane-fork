@@ -67,17 +67,16 @@ and losing one region keeps the other serving. Send the same request as before:
 
 ```bash
 ADDRESS=$(kubectl get ms qwen -n ml-team -o jsonpath='{.status.address}')
+```
 
+```bash
 kubectl run -i --rm curl-test \
   --image=curlimages/curl \
   --restart=Never \
-  -- curl -s http://$ADDRESS/ml-team/qwen/v1/chat/completions \
+  --env="ADDRESS=$ADDRESS" \
+  -- sh -c 'curl -v "$ADDRESS/v1/chat/completions" \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "Qwen/Qwen2.5-0.5B-Instruct",
-    "messages": [{"role": "user", "content": "What is Crossplane in one sentence?"}],
-    "max_tokens": 100
-  }'
+  -d "{\"model\":\"Qwen/Qwen2.5-0.5B-Instruct\",\"messages\":[{\"role\":\"user\",\"content\":\"What is Kubernetes in one sentence?\"}],\"max_tokens\":100}"'
 ```
 
 ## That's the tour

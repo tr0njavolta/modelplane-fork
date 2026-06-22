@@ -59,23 +59,30 @@
         flashCopied(btn);
       }).catch(function () {});
     }
-    // Read a code-card body as text. Editable placeholders ($@…$@ rendered by
-    // the editCode shortcode) show their default through a CSS ::before, which
-    // isn't in innerText. So for an empty field, fill in its data-default for the
-    // read and restore it after — synchronously, so the page never flickers — and
-    // a field the user has typed into copies as typed. With no editable fields
-    // this is just body.innerText.
+    // Read a code-card body as text. Uses code.textContent rather than
+    // body.innerText: the <pre> has display:flex, and Chrome's innerText
+    // collapses newlines to spaces inside flex containers, garbling multiline
+    // commands. textContent returns the raw characters directly from the <code>
+    // element, unaffected by layout.
+    //
+    // Editable placeholders ($@…$@ rendered by the editCode shortcode) show
+    // their default through a CSS ::before, which isn't in textContent. So for
+    // an empty field, fill in its data-default before reading and restore after
+    // — synchronously, so the page never flickers — and a field the user has
+    // typed into copies as typed.
     function codeCardText(body) {
       var fields = body.querySelectorAll('.editable');
-      if (!fields.length) return body.innerText;
       var filled = [];
-      fields.forEach(function (span) {
-        if (!span.textContent) {
-          span.textContent = span.getAttribute('data-default') || '';
-          filled.push(span);
-        }
-      });
-      var text = body.innerText;
+      if (fields.length) {
+        fields.forEach(function (span) {
+          if (!span.textContent) {
+            span.textContent = span.getAttribute('data-default') || '';
+            filled.push(span);
+          }
+        });
+      }
+      var code = body.querySelector('code');
+      var text = code ? code.textContent : body.innerText;
       filled.forEach(function (span) { span.textContent = ''; });
       return text;
     }
