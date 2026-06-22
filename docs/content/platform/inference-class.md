@@ -49,9 +49,10 @@ Each device sets a `claim` discriminator:
 
 The `driver`, attribute keys, and capacity keys a class declares are a contract
 with the ML team: a `ModelDeployment`'s `nodeSelector` matches a pool only if the
-class publishes the attributes and capacity it asks for. For GPUs, these keys
-should mirror what the DRA driver reports, so the same selector that places a
-deployment on the pool also binds the right device.
+class publishes the attributes and capacity it asks for. ML teams write those
+matches as [CEL](https://cel.dev/) selectors over the keys you publish here. For
+GPUs, these keys should mirror what the DRA driver reports, so the same selector
+that places a deployment on the pool also binds the right device.
 
 Publish a device's real usable capacity, not its nominal spec. An `80GB` H100
 reports about `81559Mi` of usable memory, so a class that declares `80Gi` would

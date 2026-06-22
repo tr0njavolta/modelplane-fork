@@ -118,8 +118,8 @@ nodeSelector:
         device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("40Gi")) >= 0
 ```
 
-Each selector is a single line of CEL, a small expression language, that returns
-true or false for one device. The part in brackets, `"gpu.nvidia.com"`, is the
+Each selector is a single line of [CEL](https://cel.dev/), a small expression
+language, that returns true or false for one device. The part in brackets, `"gpu.nvidia.com"`, is the
 GPU vendor's driver. The fields after it, like `memory` or `architecture`, are
 what the platform team published for that device. This one says "match a GPU
 whose memory is at least 40Gi." A device has to match every selector in the
