@@ -12,12 +12,25 @@ across every replica, wherever it runs.
 
 A service selects what to route to by label. Behind the scenes, Modelplane
 creates one `ModelEndpoint`, a single reachable backend, for each replica of a
-deployment and labels it with the deployment's name. It creates an endpoint only
-once the replica is Ready, serving and reachable, and withdraws it if the replica
-later goes unhealthy. A service only ever routes to replicas that can actually
-answer, so a deployment that's still starting or scaling up has fewer endpoints
-behind its URL until those replicas come up. You don't create these; you point a
-service at them. In the common case that's one selector matching one deployment:
+deployment and labels it. It stamps three labels you can select on:
+
+- `modelplane.ai/deployment`: the deployment the replica belongs to.
+- `modelplane.ai/cluster`: the cluster the replica runs on.
+- `modelplane.ai/replica-index`: which replica on that cluster.
+
+Modelplane creates an endpoint only once its replica is Ready, serving and
+reachable, and withdraws it if the replica later goes unhealthy. A service only
+ever routes to replicas that can actually answer, so a deployment that's still
+starting or scaling up has fewer endpoints behind its URL until those replicas
+come up. You don't create endpoints yourself. You point a service at them.
+
+`spec.endpoints` is a list, and the entries combine: the service routes to every
+endpoint that any entry matches. The patterns below build on that.
+
+## Route to a whole deployment
+
+The common case: one selector matching a deployment's name reaches every replica,
+wherever in the fleet they run.
 
 ```yaml {nocopy=true}
 spec:
@@ -27,15 +40,52 @@ spec:
         modelplane.ai/deployment: qwen3-8b   # every replica of this deployment
 ```
 
-`spec.endpoints` is a list, and the entries combine: the service routes to every
-endpoint any entry matches. That's how one service can front several deployments
-at once, or mix a deployment's replicas with a manually created
+## Route to part of a deployment
+
+Add a second label to narrow within a deployment. A selector matches an endpoint
+only when all its labels match, so pairing the deployment with a cluster routes to
+just that cluster's replicas. This is how you take a cluster out of service
+without redeploying: point the service at the clusters you want and leave one out,
+and traffic drains to the rest.
+
+```yaml {nocopy=true}
+spec:
+  endpoints:
+  # Only the replicas on prod-us-east, e.g. while draining another cluster.
+  - selector:
+      matchLabels:
+        modelplane.ai/deployment: qwen3-8b
+        modelplane.ai/cluster: prod-us-east
+```
+
+## Route across several deployments
+
+Give more than one entry to front several deployments behind the same URL. Each
+entry contributes its matched endpoints, and traffic spreads evenly across every
+one.
+
+```yaml {nocopy=true}
+spec:
+  endpoints:
+  - selector:
+      matchLabels:
+        modelplane.ai/deployment: qwen3-8b
+  - selector:
+      matchLabels:
+        modelplane.ai/deployment: qwen3-8b-v2
+```
+
+This is the shape an A/B test or a canary rollout would take, but note traffic is
+split **evenly** across the matched endpoints today. Weighting one entry over
+another, to send, say, 5% of traffic to a canary, is tracked in
+[#90](https://github.com/modelplaneai/modelplane/issues/90). Until then the split
+follows endpoint counts, not a ratio you set.
+
+You can also mix a deployment's replicas with a manually created
 [ModelEndpoint]({{< ref "model-endpoint.md" >}}) pointing at an external provider.
 Endpoints with different path layouts coexist behind the one URL.
 
-Traffic is split evenly across the matched endpoints. Weighting one entry over
-another, for canary or A/B rollouts, is tracked in
-[#90](https://github.com/modelplaneai/modelplane/issues/90).
+## Reading the address
 
 The route matches the `/<namespace>/<service>/` prefix and forwards everything
 below it to the engine, so the endpoint speaks whatever API the engine serves.
