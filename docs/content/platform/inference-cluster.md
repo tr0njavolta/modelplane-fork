@@ -20,9 +20,8 @@ Each cluster has:
 - **Labels** for organizational metadata: tier, region, provider. These are the
   matching surface for `ModelDeployment.clusterSelector`.
 
-Modelplane installs an inference stack (LeaderWorkerSet, llm-d, Envoy
-Gateway, etc.) on every cluster it manages. This includes existing clusters,
-which Modelplane assumes are solely for its use.
+Modelplane installs the serving stack it needs on every cluster it manages,
+including existing clusters, which it assumes are solely for its use.
 
 ## Ownership and requirements
 
