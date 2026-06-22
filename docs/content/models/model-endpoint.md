@@ -36,12 +36,26 @@ spec:
   rewritePath: /v1/
 ```
 
-Then point a `ModelService` at it: a service selecting
-`modelplane.ai/external-provider: together` routes to the provider. To put it
-behind the same URL as a deployment's own replicas, give the service two
-endpoint entries, one selecting the deployment and one selecting this label. See
-[Expose a Model]({{< ref "model-service.md" >}}) for selecting and combining
-endpoints.
+Then point a [`ModelService`]({{< ref "model-service.md" >}}) at it. Selecting
+`modelplane.ai/external-provider: together` routes to the provider; adding a
+second entry for a deployment fronts both behind one URL, so traffic can spill
+over to the provider alongside your own replicas:
+
+```yaml {nocopy=true}
+apiVersion: modelplane.ai/v1alpha1
+kind: ModelService
+metadata:
+  name: kimi-k2
+  namespace: ml-team
+spec:
+  endpoints:
+  - selector:
+      matchLabels:
+        modelplane.ai/deployment: kimi-k2          # your own replicas
+  - selector:
+      matchLabels:
+        modelplane.ai/external-provider: together  # the endpoint above
+```
 
 The provider must speak the OpenAI API, since that's the contract a
 `ModelService` exposes. Anything OpenAI-compatible works; `url` and `rewritePath`
