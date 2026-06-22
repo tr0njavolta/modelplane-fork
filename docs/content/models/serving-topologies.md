@@ -13,15 +13,16 @@ write carry parallelism, quantization, and KV transfer; Modelplane never injects
 them.
 
 A [`ModelDeployment`]({{< ref "model-deployment.md" >}}) sets its topology through
-three choices:
+two choices:
 
 - **One pod or a gang**: whether an engine is a single `Standalone` pod or a
   `Leader` with one or more `Worker` pods coordinating across nodes.
 - **Unified or disaggregated**: whether `spec.serving.mode` keeps prefill and
   decode together (`Unified`) or splits them across two engines
   (`PrefillDecode`).
-- **How many replicas**: `spec.replicas` runs whole copies of the topology;
-  scaling adds or removes complete instances, never pods within one.
+
+How many of each to run, replicas and copies, is covered in
+[Sizing a deployment](#sizing-a-deployment).
 
 ## Single-node
 
@@ -84,6 +85,27 @@ and long context. For small models or low traffic, the KV-transfer overhead
 outweighs the benefit, so unified serving is the default. It requires an engine
 image that includes the **NIXL** KV-transfer runtime; see
 [Deploy a Model]({{< ref "model-deployment.md" >}}) for the prerequisite detail.
+
+## Sizing a deployment
+
+Three independent numbers control how many pods a deployment runs and where they
+land:
+
+- **`spec.replicas`** stamps out whole copies of the entire topology. Each
+  replica is a complete serving instance, and replicas usually land on different
+  clusters. This is the scaling axis: Modelplane scales a model by adding and
+  removing whole replicas (see [Scaling]({{< ref "model-deployment.md#scaling" >}})).
+- **`engines[].copies`** runs several identical copies of one engine within a
+  replica, on the same cluster. It's a fixed number, sized once, never
+  autoscaled. Use it to run many copies of a small engine without one replica
+  each, or to set the prefill-to-decode ratio in disaggregated serving.
+- **`worker.nodes`** sets how many nodes one gang spans: a `Leader` plus that
+  many `Worker` pods. It's how big a single multi-node engine is.
+
+The scheduler reasons about these together. A member costs `pods × copies`
+nodes, where pods is 1 for a `Standalone` or `Leader` and `worker.nodes` for a
+`Worker`. See the [fleet scheduler]({{< ref "/overview/how-it-works.md#fleet-scheduler" >}})
+for how that cost drives placement.
 
 ## Choosing a topology
 

@@ -10,6 +10,18 @@ OpenAI-compatible endpoint. It selects endpoints by label and composes a Gateway
 API `HTTPRoute` that load-balances across them.
 
 
+Each entry in `spec.endpoints` selects `ModelEndpoints` by label. Modelplane
+composes one endpoint per replica and labels it `modelplane.ai/deployment:
+<deployment-name>`, so selecting that label reaches every replica of a
+deployment, wherever they run. Entries combine: the service routes to every
+endpoint any entry matches, so one service can front several deployments, or mix
+self-hosted replicas with a manually created
+[ModelEndpoint]({{< ref "model-endpoint.md" >}}) pointing at an external provider.
+
+Traffic is split evenly across the matched endpoints. Weighting one entry over
+another, for canary or A/B rollouts, is tracked in
+[#90](https://github.com/modelplaneai/modelplane/issues/90).
+
 Each backendRef in the HTTPRoute carries its own `URLRewrite` filter derived from
 the endpoint's `spec.rewritePath`, so endpoints from different deployments or
 external providers with different path layouts coexist correctly.
@@ -26,7 +38,8 @@ caching routers parse OpenAI-format request bodies, so an endpoint that serves
 another shape uses a plain `ModelService` with even weighting rather than those
 routers.
 
-Read the service's public address from `status.address`:
+Read the service's public address from `status.address`. It's the gateway
+address plus the service's path prefix (`http://<gateway>/<namespace>/<name>`):
 
 ```bash
 kubectl get ms qwen -n ml-team -o jsonpath='{.status.address}'
