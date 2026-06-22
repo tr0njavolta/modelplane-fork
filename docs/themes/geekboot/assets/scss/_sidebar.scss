@@ -196,6 +196,11 @@
 
   @include media-breakpoint-up(lg) {
     flex: 1 1 auto;
+    // min-height: 0 lets this flex child shrink below its content height so it
+    // scrolls instead of overflowing the fixed-height container. Without it the
+    // default min-height: auto pins it to full content height and the nav gets
+    // cut off (notably in Safari).
+    min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
   }
