@@ -40,28 +40,30 @@ native provisioning.
 | CoreWeave (CKS) | {{< accel nvidia >}} | Planned | ✓ | none yet |
 | Crusoe (CMK) | {{< accel nvidia >}} {{< accel amd >}} | Planned | ✓ | none yet |
 | DigitalOcean (DOKS) | {{< accel nvidia >}} {{< accel amd >}} | Planned | ✓ | {{< repolink "https://github.com/crossplane-contrib/provider-upjet-digitalocean" "provider-upjet-digitalocean" "community" >}} |
-| Fluidstack (Managed Kubernetes) | {{< accel nvidia >}} | Planned | ✓ | none yet |
+| Fluidstack | {{< accel nvidia >}} | Planned | ✓ | none yet |
 | Google Cloud (GKE) | {{< accel nvidia >}} {{< accel tpu >}} | ✓ | ✓ | {{< repolink "https://github.com/crossplane-contrib/provider-upjet-gcp" "provider-upjet-gcp" "community" >}} |
 | Huawei Cloud (CCE) | {{< accel nvidia >}} {{< accel ascend >}} | Planned | ✓ | {{< repolink "https://github.com/huaweicloud/provider-huaweicloud" "provider-huaweicloud" "alpha" >}} |
 | IBM Cloud (IKS) | {{< accel nvidia >}} | Planned | ✓ | none active |
-| Lambda (Managed Kubernetes) | {{< accel nvidia >}} | Planned | ✓ | none yet |
+| Lambda | {{< accel nvidia >}} | Planned | ✓ | none yet |
 | Linode / Akamai (LKE) | {{< accel nvidia >}} | Planned | ✓ | {{< repolink "https://github.com/linode/provider-linode" "provider-linode" "official" >}} |
 | Microsoft Azure (AKS) | {{< accel nvidia >}} | Planned | ✓ | {{< repolink "https://github.com/crossplane-contrib/provider-upjet-azure" "provider-upjet-azure" "community" >}} |
-| Nebius (Managed Kubernetes) | {{< accel nvidia >}} | Planned | ✓ | none yet |
+| Nebius | {{< accel nvidia >}} | Planned | ✓ | none yet |
 | Oracle Cloud (OKE) | {{< accel nvidia >}} {{< accel amd >}} | Planned | ✓ | {{< repolink "https://github.com/oracle/crossplane-provider-oci" "crossplane-provider-oci" "official" >}} |
-| OVHcloud (Managed Kubernetes) | {{< accel nvidia >}} | Planned | ✓ | {{< repolink "https://github.com/edixos/provider-ovh" "edixos/provider-ovh" "community" >}} |
+| OVHcloud | {{< accel nvidia >}} | Planned | ✓ | {{< repolink "https://github.com/edixos/provider-ovh" "edixos/provider-ovh" "community" >}} |
 | Scaleway (Kapsule) | {{< accel nvidia >}} | Planned | ✓ | {{< repolink "https://github.com/scaleway/crossplane-provider-scaleway" "crossplane-provider-scaleway" "official" >}} |
 | Tencent Cloud (TKE) | {{< accel nvidia >}} | Planned | ✓ | {{< repolink "https://github.com/crossplane-contrib/provider-tencentcloud" "provider-tencentcloud" "community" >}} |
-| Voltage Park (Managed Kubernetes) | {{< accel nvidia >}} | Planned | ✓ | none yet |
+| Voltage Park | {{< accel nvidia >}} | Planned | ✓ | none yet |
 | Vultr (VKE) | {{< accel nvidia >}} {{< accel amd >}} | Planned | ✓ | {{< repolink "https://github.com/vultr/crossplane-provider-vultr" "crossplane-provider-vultr" "official" >}} |
 {{< /table >}}
 
 {{< hint "note" >}}
-**On-premises and bare metal.** Running NVIDIA DGX systems (BasePOD or SuperPOD)
-or any bare-metal cluster on your own hardware works the same way: stand up
-Kubernetes with NVIDIA Base Command Manager, Run:ai, or your own tooling, then
-register it with `source: Existing`. Modelplane installs its serving stack on the
-cluster you bring; it doesn't provision the hardware.
+**On-premises and bare metal.** Bring an on-prem cluster the same way as any
+other: stand up Kubernetes on your own hardware (for example NVIDIA DGX BasePOD
+or SuperPOD) with NVIDIA Base Command Manager, Run:ai, or your own tooling, then
+register it with `source: Existing`. Provisioning it for you is on the roadmap
+too: Modelplane can drive NVIDIA Base Command Manager or other bare-metal
+Kubernetes provisioners through Crossplane, the same pattern it uses in the
+cloud.
 {{< /hint >}}
 
 Native provisioning expands as more Crossplane providers ship; until then, the

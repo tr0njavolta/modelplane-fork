@@ -191,10 +191,10 @@ blockquote {
 }
 .table-responsive--matrix .table {
   // Content-sized columns (no stretch), single line per cell, and tighter
-  // vertical padding so rows holding pills and icons don't read as oversized.
-  // Middle-align keeps pills centred in the row.
+  // padding so the five columns of pills and icons fit the measure without
+  // scrolling. Middle-align keeps pills centred in the row.
   width: auto;
-  th, td { white-space: nowrap; padding-top: 6px; padding-bottom: 6px; vertical-align: middle; }
+  th, td { white-space: nowrap; padding: 6px 12px; vertical-align: middle; }
 }
 
 // Header row: subtle surface + emphasis so columns read clearly.
