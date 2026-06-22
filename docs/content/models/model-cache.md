@@ -20,9 +20,8 @@ Each cache has:
 
 - A **source**: a required `source` enum naming the kind, with the matching
   source object set alongside it (setting `source: HuggingFace` selects
-  `spec.huggingFace`, which carries `repo` and `sizeGiB`). `HuggingFace` is
-  the only value today; future sources add an enum value and a sibling object
-  (`Dragonfly` for P2P distribution, `OCI` for NIM-style bundled artifacts).
+  `spec.huggingFace`, which carries `repo` and `sizeGiB`). `HuggingFace` is the
+  only source today.
 - An optional **clusterSelector** to scope replication. Omitting
   `spec.clusterSelector` stages the cache on every matched cluster; setting
   `matchLabels` restricts it to clusters carrying those labels. A
@@ -37,6 +36,30 @@ should reference this path (`--model=/mnt/models` for vLLM).
 `ModelCache` is recommended for multi-node deployments and optional for
 single-node cold-start optimization.
 
+## Loading from the cache efficiently
+
+A cache only pays off if the engine reads from it quickly. With its default
+loader an engine can read a large model from shared storage slowly enough that
+the cache makes cold starts *worse* than fetching the model directly, since you
+pay to hydrate the cache and then wait on a slow read. Choose a fast loader with
+your engine flags.
+
+For vLLM on EKS, `--load-format=runai_streamer` reads from the EFS-backed cache
+dramatically faster than the default loader (minutes rather than tens of
+minutes for a large model), tuned further with `--model-loader-extra-config`:
+
+```yaml {nocopy=true}
+args:
+- --model=/mnt/models
+- --load-format=runai_streamer
+- --model-loader-extra-config={"concurrency":16,"distributed":true}
+```
+
+The right loader and settings depend on the engine and the storage backend, so
+treat these as a starting point and measure your own cold-start time. The
+[Kimi-K2 example]({{< ref "/examples/kimi-k2" >}}) uses this configuration end to
+end.
+
 ## Storage prerequisites
 
 <!-- vale Google.Acronyms = NO -->
@@ -45,9 +68,7 @@ What the platform admin must set up depends on the cloud:
 <!-- vale Google.Acronyms = YES -->
 
 - **GKE:** auto-provisioned on Filestore. Nothing for the admin to do.
-- **EKS:** auto-provisioned on EFS. Nothing for the admin to do. EFS is elastic,
-  so the cache's `sizeGiB` is informational on EKS: the PVC API still requires a
-  size, but EFS ignores it.
+- **EKS:** auto-provisioned on EFS. Nothing for the admin to do.
 - **Existing:** bring-your-own. The admin creates a `ReadWriteMany` StorageClass
   on the cluster and names it in `cluster.existing.cache.storageClassName`. See
   [Custom cache backends](#custom-cache-backends).
@@ -60,14 +81,9 @@ Modelplane provisions RWX storage on `GKE` (Filestore Enterprise) and `EKS`
 brings the storage: create a `ReadWriteMany` StorageClass on the cluster (any
 backend with automatic PVC provisioning, like WekaIO, NetApp Trident, `FSx` for
 NetApp, and similar) and name it in `cluster.existing.cache.storageClassName` on
-the [InferenceCluster]({{< ref "platform/inference-cluster.md" >}}). Any name
-works; `modelplane-rwx` is just a convention. The ML team's `ModelCache` and
-`ModelDeployment` specs are unchanged regardless.
+the [InferenceCluster]({{< ref "platform/inference-cluster.md" >}}). The ML
+team's `ModelCache` and `ModelDeployment` specs are unchanged regardless.
 <!-- vale Google.Acronyms = YES -->
-
-Backends that don't fit automatic PVC provisioning (Dragonfly's P2P distribution
-to per-node local caches) will be added natively as new types under
-`ModelCache.spec.source` rather than through this override.
 
 ## Example
 
