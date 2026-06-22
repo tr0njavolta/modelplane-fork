@@ -167,9 +167,34 @@ blockquote {
   margin-bottom: 1.1rem;
   border: 1px solid var(--table-divider, var(--dropdown-border-color));
   border-radius: 8px;
-  overflow: hidden;
+  // Scroll wide tables horizontally instead of clipping them (overflow: hidden
+  // would defeat the .table-responsive contract and crush columns on phones).
+  // overflow-y stays hidden so the rounded corners still clip the table edges.
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
   background-color: var(--body-background) !important;
   color: var(--body-font-color);
+}
+
+// Many-column matrices (e.g. the provider support table): keep every cell on a
+// single line so the table keeps its natural width and the wrapper scrolls,
+// rather than wrapping each column into a tall, cramped block on small screens.
+// Hug the table's natural width rather than stretching to fill the measure.
+// Once the long repo slugs became icons the table no longer needed the full
+// width, and stretching dumped the slack into the Accelerators column, leaving
+// it oversized. fit-content keeps the box tight on desktop while max-width and
+// the wrapper's overflow-x still let it scroll on narrow screens.
+.table-responsive--matrix {
+  width: fit-content;
+  max-width: 100%;
+}
+.table-responsive--matrix .table {
+  // Content-sized columns (no stretch), single line per cell, and tighter
+  // padding so the five columns of pills and icons fit the measure without
+  // scrolling. Middle-align keeps pills centred in the row.
+  width: auto;
+  th, td { white-space: nowrap; padding: 6px 12px; vertical-align: middle; }
 }
 
 // Header row: subtle surface + emphasis so columns read clearly.

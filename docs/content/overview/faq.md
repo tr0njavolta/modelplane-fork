@@ -47,6 +47,19 @@ Modelplane supports any model, including open weights, custom models, and just a
 anything that can be downloaded from Hugging Face, NVIDIA NGC, and other registries.
 {{< /qa >}}
 
+{{< qa "Does Modelplane support NVIDIA?" >}}
+Yes, across the stack. NVIDIA is the most widely available accelerator on the
+clouds Modelplane runs on and the primary target today: Modelplane binds NVIDIA
+GPUs to pods through Dynamic Resource Allocation (DRA), matching devices by
+attributes such as GPU memory and architecture with CEL selectors.
+
+The software stack rides on the engine-agnostic API. NVIDIA NIM microservices and
+the TensorRT-LLM engine run as engine containers like any other, Modelplane stages
+weights and NIM-style artifacts from NVIDIA NGC alongside Hugging Face and other
+registries, and the inference stack it installs includes NVIDIA Dynamo and llm-d,
+with deeper Dynamo integration on the roadmap.
+{{< /qa >}}
+
 {{< qa "Which engines and accelerators are supported?" >}}
 The API is engine-agnostic: any engine that runs as a container works, and its
 flags are yours to write. Multiple accelerators are supported as long as they
@@ -57,7 +70,9 @@ extend to other accelerators and fabrics.
 {{< qa "Which clouds or neoclouds does Modelplane support?" >}}
 Today Modelplane provisions clusters on a few hyperscalers and neoclouds, and supports
 bringing your own Kubernetes cluster anywhere. More provisioners are on the roadmap; the
-bring-your-own path means you can run on any Kubernetes now.
+bring-your-own path means you can run on any Kubernetes now. See
+[Supported Providers]({{< ref "platform/providers.md" >}}) for the full matrix of clouds,
+neoclouds, and their Crossplane providers.
 {{< /qa >}}
 
 {{< qa "Can I bring my own cluster, or run on a neocloud or on-premise?" >}}
