@@ -84,8 +84,6 @@ You can also mix a deployment's replicas with a manually created
 [ModelEndpoint]({{< ref "model-endpoint.md" >}}) pointing at an external provider.
 Endpoints with different path layouts coexist behind the one URL.
 
-## Reading the address
-
 The route matches the `/<namespace>/<service>/` prefix and forwards everything
 below it to the engine, so the endpoint speaks whatever API the engine serves.
 OpenAI compatibility comes from the engines, not the route. An engine that also exposes
@@ -98,10 +96,26 @@ caching routers parse OpenAI-format request bodies, so an endpoint that serves
 another shape uses a plain `ModelService` with even weighting rather than those
 routers.
 
-Read the service's public address from `status.address`:
+## Sending a request
+
+The service's public address is on `status.address`, in the form
+`http://<gateway>/<namespace>/<service-name>`:
 
 ```bash
-kubectl get ms qwen -n ml-team -o jsonpath='{.status.address}'
+ADDRESS=$(kubectl get ms qwen -n ml-team -o jsonpath='{.status.address}')
+```
+
+It's an OpenAI-compatible endpoint, so append the OpenAI path and send a request.
+The `model` field is the name the engine serves (its `--served-model-name`, or the
+model's Hugging Face id if you didn't set one):
+
+```bash
+curl "$ADDRESS/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
 ```
 
 ## Example
