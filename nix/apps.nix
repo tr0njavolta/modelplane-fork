@@ -21,10 +21,18 @@
           pkgs.shellcheck
           pkgs.shfmt
           pkgs.gnupatch
+          pkgs.addlicense
           pkgs.unstable.uv
         ];
         inheritPath = false;
         text = ''
+          echo "Adding missing license headers..."
+          addlicense -l apache -c "The Modelplane Authors." \
+            -ignore '**/*.toml' \
+            -ignore '**/*.yaml' \
+            -ignore '**/*.yml' \
+            functions/ docs/utils/validate/ nix.sh docs/vercel-build.sh
+
           echo "Formatting and linting Nix..."
           statix fix .
           deadnix --edit flake.nix nix/*.nix
