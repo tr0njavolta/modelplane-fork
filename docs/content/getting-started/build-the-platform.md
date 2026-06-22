@@ -137,7 +137,7 @@ kubectl wait --for=condition=Ready ic/starter --timeout=20m
 {{< /tabs >}}
 
 {{< hint "note" >}}
-Crossplane is reconciling the infrastructure against the source of truth, the
+Modelplane is reconciling the infrastructure against the source of truth, the
 manifest you just applied.
 
 While you wait, Modelplane is creating the EKS or GKE cluster and its GPU node
@@ -147,8 +147,7 @@ management, and the storage class for model weights. This is the same reconcilia
 infrastructure, extended to the inference layer.
 {{< /hint >}}
 
-Once the cluster is `Ready` the scheduler can see it and the ML team can deploy
-a model on it.
+Once the cluster is `Ready` the ML team can deploy a model on it.
 
 {{< hint "note" >}}
 A cloud GPU cluster costs money while it runs. To stop the tour and resume

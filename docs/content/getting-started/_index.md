@@ -13,13 +13,11 @@ model requirements change, the platform team gets a request.
 
 With Modelplane, the platform team publishes hardware without knowing what
 models will run on it. The ML team declares what a model needs without knowing
-what clusters exist. The scheduler resolves it and keeps it current as
+what clusters exist. The control plane resolves it and keeps it current as
 both sides change.
 
 In this tour, you'll switch between provisioning infrastructure and declaring a
-model to see how they interact. By the end you'll have a three cluster fleet
-across two regions and one OpenAI-compatible endpoint routing to a model served
-across both.
+model to see how they interact. By the end you'll have a GPU fleet across two regions and one OpenAI-compatible endpoint routing to a model served across both.
 
 This is not a production setup and takes around 45 minutes to run.
 
