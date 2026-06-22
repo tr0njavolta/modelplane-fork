@@ -11,10 +11,10 @@
 # groups - each referencing an InferenceClass that describes the
 # hardware shape and how to provision it - need to be declared.
 #
-# Modelplane does not currently provision EFS for RWX ModelCache
-# storage on EKS. The admin should create an EFS file system and the
-# EFS CSI StorageClass on the cluster, then set cache.storageClassName
-# to its name (default 'modelplane-rwx-efs').
+# Modelplane provisions EFS RWX storage for ModelCache on EKS: an
+# Elastic-throughput file system, mount targets, the EFS CSI driver, and
+# a 'modelplane-rwx-efs' StorageClass pinned to it. The admin does
+# nothing, and provisioned EKS clusters take no StorageClass override.
 #
 # Delete this InferenceCluster with foreground cascading deletion for a
 # clean teardown:

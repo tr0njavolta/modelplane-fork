@@ -50,32 +50,26 @@ What the platform admin must set up depends on the cloud:
 
 - **GKE:** auto-provisioned. Modelplane composes the `modelplane-rwx` Filestore
   StorageClass and enables `file.googleapis.com`. Nothing for the admin to do.
-- **EKS:** bring-your-own for v0.1. On the workload cluster the admin must
-  install the `aws-efs-csi-driver` EKS add-on (with an IRSA role bound to
-  `AmazonEFSCSIDriverPolicy`); create an EFS file system with a mount target in
-  each node subnet and a security group allowing inbound NFS (2049) from the node
-  security group; and create a StorageClass named `modelplane-rwx-efs` with
-  `provisioner: efs.csi.aws.com`, `provisioningMode: efs-ap`, and
-  `fileSystemId: <fs-id>`. Set `eks.cache.storageClassName` if the admin's class
-  has a different name. EFS is elastic, so the cache's `sizeGiB` is informational
-  on EKS. The PVC API still requires a size, but EFS ignores it.
-  Auto-provisioning EFS is tracked in
-  [#114](https://github.com/modelplaneai/modelplane/issues/114).
+- **EKS:** auto-provisioned. Modelplane composes an EFS file system with a mount
+  target in each node subnet, the EFS storage driver (its IAM role bound through
+  Pod Identity), and a `modelplane-rwx-efs` StorageClass pinned to the file
+  system. Nothing for the admin to do. EFS is elastic, so the cache's `sizeGiB`
+  is informational on EKS: the PVC API still requires a size, but EFS ignores it.
+- **Existing:** bring-your-own. The admin creates a `ReadWriteMany` StorageClass
+  on the cluster and names it in `cluster.existing.cache.storageClassName`. See
+  [Custom cache backends](#custom-cache-backends).
 
 ## Custom cache backends
 
 <!-- vale Google.Acronyms = NO -->
-Modelplane provisions Filestore Enterprise on `GKE` clusters and expects a
-StorageClass named `modelplane-rwx` on `Existing` clusters. When the default
-doesn't fit (a different cost profile, an RWX backend the org already runs,
-etc.). Platform teams point Modelplane at a different StorageClass via
-`cluster.<source>.cache.storageClassName` on the
-[InferenceCluster]({{< ref "platform/inference-cluster.md" >}}). On GKE the
-admin must first create the StorageClass on the workload cluster (any backend
-supporting ReadWriteMany dynamic provisioning like WekaIO, NetApp Trident, `FSx`
-for NetApp, and similar). On Existing clusters the field points at whatever name
-the admin chose. The ML team's `ModelCache` and `ModelDeployment` specs are
-unchanged regardless.
+Modelplane provisions RWX storage on `GKE` (Filestore Enterprise) and `EKS`
+(EFS) clusters, and those classes are fixed. On `Existing` clusters the admin
+brings the storage: create a `ReadWriteMany` StorageClass on the cluster (any
+backend supporting dynamic provisioning like WekaIO, NetApp Trident, `FSx` for
+NetApp, and similar) and name it in `cluster.existing.cache.storageClassName` on
+the [InferenceCluster]({{< ref "platform/inference-cluster.md" >}}). Any name
+works; `modelplane-rwx` is just a convention. The ML team's `ModelCache` and
+`ModelDeployment` specs are unchanged regardless.
 <!-- vale Google.Acronyms = YES -->
 
 Backends that don't fit dynamic-PVC provisioning (Dragonfly's P2P distribution
