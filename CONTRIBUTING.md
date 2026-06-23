@@ -424,7 +424,7 @@ release from it and run the workflow against the new tag.
 ### Versioning the docs
 
 Docs are versioned at the minor level. Each minor release is served from its own
-subdomain (`v0.1.docs.modelplane.ai`, `v0.2.docs.modelplane.ai`, …) using a single
+subdomain (`v0-1.docs.modelplane.ai`, `v0-2.docs.modelplane.ai`, …) using a single
 Vercel project with one branch domain per release. The `main` branch always serves
 the latest docs at `docs.modelplane.ai`. Patch releases push to the existing release
 branch; the versioned deployment rebuilds automatically with no changes to `main`
@@ -441,10 +441,10 @@ DNS record is needed per release.
 
 2. In the Vercel dashboard, open the `modelplane-docs` project and add a branch
    domain for the release:
-   - Go to **Settings → Domains**, add `v0.1.docs.modelplane.ai`, and assign it
+   - Go to **Settings → Domains**, add `v0-1.docs.modelplane.ai`, and assign it
      to the `release-0.1` branch.
    - Add a Production environment variable scoped to the `release-0.1` branch:
-     `HUGO_BASEURL` = `https://v0.1.docs.modelplane.ai/`.
+     `HUGO_BASEURL` = `https://v0-1.docs.modelplane.ai/`.
    - Trigger a redeployment of `release-0.1` and confirm the subdomain serves.
 
 3. On `main`, add an entry to `docs/data/versions.yaml`, newest first:
@@ -453,7 +453,7 @@ DNS record is needed per release.
      - version: "main"
        url: ""
      - version: "0.1"
-       url: "https://v0.1.docs.modelplane.ai"
+       url: "https://v0-1.docs.modelplane.ai"
    ```
 
 4. Merge the `versions.yaml` change to `main`. The version dropdown on all release
