@@ -114,15 +114,13 @@ replica on a cluster and pool that fits and has free capacity.
 
 {{< qa "Can I serve across regions and clusters behind one endpoint?" >}}
 Yes, that's the point. A `ModelService` exposes one OpenAI-compatible endpoint and
-load-balances across every replica of a deployment, wherever they run, with
-weights for canary and A/B rollouts.
+load-balances across every replica of a deployment, wherever they run.
 {{< /qa >}}
 
-{{< qa "Can I fall back to a managed provider?" >}}
-Yes, a `ModelService` can send a slice of traffic to a manually created
-`ModelEndpoint` that points at an external SaaS endpoint (like Together or
-Baseten), alongside your self-hosted replicas. Use it for overflow or break-glass
-routing.
+{{< qa "Can I route to a managed provider?" >}}
+Yes, a `ModelService` can include a manually created `ModelEndpoint` that points at
+an external SaaS endpoint like Together or Baseten alongside your self-hosted
+replicas, and load-balances across all of them.
 {{< /qa >}}
 
 {{< qa "How do large or multi-node models work?" >}}
@@ -150,7 +148,7 @@ KEDA work without anything extra. There's no per-pod autoscaling inside a cluste
 A `ModelCache` stages weights once per cluster on shared (ReadWriteMany) storage,
 and every pod reads them locally. Pods don't re-download on each start, and
 concurrent starts don't race. It hydrates from Hugging Face today, is optional for
-single-node deployments, and is required for multi-node ones.
+single-node deployments, and is recommended for multi-node ones.
 {{< /qa >}}
 
 ## The project

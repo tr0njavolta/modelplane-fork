@@ -5,6 +5,12 @@
 # Entries are case-sensitive regular expressions.
 
 # Modelplane API types
+XR
+XRs
+[Cc]omposite
+[Cc]omposition
+required-resources
+provider-kubernetes
 InferenceClass
 InferenceCluster
 InferenceClusters
@@ -57,6 +63,9 @@ llm-d
 Crossplane
 Crossplane's
 CompositeResourceDefinition
+envtest
+finalizers
+requeues
 ProviderConfig
 ProviderConfigs
 CRD
@@ -289,6 +298,8 @@ conformant
 datastore
 hardcode
 UpperCamelCased?
+reimplementing
+reimplement
 
 # Compound and hyphenated terms
 add-on
@@ -299,7 +310,10 @@ base64-encoded
 bring-your-own
 built-in
 call-outs
+cache-aware
 cloud-native
+distributed-systems
+performance-sensitive
 cluster-scoped
 cluster-wide
 co-schedules
@@ -325,6 +339,7 @@ fleet-level
 fleet-managed
 free-form
 GKE-based
+hand-written
 hands-on
 high-churn
 how-to
@@ -414,6 +429,25 @@ hardcode
 hardcoding
 hardcodes
 [Bb]ootstrap
+
+# Scheduling and routing compound terms
+FQDN
+autoscaled
+[Cc]o-scheduling
+[Cc]ontrol-plane
+delete-plus-create
+[Dd]evice-level
+fabric-aware
+garbage-collects
+highest-index
+load-balanced
+overcommit
+per-pool
+per-cluster
+per-replica
+[Rr]e-placement
+sub-node
+under-count
 
 # Overview rework: compound terms and project/product names
 [Oo]pen-weight

@@ -44,7 +44,7 @@ model, and Modelplane composes the rest.
     </a>
     <a class="mp-chip" href="{{< ref "/models/model-service" >}}">
       <span class="mp-chip-name">ModelService</span>
-      <span class="mp-chip-desc">One OpenAI-compatible endpoint, weighted across the endpoints it selects.</span>
+      <span class="mp-chip-desc">One OpenAI-compatible endpoint, load-balanced across the endpoints it selects.</span>
     </a>
     <a class="mp-chip" href="{{< ref "/models/model-cache" >}}">
       <span class="mp-chip-name">ModelCache</span>
@@ -84,9 +84,9 @@ run continuously:
    Kubernetes scale subresource, so `kubectl scale` or a KEDA `ScaledObject` work
    out of the box.
 4. **Routing.** A `ModelService` exposes one OpenAI-compatible endpoint through
-   the gateway and load-balances across the deployment's `ModelEndpoints`, with
-   weights for canary and A/B rollouts. `ModelEndpoints` can also fall back to
-   external inference services.
+   the gateway and load-balances across the deployment's `ModelEndpoints`,
+   wherever their replicas run. `ModelEndpoints` can also point at external
+   inference services.
 5. **Caching.** A `ModelCache` stages model weights on cluster storage once, so
    serving pods read them locally instead of re-downloading on every start.
 
@@ -122,7 +122,8 @@ For each replica, the scheduler picks a `(cluster, pool)` in two steps:
 Capacity is accounted at the node level across the fleet, so Modelplane never
 overcommits a pool. Replicas are pinned to their cluster once placed and stay
 there across reconciles; if a cluster is deleted, the scheduler re-places its
-replicas elsewhere.
+replicas elsewhere. [How it schedules]({{< ref "/architecture/scheduling.md" >}})
+covers the placement rules and their limits in full.
 
 ## Deploying a model
 
@@ -140,9 +141,9 @@ re-converges.
 A single-node deployment composes to a Kubernetes Deployment fronted by a
 service. When a model is too large for one node, an engine becomes a gang: a
 `Leader` member and one or more `Worker` members that Modelplane composes into a
-LeaderWorkerSet, serving the model together across nodes. Gang deployments stage
-their weights through a `ModelCache`, which is required once more than one pod
-loads the same model.
+LeaderWorkerSet, serving the model together across nodes. Gang deployments
+should stage their weights through a `ModelCache`, so the pods share one copy
+instead of each pulling the same model.
 
 Disaggregated serving splits prefill and decode into separate engines
 (`serving.mode: PrefillDecode`) that run on the same cluster and hand off the KV
