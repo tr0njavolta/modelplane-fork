@@ -97,7 +97,7 @@ flowchart TB
         cp["Crossplane core"]
         fns["Modelplane functions\n(one pod per resource)"]
         prov["Providers\ngcp · aws · helm · kubernetes"]
-        gw["Control-plane gateway\n(Traefik)"]
+        gw["Control-plane gateway"]
     end
     subgraph fleet["Fleet"]
         wc1["Workload cluster A"]
@@ -153,33 +153,33 @@ claim through.
 
 ## The request path
 
-A served request crosses both gateways. The **control-plane gateway** (Traefik)
-is the front door: a `ModelService` composes an `HTTPRoute` on it that matches the
-service's path prefix and forwards to the matched `ModelEndpoint`s, each of which
-is a `Service` pointing at a workload cluster's gateway address. The
-**workload-cluster gateway** (Envoy Gateway) then routes from the cluster edge to
-the engine pods.
+A served request crosses two gateways, both built on Gateway API. The
+**control-plane gateway** is the front door: a `ModelService` composes an
+`HTTPRoute` on it that matches the service's path prefix and forwards to the
+matched `ModelEndpoint`s, each of which is a `Service` pointing at a workload
+cluster's gateway address. The **workload-cluster gateway** then routes from the
+cluster edge to the engine pods.
 
 ```mermaid
 flowchart LR
     client["Client"]
-    traefik["Control-plane gateway\n(Traefik)"]
-    envoy["Workload-cluster gateway\n(Envoy Gateway)"]
+    cpgw["Control-plane gateway"]
+    wcgw["Workload-cluster gateway"]
     engine["Engine pods\n(vLLM, SGLang, ...)"]
 
-    client -->|service path| traefik
-    traefik -->|per-replica path| envoy
-    envoy -->|engine path| engine
+    client -->|service path| cpgw
+    cpgw -->|per-replica path| wcgw
+    wcgw -->|engine path| engine
 ```
 
-Modelplane uses Traefik on the control plane because it supports a `URLRewrite`
-filter on each `backendRef`, which routing to a per-replica path depends on and
-Envoy Gateway doesn't offer. Each hop rewrites the path: the control plane
-rewrites the public prefix to the replica's path, and the workload gateway strips
-that down to what the engine serves.
+Each hop rewrites the path: the control plane rewrites the public prefix to the
+replica's path, and the workload gateway strips that down to what the engine
+serves. This per-backend path rewriting is the main thing the control-plane
+gateway has to support, and it narrows which Gateway API implementations can fill
+the role.
 
-Which gateway sits at each layer is internal, not part of the API. Traefik and
-Envoy Gateway are today's choices; the `InferenceGateway` `backend` field is an
-enum precisely so the control-plane gateway can grow other options over time.
-Target the `ModelService` URL rather than either gateway directly.
+Which gateway sits at each layer is internal, not part of the API. The
+[`InferenceGateway`]({{< ref "/platform/inference-gateway.md" >}}) `backend` field
+is an enum precisely so the control-plane gateway can grow other options over
+time. Target the `ModelService` URL rather than either gateway directly.
 <!-- vale write-good.Passive = YES -->

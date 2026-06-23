@@ -14,6 +14,9 @@ your Modelplane control plane. It fronts every inference cluster in the fleet, s
 you don't create one per cluster. When running the control plane in kind, set
 `loadBalancer: MetalLB` to get a LoadBalancer IP inside the Docker network.
 
+The `backend` field selects which gateway runs it. `Traefik` is the only value
+today.
+
 Once ready, read the gateway's external address from the resource's status:
 
 ```bash
