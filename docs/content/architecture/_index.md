@@ -104,7 +104,7 @@ flowchart TB
         wc2["Workload cluster B"]
     end
     cp <-->|"desired state (gRPC)"| fns
-    cp -->|applies| prov
+    cp -->|composes| prov
     cp -->|composes| gw
     prov -->|provision + install via kubeconfig| wc1
     prov -->|provision + install via kubeconfig| wc2
