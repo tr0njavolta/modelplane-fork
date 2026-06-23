@@ -1,0 +1,23 @@
+# EKS InferenceCluster with one L4 node pool. No clusterSelector targets it; the
+# ModelDeployment matches on device capacity alone, so it lands here or on any
+# other compatible cluster in the fleet.
+apiVersion: modelplane.ai/v1alpha1
+kind: InferenceCluster
+metadata:
+  name: eks-l4-single
+  labels:
+    modelplane.ai/cloud: eks
+    modelplane.ai/region: us-west
+spec:
+  cluster:
+    source: EKS
+    eks:
+      region: us-west-2
+  nodePools:
+  - name: gpu-l4
+    className: eks-l4-1x-g6
+    nodeCount: 1
+    zones:
+    - us-west-2a
+    minNodeCount: 0
+    maxNodeCount: 4

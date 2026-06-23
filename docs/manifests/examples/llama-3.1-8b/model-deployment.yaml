@@ -1,0 +1,51 @@
+# Llama-3.1-8B Instruct served on a single NVIDIA L4 by vLLM, validated end to
+# end on GKE (the model layer is cloud-agnostic; the same manifest serves on EKS).
+#
+# 8B in bf16 is ~16Gi of weights, leaving room for the KV cache on the L4's
+# ~23Gi. Llama's default context is 128K, whose KV cache does not fit beside the
+# weights, so --max-model-len caps it at 8192 - raise it only as far as the
+# leftover VRAM allows.
+#
+# Weights come from the public NousResearch mirror, so no Hugging Face token is
+# needed. The gated meta-llama/Llama-3.1-8B-Instruct original needs an hf-token
+# Secret on the *workload* cluster (the engine pod reads it, not the control
+# plane) and HF_TOKEN passed on the engine container.
+#
+# No --port or --host: Modelplane's routing expects the engine on its default
+# :8000 with a /health probe, and passes args through verbatim.
+apiVersion: modelplane.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: llama-3-1-8b
+  namespace: ml-team
+spec:
+  # One replica, matched to any compatible InferenceCluster by device capacity.
+  replicas: 1
+  engines:
+  - name: llama
+    members:
+    # A single self-contained vLLM pod. The container named "engine" is the
+    # inference server; its image and args pass through verbatim.
+    - role: Standalone
+      nodeSelector:
+        devices:
+        - name: gpu
+          count: 1
+          selectors:
+          # An 8B model needs most of an L4. >=20Gi selects the L4 (which
+          # reports ~23Gi) without over-constraining. DRA evaluates this CEL
+          # against the InferenceClass device, then against the GPU's
+          # ResourceSlice when it binds the claim.
+          - cel: |
+              device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
+      template:
+        spec:
+          containers:
+          - name: engine
+            image: vllm/vllm-openai:v0.7.3
+            args:
+            - "--model=NousResearch/Meta-Llama-3.1-8B-Instruct"
+            # The id clients pass as "model" in OpenAI requests.
+            - "--served-model-name=llama-3.1-8b"
+            # Cap the context so the KV cache fits beside the weights on the L4.
+            - "--max-model-len=8192"
