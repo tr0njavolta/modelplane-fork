@@ -54,7 +54,7 @@ pulling its own.
 
 ```yaml {nocopy=true}
 modelCacheRef:
-  name: qwen3-coder         # required for gangs
+  name: qwen3-coder         # recommended for gangs
 engines:
 - name: qwen3-coder
   members:
