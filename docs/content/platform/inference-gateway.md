@@ -11,17 +11,25 @@ each request on to the inference cluster serving it.
 
 The `InferenceGateway` is a singleton: create exactly one, named `default`, on
 your Modelplane control plane. It fronts every inference cluster in the fleet, so
-you don't create one per cluster. When running the control plane in kind, set
-`loadBalancer: MetalLB` to get a LoadBalancer IP inside the Docker network.
+you don't create one per cluster.
 
 The `backend` field selects which gateway runs it. `Traefik` is the only value
 today.
 
-Once ready, read the gateway's external address from the resource's status:
+On a cloud cluster with a native LoadBalancer controller, the gateway's `Service`
+gets an external address on its own. On kind or bare-metal, where there's no such
+controller, set `spec.traefik.loadBalancer: MetalLB` and give it an address pool
+in `spec.traefik.metallb.addressPool` so the gateway gets an IP. See the example
+below.
+
+Once the gateway is ready, read its external address from `status.address`:
 
 ```bash
-kubectl get ig default
+kubectl get ig default -o jsonpath='{.status.address}'
 ```
+
+That address is the host of every `ModelService` URL
+(`http://<address>/<namespace>/<service>`), so it's what you hand to ML teams.
 ## Example
 
 {{< manifests "concepts/inference-gateway.yaml" >}}
