@@ -35,10 +35,15 @@ matter here:
 
 Put together: a Modelplane API is an XR, its logic is a composition function, and
 the function composes a mix of plain Kubernetes objects, other Modelplane XRs, and
-provider resources. The API feels like Kubernetes core one scope up: a
-`ModelDeployment` composes a `ModelReplica` per replica, a `ModelReplica`
-composes the serving workload on its target cluster, and a `ModelService`
-composes the routing resources.
+provider resources.
+
+The resource model mirrors Kubernetes core, one scope up:
+`ModelDeployment` → `ModelReplica` → `ModelService` → `ModelEndpoint` parallels
+`Deployment` → `Pod` → `Service` → `Endpoint`, but across a fleet of clusters
+rather than within one. A `ModelDeployment` composes a `ModelReplica` per replica,
+a `ModelReplica` composes the serving workload on its target cluster, and a
+`ModelService` routes across the `ModelEndpoint`s. If you know how those core
+objects relate, you already know the shape of Modelplane's.
 
 ## Why Crossplane?
 
