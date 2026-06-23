@@ -423,45 +423,46 @@ release from it and run the workflow against the new tag.
 
 ### Versioning the docs
 
-Docs are versioned at the minor level. Each minor release gets its own Vercel
-project, connected to its `release-X.Y` branch and served at
-`https://docs.modelplane.ai/vX.Y/` via a rewrite rule on the main Vercel project.
-The `main` branch always serves the latest docs at the root. Patch releases push
-to the existing release branch; the versioned Vercel project rebuilds automatically
-with no changes to `main` required.
+Docs are versioned at the minor level. Each minor release is served from its own
+subdomain (`v0.1.docs.modelplane.ai`, `v0.2.docs.modelplane.ai`, …) using a single
+Vercel project with one branch domain per release. The `main` branch always serves
+the latest docs at `docs.modelplane.ai`. Patch releases push to the existing release
+branch; the versioned deployment rebuilds automatically with no changes to `main`
+required.
+
+**One-time DNS setup (already done):** a wildcard CNAME `*.docs.modelplane.ai →
+cname.vercel-dns.com` covers every future release subdomain automatically. No new
+DNS record is needed per release.
 
 **To publish docs for a new minor release (e.g. `v0.1.0`):**
 
 1. On `release-0.1`, set `version = "0.1"` in `docs/hugo.toml`. Leave
    `latest = "main"` unchanged — the latest docs always live at the root.
 
-2. In the Vercel dashboard, create a new project for the release:
-   - Connect it to the `release-0.1` branch of this repo.
-   - Set the `HUGO_BASEURL` environment variable to
-     `https://docs.modelplane.ai/v0.1/` for the Production environment.
-   - Note the project's `.vercel.app` deployment URL once it builds.
+2. In the Vercel dashboard, open the `modelplane-docs` project and add a branch
+   domain for the release:
+   - Go to **Settings → Domains**, add `v0.1.docs.modelplane.ai`, and assign it
+     to the `release-0.1` branch.
+   - Add a Production environment variable scoped to the `release-0.1` branch:
+     `HUGO_BASEURL` = `https://v0.1.docs.modelplane.ai/`.
+   - Trigger a redeployment of `release-0.1` and confirm the subdomain serves.
 
-3. On `main`, add a rewrite to `docs/vercel.json` pointing at that deployment:
-   ```json
-   { "source": "/v0.1/:path*", "destination": "https://<project>.vercel.app/:path*" }
-   ```
-
-4. On `main`, add an entry to `docs/data/versions.yaml`, newest first:
+3. On `main`, add an entry to `docs/data/versions.yaml`, newest first:
    ```yaml
    versions:
      - version: "main"
        url: ""
      - version: "0.1"
-       url: "https://docs.modelplane.ai/v0.1"
+       url: "https://v0.1.docs.modelplane.ai"
    ```
 
-5. Merge the `vercel.json` and `versions.yaml` changes to `main`. The main Vercel
-   project redeploys and `/v0.1/` goes live.
+4. Merge the `versions.yaml` change to `main`. The version dropdown on all release
+   builds now links to the new subdomain.
 
 To fix a typo or update content in an archived version, push to the release branch.
-The versioned Vercel project rebuilds automatically.
+The versioned deployment rebuilds automatically.
 
-When a new minor ships (e.g. `v0.2.0`), repeat all five steps for `release-0.2`,
+When a new minor ships (e.g. `v0.2.0`), repeat steps 1–4 for `release-0.2`,
 adding the `v0.2` entry above `v0.1` in `versions.yaml`.
 
 ## Reporting issues

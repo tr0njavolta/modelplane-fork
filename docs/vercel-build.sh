@@ -81,8 +81,8 @@ cd "$repo_root"
 # baseURL baked into nix/docs.nix: a pure, cached build identical to what CI verifies.
 #
 # Release branch projects (e.g. release-0.1) set HUGO_BASEURL in their Vercel
-# environment variables (e.g. https://docs.modelplane.ai/v0.1/) so their output
-# resolves assets and links against the correct path prefix on the main domain.
+# environment variables (e.g. https://v0.1.docs.modelplane.ai/) so their output
+# resolves assets and links against the correct subdomain.
 # --impure lets the derivation read HUGO_BASEURL from the environment.
 #
 # Previews use a root-relative ("/") baseURL. A preview is reachable on several
