@@ -482,6 +482,7 @@ Kueue
 
 agent
 requirement
+PrefillDecode
 
 # Clouds and neoclouds, their managed Kubernetes services, and Crossplane providers
 CoreWeave
