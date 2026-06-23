@@ -42,6 +42,8 @@
 // column. Sticky on desktop so it stays put while the content scrolls.
 .doc-content-nav {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
   background: var(--body-background);
   border-bottom: 1px solid var(--dropdown-border-color);
   padding: 0 18px;
@@ -54,6 +56,21 @@
     top: 0;
     z-index: 10;
   }
+
+  // At the wide breakpoint bd-main-grid reserves a 17rem TOC column (2.5rem
+  // gap). Match that offset so the version selector's right edge lands at the
+  // content/TOC boundary rather than the full bd-main edge.
+  @media (min-width: 1280px) {
+    padding-right: calc(17rem + 2.5rem + 18px);
+  }
+}
+
+.doc-content-version {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  padding: 6px 0;
+  flex-shrink: 0;
 }
 
 .bd-main-grid {

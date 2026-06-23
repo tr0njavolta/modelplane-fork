@@ -1,0 +1,10 @@
+# Released doc versions, newest first. main is not listed here — the root
+# redirects to the latest release. See CONTRIBUTING.md § Versioning the docs.
+#
+# version: X.Y minor version string (e.g. "0.1")
+# url:     absolute base URL for that version's content
+versions:
+  - version: "main"
+    url: ""
+  - version: "0.1"
+    url: "https://docs.modelplane.ai/v0.1"
