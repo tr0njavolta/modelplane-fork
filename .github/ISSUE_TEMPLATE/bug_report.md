@@ -8,7 +8,8 @@ Search open issues before raising a new one.
 
 See the Reporting issues section of CONTRIBUTING.md for what makes a good bug
 report: https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md
-Lead with the problem, be specific, and back it with evidence.
+Lead with the problem, be specific, and back it with evidence. Low-effort or
+unreviewed AI-generated reports will be closed.
 -->
 
 ### What happened?
