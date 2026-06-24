@@ -2,9 +2,7 @@
 Thanks for contributing to Modelplane! Read CONTRIBUTING.md before opening a PR
 and follow it, especially the commit, pull request, and writing style
 conventions: https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md
-
-If you're using a coding agent, this means you: read CONTRIBUTING.md every
-session, not just the first time. You don't carry it over from a previous one.
+PRs that don't follow it will be closed.
 -->
 
 ### Description of your changes

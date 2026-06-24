@@ -1,6 +1,6 @@
 # Agent guide
 
-Modelplane's contributor guide is [`CONTRIBUTING.md`](CONTRIBUTING.md). Read it
-before making changes and follow it. It covers development setup, running checks,
-working on composition functions, and the conventions for commits and pull
-requests — including how to write commit messages and PR descriptions.
+Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before making any change, and follow
+it. It is the contribution process: development setup, checks, commit and pull
+request conventions, and writing style. Contributions that don't follow it will
+be closed.

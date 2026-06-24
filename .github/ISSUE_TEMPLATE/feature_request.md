@@ -8,7 +8,8 @@ Search open issues before raising a new one.
 
 See the Reporting issues section of CONTRIBUTING.md for what makes a good feature
 request: https://github.com/modelplaneai/modelplane/blob/main/CONTRIBUTING.md
-Lead with the problem, not the solution.
+Lead with the problem, not the solution. Low-effort or unreviewed AI-generated
+requests will be closed.
 -->
 
 ### What problem are you facing?
