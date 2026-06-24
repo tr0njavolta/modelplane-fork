@@ -477,7 +477,8 @@ adding the `v0.2` entry above `v0.1` in `versions.yaml`.
 
 Open an issue with the bug report or feature request template. The Writing style
 section above applies here too: lead with the problem, be specific, and don't pad
-or invent.
+or invent. Don't hard-wrap the body; like a PR, GitHub renders it as Markdown and
+reflows to the viewport, so write each paragraph as one line and let it wrap.
 
 For a bug, the title should name the symptom, and the root cause if you know it:
 "InferenceGateway never becomes ready on a fresh control plane: Gateway API CRDs
