@@ -135,6 +135,7 @@ _USAGE_GATEWAY_CLASS_BY_GATEWAY = {
 _CERT_MANAGER = {
     "apiVersion": "helm.m.crossplane.io/v1beta1",
     "kind": "Release",
+    "metadata": {"annotations": {"crossplane.io/external-name": "mp-cert-manager"}},
     "spec": {
         "forProvider": {
             "chart": {
@@ -161,6 +162,7 @@ _ENVOY_GATEWAY = {
     "apiVersion": "helm.m.crossplane.io/v1beta1",
     "kind": "Release",
     "metadata": {
+        "annotations": {"crossplane.io/external-name": "mp-gateway-helm"},
         "labels": {"modelplane.ai/resource": "envoy-gateway"},
     },
     "spec": {
@@ -215,6 +217,7 @@ _ENVOY_GATEWAY = {
 _AI_GATEWAY_CRDS = {
     "apiVersion": "helm.m.crossplane.io/v1beta1",
     "kind": "Release",
+    "metadata": {"annotations": {"crossplane.io/external-name": "mp-ai-gateway-crds-helm"}},
     "spec": {
         "forProvider": {
             "chart": {
@@ -234,6 +237,7 @@ _AI_GATEWAY_CRDS = {
 _AI_GATEWAY = {
     "apiVersion": "helm.m.crossplane.io/v1beta1",
     "kind": "Release",
+    "metadata": {"annotations": {"crossplane.io/external-name": "mp-ai-gateway-helm"}},
     "spec": {
         "forProvider": {
             "chart": {
@@ -369,6 +373,7 @@ _GATEWAY_CLASS = {
 _LEADER_WORKER_SET = {
     "apiVersion": "helm.m.crossplane.io/v1beta1",
     "kind": "Release",
+    "metadata": {"annotations": {"crossplane.io/external-name": "mp-lws"}},
     "spec": {
         "forProvider": {
             "chart": {
@@ -388,6 +393,7 @@ _LEADER_WORKER_SET = {
 _NODE_FEATURE_DISCOVERY = {
     "apiVersion": "helm.m.crossplane.io/v1beta1",
     "kind": "Release",
+    "metadata": {"annotations": {"crossplane.io/external-name": "mp-node-feature-discovery"}},
     "spec": {
         "forProvider": {
             "chart": {
@@ -407,6 +413,7 @@ _NODE_FEATURE_DISCOVERY = {
 _DRA_DRIVER = {
     "apiVersion": "helm.m.crossplane.io/v1beta1",
     "kind": "Release",
+    "metadata": {"annotations": {"crossplane.io/external-name": "mp-dra-driver-nvidia-gpu"}},
     "spec": {
         "forProvider": {
             "chart": {
@@ -467,6 +474,7 @@ _DRA_DRIVER_QUOTA = {
 _PROMETHEUS = {
     "apiVersion": "helm.m.crossplane.io/v1beta1",
     "kind": "Release",
+    "metadata": {"annotations": {"crossplane.io/external-name": "mp-kube-prometheus-stack"}},
     "spec": {
         "forProvider": {
             "chart": {
@@ -525,7 +533,10 @@ _PROMETHEUS = {
 }
 
 
-def _base_request(nvidia_driver_root: str = "/home/kubernetes/bin/nvidia") -> fnv1.RunFunctionRequest:
+def _base_request(
+    nvidia_driver_root: str = "/home/kubernetes/bin/nvidia",
+    name: str = "test-backend",
+) -> fnv1.RunFunctionRequest:
     """Build the base RunFunctionRequest used by all test cases.
 
     Defaults to the GKE driver root, which drives the DRA driver's
@@ -537,7 +548,7 @@ def _base_request(nvidia_driver_root: str = "/home/kubernetes/bin/nvidia") -> fn
                 resource=resource.dict_to_struct(
                     v1alpha1.ServingStack(
                         metadata=metav1.ObjectMeta(
-                            name="test-backend",
+                            name=name,
                             namespace="test-ns",
                         ),
                         spec=v1alpha1.Spec(
