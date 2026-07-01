@@ -47,6 +47,15 @@ from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 # Label key for composed resources that need deletion ordering via Usages.
 _LABEL_RESOURCE = "modelplane.ai/resource"
 
+# Annotation provider-helm reads as the Helm release name (see _helm_release).
+_EXTERNAL_NAME_ANNOTATION = "crossplane.io/external-name"
+
+# Reserved prefix for the Helm release names this function manages. Names every
+# release "mp-<chart>" so it's clearly modelplane-owned and can't adopt or
+# collide with a same-named release a user already runs in the same namespace
+# (e.g. a cluster's own "cert-manager"). See _helm_release.
+_RELEASE_NAME_PREFIX = "mp-"
+
 # CEL readiness query for the Envoy Gateway Object. The Gateway's LoadBalancer
 # address is assigned asynchronously by the controller after the Object is
 # applied. With the default SuccessfulCreate policy the Object is Ready the
@@ -131,20 +140,28 @@ def _helm_release(
     labels: dict | None = None,
     metadata_namespace: str | None = None,
 ) -> helmv1beta1.Release:
-    """Build a Helm Release targeting a remote (or local) cluster."""
-    md = None
-    if labels or metadata_namespace:
+    """Build a Helm Release targeting a remote (or local) cluster.
+
+    The crossplane.io/external-name annotation sets a fixed "mp-<chart>" release
+    name, which provider-helm uses verbatim. Left unset, the release inherits the
+    composed resource's generated "<inferencecluster>-<hash>" name; charts derive
+    resource names from it and append suffixes, so names can exceed the 63-char
+    label-value limit and break consumers like Cilium's per-pod CiliumIdentity.
+    "mp-<chart>" keeps every derived name short regardless of InferenceCluster
+    name (worst case is the DRA driver's ServiceAccount at 54 chars), is stable
+    across chart-version upgrades so provider-helm upgrades in place, and its
+    "mp-" prefix reserves a namespace for the releases this function owns. Each
+    chart runs once per workload cluster, so the name is unique. See issue #215."""
+    md = metav1.ObjectMeta(
+        annotations={_EXTERNAL_NAME_ANNOTATION: f"{_RELEASE_NAME_PREFIX}{chart}"},
         # Only set fields that are present; under exclude_unset, an explicit
         # namespace=None or labels=None would leak a null into the metadata.
-        md = metav1.ObjectMeta(
-            **({"namespace": metadata_namespace} if metadata_namespace is not None else {}),
-            **({"labels": labels} if labels is not None else {}),
-        )
+        **({"namespace": metadata_namespace} if metadata_namespace is not None else {}),
+        **({"labels": labels} if labels is not None else {}),
+    )
 
     release = helmv1beta1.Release(
-        # Only set metadata when present (see _k8s_object: avoids a null
-        # metadata leaking under exclude_unset serialization).
-        **({"metadata": md} if md is not None else {}),
+        metadata=md,
         spec=helmv1beta1.Spec(
             providerConfigRef=helmv1beta1.ProviderConfigRef(
                 kind="ProviderConfig",
