@@ -19,8 +19,8 @@ illustration.
 
 **Make sure your container engine is configured to allow higher resource allocations.**
 
-Update you Docker memory limit to **16 GB**. For more information, review
-the [Docker documentation](https://docs.docker.com/desktop/settings-and-maintenance/settings/#advanced)
+Update your Docker memory limit to **10 GB**. For more information, review
+the [Docker documentation](https://docs.docker.com/desktop/settings-and-maintenance/settings/#advanced).
 
 {{< /hint >}}
 
