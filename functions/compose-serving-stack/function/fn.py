@@ -727,8 +727,8 @@ class Composer:
         )
 
     def compose_gateway(self) -> None:
-        """Compose the GatewayClass and Gateway on the remote cluster. Gated on
-        ProviderConfigs being observed."""
+        """Compose the gateway namespace, EnvoyProxy, GatewayClass, and Gateway on
+        the remote cluster. Gated on ProviderConfigs being observed."""
         pc_observed = self.provider_configs_observed()
         pc = _pc_name(self.xr)
 
@@ -756,6 +756,39 @@ class Composer:
                 ),
             )
 
+        # EnvoyProxy pins the managed LoadBalancer Service's externalTrafficPolicy
+        # to Cluster. Envoy Gateway defaults it to Local, which some clouds' load
+        # balancers reject (Nebius returns SyncLoadBalancerFailed and never assigns
+        # an external IP, leaving the gateway address pending and the cluster
+        # not-Ready). Cluster is accepted by every cloud the provider runs on
+        # (GKE, EKS, Nebius); the inference gateway does not need client source-IP
+        # preservation. The GatewayClass references it via parametersRef below. It
+        # gets no teardown Usage (unlike the Gateway/GatewayClass, which carry Envoy
+        # Gateway finalizers): it is a plain config object referenced only by
+        # parametersRef. If Envoy Gateway is found to finalize a referenced
+        # EnvoyProxy, give it a Usage protected-by gateway-class (see compose_usages).
+        if pc_observed or "gateway-proxy" in self.req.observed.resources:
+            resource.update(
+                self.rsp.desired.resources["gateway-proxy"],
+                _k8s_object(
+                    pc,
+                    {
+                        "apiVersion": "gateway.envoyproxy.io/v1alpha1",
+                        "kind": "EnvoyProxy",
+                        "metadata": {"name": "inference-gateway", "namespace": "modelplane-system"},
+                        "spec": {
+                            "provider": {
+                                "type": "Kubernetes",
+                                "kubernetes": {
+                                    "envoyService": {"externalTrafficPolicy": "Cluster"},
+                                },
+                            },
+                        },
+                    },
+                    metadata=metav1.ObjectMeta(labels={_LABEL_RESOURCE: "gateway-proxy"}),
+                ),
+            )
+
         if pc_observed or "gateway-class" in self.req.observed.resources:
             resource.update(
                 self.rsp.desired.resources["gateway-class"],
@@ -767,6 +800,12 @@ class Composer:
                         "metadata": {"name": gw.className},
                         "spec": {
                             "controllerName": "gateway.envoyproxy.io/gatewayclass-controller",
+                            "parametersRef": {
+                                "group": "gateway.envoyproxy.io",
+                                "kind": "EnvoyProxy",
+                                "name": "inference-gateway",
+                                "namespace": "modelplane-system",
+                            },
                         },
                     },
                     metadata=metav1.ObjectMeta(labels={_LABEL_RESOURCE: "gateway-class"}),
@@ -848,6 +887,7 @@ class Composer:
             "dra-driver",
             "dra-driver-critical-pods-quota",
             "gateway-namespace",
+            "gateway-proxy",
             "gateway-class",
             "gateway",
         ]
