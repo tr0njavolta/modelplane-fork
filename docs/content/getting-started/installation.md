@@ -13,12 +13,19 @@ Install [kind](https://kind.sigs.k8s.io/),
 [kubectl](https://kubernetes.io/docs/tasks/tools/), and
 [Helm](https://helm.sh/docs/intro/install/) on your machine.
 
-{{< hint "note" >}}
+{{< hint "important" >}}
 You can run your Modelplane control plane anywhere. This tour uses kind for
 illustration.
+
+**Make sure your container engine can support heavier resource allocation**. 
+
+Update you Docker memory allocation to **16 GB**. For more information, review
+the [Docker documentation](https://docs.docker.com/desktop/settings-and-maintenance/settings/#advanced)
+
 {{< /hint >}}
 
 ## Install the control plane
+
 
 Crossplane provides the reconciliation engine and package management. Create the
 kind cluster and install it with Helm:
