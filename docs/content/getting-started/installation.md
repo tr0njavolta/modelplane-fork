@@ -17,9 +17,9 @@ Install [kind](https://kind.sigs.k8s.io/),
 You can run your Modelplane control plane anywhere. This tour uses kind for
 illustration.
 
-**Make sure your container engine can support heavier resource allocation**. 
+**Make sure your container engine is configured to allow higher resource allocations.**
 
-Update you Docker memory allocation to **16 GB**. For more information, review
+Update you Docker memory limit to **16 GB**. For more information, review
 the [Docker documentation](https://docs.docker.com/desktop/settings-and-maintenance/settings/#advanced)
 
 {{< /hint >}}
