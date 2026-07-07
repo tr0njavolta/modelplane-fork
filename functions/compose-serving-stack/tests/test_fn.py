@@ -346,6 +346,35 @@ _GATEWAY_NAMESPACE = {
     },
 }
 
+_GATEWAY_PROXY = {
+    "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+    "kind": "Object",
+    "metadata": {
+        "labels": {"modelplane.ai/resource": "gateway-proxy"},
+    },
+    "spec": {
+        "forProvider": {
+            "manifest": {
+                "apiVersion": "gateway.envoyproxy.io/v1alpha1",
+                "kind": "EnvoyProxy",
+                "metadata": {"name": "inference-gateway", "namespace": "modelplane-system"},
+                "spec": {
+                    "provider": {
+                        "type": "Kubernetes",
+                        "kubernetes": {
+                            "envoyService": {"externalTrafficPolicy": "Cluster"},
+                        },
+                    },
+                },
+            },
+        },
+        "providerConfigRef": {
+            "kind": "ProviderConfig",
+            "name": _PC_NAME,
+        },
+    },
+}
+
 _GATEWAY_CLASS = {
     "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
     "kind": "Object",
@@ -360,6 +389,12 @@ _GATEWAY_CLASS = {
                 "metadata": {"name": "envoy"},
                 "spec": {
                     "controllerName": "gateway.envoyproxy.io/gatewayclass-controller",
+                    "parametersRef": {
+                        "group": "gateway.envoyproxy.io",
+                        "kind": "EnvoyProxy",
+                        "name": "inference-gateway",
+                        "namespace": "modelplane-system",
+                    },
                 },
             },
         },
@@ -655,6 +690,9 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     "gateway-namespace": fnv1.Resource(
                         resource=resource.dict_to_struct(_GATEWAY_NAMESPACE),
                     ),
+                    "gateway-proxy": fnv1.Resource(
+                        resource=resource.dict_to_struct(_GATEWAY_PROXY),
+                    ),
                     "gateway-class": fnv1.Resource(
                         resource=resource.dict_to_struct(_GATEWAY_CLASS),
                     ),
@@ -808,6 +846,57 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             "gateway address must surface to the XR status once observed",
         )
 
+    async def test_gateway_proxy_marked_ready_when_observed_ready(self) -> None:
+        """The EnvoyProxy (gateway-proxy) is a config-only Object with no runtime
+        readiness of its own, so it is marked ready from the Ready condition
+        provider-kubernetes reports on apply, exactly like gateway-namespace and
+        gateway-class. Left out of mark_readiness it would sit at
+        READY_UNSPECIFIED and block the ServingStack XR from ever reaching
+        Ready."""
+        req = _base_request()
+        req.observed.resources["provider-config-helm"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {"apiVersion": "helm.m.crossplane.io/v1beta1", "kind": "ProviderConfig"}
+                ),
+            ),
+        )
+        req.observed.resources["provider-config-kubernetes"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {"apiVersion": "kubernetes.m.crossplane.io/v1alpha1", "kind": "ProviderConfig"}
+                ),
+            ),
+        )
+
+        # Composed but not yet observed Ready: it must not be marked ready.
+        got = await self.runner.RunFunction(req, None)
+        self.assertEqual(
+            got.desired.resources["gateway-proxy"].ready,
+            fnv1.READY_UNSPECIFIED,
+            "gateway-proxy must not be ready before it is observed Ready",
+        )
+
+        # Once provider-kubernetes reports the EnvoyProxy Object Ready=True it is
+        # marked ready, so it does not hold the composite XR from Ready.
+        req.observed.resources["gateway-proxy"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                        "kind": "Object",
+                        "status": {"conditions": [{"type": "Ready", "status": "True"}]},
+                    }
+                ),
+            ),
+        )
+        got = await self.runner.RunFunction(req, None)
+        self.assertEqual(
+            got.desired.resources["gateway-proxy"].ready,
+            fnv1.READY_TRUE,
+            "gateway-proxy must be ready once provider-kubernetes observes it Ready",
+        )
+
     async def test_third_pass(self) -> None:
         """Steady state: composed releases report Ready, and the gateway address is
         surfaced from the observed Object's manifest. The observed gateway Object
@@ -890,6 +979,9 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     ),
                     "gateway-namespace": fnv1.Resource(
                         resource=resource.dict_to_struct(_GATEWAY_NAMESPACE),
+                    ),
+                    "gateway-proxy": fnv1.Resource(
+                        resource=resource.dict_to_struct(_GATEWAY_PROXY),
                     ),
                     "gateway-class": fnv1.Resource(
                         resource=resource.dict_to_struct(_GATEWAY_CLASS),
