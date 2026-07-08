@@ -63,6 +63,15 @@ _SYSTEM_POOL_MAX_NODE_COUNT = 2
 _LABEL_GPU = "modelplane.ai/gpu"
 _LABEL_POOL = "modelplane.ai/pool"
 
+# GKE's cluster autoscaler uses this label to recognise a node pool as one whose
+# nodes run the NVIDIA GPU DRA driver, and so models the DRA ResourceSlices such
+# a node would publish. Without it the autoscaler can't tell that a new node
+# would satisfy a pod's GPU ResourceClaim, so a pool sitting at zero nodes never
+# scales up: the claim binds only against a ResourceSlice, and no slice exists
+# until a node is already running. Setting it lets a GPU pool cold-start from
+# minNodeCount 0.
+_LABEL_GPU_DRA_DRIVER = "cloud.google.com/gke-nvidia-gpu-dra-driver"
+
 # Secret types written to XR status. compose-inference-cluster reads
 # these to wire the kubeconfig and SA key into ProviderConfigs. The SA key's
 # type is the provider identity it authenticates as (see _IDENTITY_TYPE_GCP).
@@ -293,6 +302,7 @@ class Composer:
                 node_config.labels = {
                     _LABEL_GPU: pool.gpu.acceleratorType,
                     _LABEL_POOL: pool.name,
+                    _LABEL_GPU_DRA_DRIVER: "true",
                 }
             else:
                 node_config.labels = {

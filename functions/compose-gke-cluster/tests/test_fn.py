@@ -245,6 +245,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                     "labels": {
                                                         "modelplane.ai/gpu": "nvidia-tesla-a100",
                                                         "modelplane.ai/pool": "gpu-pool",
+                                                        "cloud.google.com/gke-nvidia-gpu-dra-driver": "true",
                                                     },
                                                 },
                                             },
@@ -636,6 +637,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                     "labels": {
                                                         "modelplane.ai/gpu": "nvidia-tesla-a100",
                                                         "modelplane.ai/pool": "gpu-pool",
+                                                        "cloud.google.com/gke-nvidia-gpu-dra-driver": "true",
                                                     },
                                                 },
                                             },
