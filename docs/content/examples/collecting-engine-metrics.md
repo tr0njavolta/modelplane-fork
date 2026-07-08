@@ -44,30 +44,14 @@ Modelplane stamps on them, and the `monitoring` namespace Prometheus discovers a
 `PodMonitor`, so this is the whole config. The engine container port is unnamed,
 so reference it by number with `targetPort`:
 
-```yaml
-apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
-metadata:
-  name: qwen2-5-0-5b-metrics
-  namespace: default
-spec:
-  selector:
-    matchExpressions:
-    - key: modelplane.ai/serving   # carried by every serving pod
-      operator: Exists
-  podMetricsEndpoints:
-  - targetPort: 8000
-    path: /metrics
-    interval: 30s
-```
+{{< manifests "examples/collecting-engine-metrics/podmonitor.yaml" >}}
 
 The engine pods and the `PodMonitor` CRD live on the workload cluster, not the
 control plane, so apply it there. Then read the metrics from the in-cluster
 Prometheus over a `port-forward`:
 
 ```bash
-kubectl apply -f podmonitor.yaml                                  # workload cluster
-kubectl -n monitoring port-forward svc/prometheus-prometheus 9090:9090
+kubectl -n monitoring port-forward svc/prometheus-prometheus 9090:9090   # workload cluster
 # open http://localhost:9090, Status > Targets to confirm the scrape, then query
 # e.g. vllm:num_requests_running or vllm:gpu_cache_usage_perc
 ```

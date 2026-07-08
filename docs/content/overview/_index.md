@@ -39,48 +39,13 @@ Once a platform team has provisioned inference clusters and declared the availab
 GPUs and networking fabric, an ML development team deploys a model with a
 declarative manifest:
 
-```yaml {nocopy=true}
-apiVersion: modelplane.ai/v1alpha1
-kind: ModelDeployment
-metadata:
-  name: qwen-demo
-  namespace: ml-team
-spec:
-  replicas: 1
-  engines:
-  - name: qwen
-    members:
-    - role: Standalone
-      nodeSelector:
-        devices:
-        - name: gpu
-          count: 1
-          selectors:
-          - cel: device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
-      template:
-        spec:
-          containers:
-          - name: engine
-            image: vllm/vllm-openai:v0.23.0
-            args: ["--model=Qwen/Qwen2.5-0.5B-Instruct"]
-```
+{{< manifests "overview/model-deployment.yaml" >}}
 
 Modelplane schedules a model replica onto an inference cluster with free,
 compatible GPUs and memory, and deploys the serving engine. Exposing an
 OpenAI-compatible endpoint can be done by declaring a model service:
 
-```yaml {nocopy=true}
-apiVersion: modelplane.ai/v1alpha1
-kind: ModelService
-metadata:
-  name: qwen
-  namespace: ml-team
-spec:
-  endpoints:
-  - selector:
-      matchLabels:
-        modelplane.ai/deployment: qwen-demo
-```
+{{< manifests "overview/model-service.yaml" >}}
 <!-- vale Microsoft.HeadingAcronyms = NO -->
 ## A universal control plane for AI inference
 <!-- vale Microsoft.HeadingAcronyms = YES -->

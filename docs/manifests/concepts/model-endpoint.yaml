@@ -1,17 +1,20 @@
 # Modelplane composes a ModelEndpoint per ModelReplica automatically. Create one
 # manually only to register an external inference endpoint with a ModelService,
 # for example a SaaS provider like Together or BaseTen.
-#
-# Give it a label of your own for a ModelService to select on
-# (modelplane.ai/external-provider is a readable convention), and set
-# url/rewritePath to the provider's OpenAI-compatible endpoint.
 apiVersion: modelplane.ai/v1alpha1
 kind: ModelEndpoint
 metadata:
-  name: qwen3-coder-together
+  name: kimi-k2-together
   namespace: ml-team
   labels:
+    # 1. A label of your own for a ModelService to select on. Any label
+    #    works; modelplane.ai/external-provider is a readable convention.
     modelplane.ai/external-provider: together
 spec:
+  # 2. The provider's base URL.
   url: https://api.together.xyz/
+  # 3. The path to rewrite requests to. A ModelService receives requests at
+  #    /<namespace>/<service>/v1/... and strips only the /<namespace>/<service>/
+  #    prefix, so an OpenAI-compatible provider that already serves /v1/...
+  #    takes just /.
   rewritePath: /
