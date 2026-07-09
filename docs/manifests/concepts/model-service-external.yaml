@@ -1,0 +1,17 @@
+# A ModelService's endpoints list combines: one entry can select your own
+# deployment's replicas while another selects an external ModelEndpoint, so
+# overflow or break-glass traffic to a SaaS provider sits behind the same URL
+# as your own replicas.
+apiVersion: modelplane.ai/v1alpha1
+kind: ModelService
+metadata:
+  name: kimi-k2
+  namespace: ml-team
+spec:
+  endpoints:
+  - selector:
+      matchLabels:
+        modelplane.ai/deployment: kimi-k2          # your own replicas
+  - selector:
+      matchLabels:
+        modelplane.ai/external-provider: together  # the endpoint above
