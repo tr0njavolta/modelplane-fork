@@ -22,25 +22,34 @@ release from it and run the workflow against the new tag.
 
 ## Versioning the docs
 
-Docs are versioned at the minor level, each version on its own subdomain, served
-by a single Vercel project with one branch domain per build:
+Docs are versioned at the minor level, each version on its own subdomain. Two
+Vercel projects serve them, and each domain serves its build's content directly —
+nothing redirects:
 
-- `docs.modelplane.ai` — the canonical apex. Its home page redirects to the
-  latest release, so a reader who types the bare domain lands on the latest docs.
-- `vX-Y.docs.modelplane.ai` — each minor release (`v0-1`, `v0-2`, …), built from
-  its `release-X.Y` branch.
-- `main.docs.modelplane.ai` — the dev docs, built from `main`, so unreleased docs
-  stay browsable.
+- **dev project** (`main` branch) — serves `main.docs.modelplane.ai`, the
+  unreleased docs, so work in progress stays browsable.
+- **release project** (latest `release-X.Y` branch) — serves both
+  `docs.modelplane.ai` (the canonical apex, always the latest release) and that
+  release's permanent `vX-Y.docs.modelplane.ai` subdomain.
 
-Both `main.docs` and the apex are built from `main`; what tells them apart is the
-baseURL. The apex build redirects because its baseURL isn't `main`'s own subdomain
-(`docs/themes/geekboot/layouts/index.html`). The redirect target is the latest
-release's URL, looked up in `docs/data/versions.yaml` by `latest` in
-`docs/hugo.toml`.
+Older releases keep their own project on their `vX-Y.docs.modelplane.ai`
+subdomain. There is no apex redirect: `docs.modelplane.ai` *is* the latest
+release's build, so a reader on the bare domain gets the latest docs with the URL
+unchanged. What a build serves is decided entirely by its Vercel project and
+baseURL, never by the home page (`docs/themes/geekboot/layouts/index.html`).
+
+Each project's baseURL:
+- dev project → `HUGO_BASEURL = https://main.docs.modelplane.ai/` (scoped to `main`).
+- release project → `docs.modelplane.ai` (leave `HUGO_BASEURL` unset in
+  production so the build uses the baked `https://docs.modelplane.ai/` from
+  `nix/docs.nix`). The `vX-Y` subdomain aliases the same build.
+- PR previews → root-relative `HUGO_BASEURL = /`, so assets resolve against the
+  preview host.
+- local (`hugo server`) → `localhost` from hugo.toml's `baseURL = "/"`.
 
 `docs/data/versions.yaml` is the single list of every version and its URL. It
-drives the version dropdown and the apex redirect, and must be identical on every
-branch — `main` and all release branches — so each build offers the same switcher.
+drives the version dropdown and must be identical on every branch — `main` and all
+release branches — so each build offers the same switcher.
 
 One-time DNS setup (already done): a wildcard CNAME `*.docs.modelplane.ai →
 cname.vercel-dns.com` covers `main.docs` and every release subdomain. No new DNS
@@ -59,26 +68,31 @@ To publish docs for a new minor release (e.g. `v0.1.0`):
      - version: "0.1"
        url: "https://v0-1.docs.modelplane.ai"
    ```
-   On `main`, also set `latest = "0.1"` in `docs/hugo.toml` so the apex redirects
-   to the new release.
+   On `main`, also set `latest = "0.1"` in `docs/hugo.toml` so the version
+   dropdown and the "not the latest release" banners point at the new release.
 
-3. In the Vercel dashboard, open the `modelplane-docs` project and add a branch
-   domain for the release:
-   - Go to Settings → Domains, add `v0-1.docs.modelplane.ai`, and assign it
-     to the `release-0.1` branch.
-   - Add a Production environment variable scoped to the `release-0.1` branch:
-     `HUGO_BASEURL` = `https://v0-1.docs.modelplane.ai/`.
-   - Trigger a redeployment of `release-0.1` and confirm the subdomain serves.
+3. In the Vercel dashboard, create the release project for `release-0.1` (or
+   reuse the existing one) and, under Settings → Domains, assign it both
+   `docs.modelplane.ai` (the apex) and `v0-1.docs.modelplane.ai`. Leave
+   `HUGO_BASEURL` unset in Production so the build bakes `https://docs.modelplane.ai/`.
+   Trigger a redeployment and confirm both domains serve.
 
-4. Merge the changes. The apex now redirects to the new release, and the version
-   dropdown on every build links to it.
+4. Merge the changes. The apex now serves the new release directly, and the
+   version dropdown on every build links to it.
 
-The `main.docs.modelplane.ai` domain and its `HUGO_BASEURL = https://main.docs.modelplane.ai/`
-env var (scoped to `main`) are a one-time setup, done when the first release ships.
+The dev project's `main.docs.modelplane.ai` domain and its
+`HUGO_BASEURL = https://main.docs.modelplane.ai/` env var (scoped to `main`) are a
+one-time setup, done when the first release ships.
 
 To fix a typo or update content in an archived version, push to the release branch.
 The versioned deployment rebuilds automatically.
 
-When a new minor ships (e.g. `v0.2.0`), repeat steps 1–4 for `release-0.2`, adding
-the `v0.2` entry above `v0.1` in `versions.yaml` on every branch and bumping
-`latest` to `0.2` on `main`.
+When a new minor ships (e.g. `v0.2.0`):
+
+1. Repeat steps 1–4 for `release-0.2`, adding the `v0.2` entry above `v0.1` in
+   `versions.yaml` on every branch and bumping `latest` to `0.2` on `main`.
+2. Move `docs.modelplane.ai` to the `release-0.2` project so the apex tracks the
+   new latest.
+3. On the old `release-0.1` project, set `HUGO_BASEURL = https://v0-1.docs.modelplane.ai/`
+   so it stays self-canonical at its permanent subdomain now that it no longer
+   owns the apex.
