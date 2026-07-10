@@ -129,9 +129,9 @@ spec:
       # ToDo(haarchri): switch to official provider
       package: xpkg.upbound.io/modelplane/provider-kubernetes
       version: v1.2.1-070dae7
-  # - type: xpkg
-  #   xpkg:
-  #     apiVersion: pkg.crossplane.io/v1
-  #     kind: Provider
-  #     package: xpkg.upbound.io/upbound/provider-nebius
-  #     version: v1.0.1
+  - type: xpkg
+    xpkg:
+      apiVersion: pkg.crossplane.io/v1
+      kind: Provider
+      package: xpkg.upbound.io/upbound/provider-nebius
+      version: v1.0.1
