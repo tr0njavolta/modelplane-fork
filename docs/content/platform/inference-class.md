@@ -68,6 +68,9 @@ GPU.
 {{< tab "EKS L4" >}}
 {{< manifests "concepts/inference-class-eks-l4.yaml" >}}
 {{< /tab >}}
+{{< tab "Nebius H100" >}}
+{{< manifests "concepts/inference-class-nebius-h100.yaml" >}}
+{{< /tab >}}
 {{< tab "H100 bare-metal" >}}
 {{< manifests "concepts/inference-class-h100-byo.yaml" >}}
 {{< /tab >}}

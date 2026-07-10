@@ -965,7 +965,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         want8.requirements.resources["class-gpu-l4-eks"].CopyFrom(class_selector_eks)
 
         # --- Case 9: EKS first pass with a node pool that opts into the EFA
-        # fabric. fabric flows through to the EKSCluster node pool, which
+        # fabric. fabric.type flows through to the EKSCluster node pool, which
         # compose-eks-cluster turns into EFA launch-template interfaces. ---
         req9 = fnv1.RunFunctionRequest(
             observed=fnv1.State(
@@ -988,7 +988,7 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                         nodeCount=2,
                                         maxNodeCount=4,
                                         zones=["us-west-2a"],
-                                        fabric="EFA",
+                                        fabric=v1alpha1.Fabric(type="EFA"),
                                     ),
                                 ],
                             ),
@@ -1502,8 +1502,328 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+        # --- Case 10: Nebius first pass composes the NebiusCluster XR only.
+        # The pool's fabric.infiniband.fabric flows through to the
+        # NebiusCluster pool's fabric, and minNodeCount stays unset so the
+        # pool's autoscaling floor defaults to its node count downstream. ---
+        inference_class_h100_nebius = {
+            "apiVersion": "modelplane.ai/v1alpha1",
+            "kind": "InferenceClass",
+            "metadata": {"name": "gpu-h100-nebius"},
+            "spec": {
+                "devices": [
+                    {
+                        "name": "gpu",
+                        "claim": "DRA",
+                        "driver": "gpu.nvidia.com",
+                        "deviceClassName": "gpu.nvidia.com",
+                        "count": 8,
+                        "capacity": {"memory": {"value": "81559Mi"}},
+                    },
+                ],
+                "provisioning": {
+                    "provider": "Nebius",
+                    "nebius": {
+                        "platform": "gpu-h100-sxm",
+                        "preset": "8gpu-128vcpu-1600gb",
+                        "diskSizeGb": 200,
+                        "accelerator": {"type": "nvidia-h100", "count": 8},
+                    },
+                },
+            },
+        }
+        class_selector_nebius = fnv1.ResourceSelector(
+            api_version="modelplane.ai/v1alpha1",
+            kind="InferenceClass",
+            match_name="gpu-h100-nebius",
+        )
+
+        req10 = fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        v1alpha1.InferenceCluster(
+                            metadata=metav1.ObjectMeta(
+                                name="test-cluster",
+                                namespace="modelplane-system",
+                            ),
+                            spec=v1alpha1.Spec(
+                                cluster=v1alpha1.Cluster(
+                                    source="Nebius",
+                                    nebius=v1alpha1.Nebius(),
+                                ),
+                                nodePools=[
+                                    v1alpha1.NodePool(
+                                        name="h100-pool",
+                                        className="gpu-h100-nebius",
+                                        nodeCount=2,
+                                        maxNodeCount=4,
+                                        fabric=v1alpha1.Fabric(
+                                            type="InfiniBand",
+                                            infiniband=v1alpha1.Infiniband(fabric="fabric-2"),
+                                        ),
+                                    ),
+                                ],
+                            ),
+                        ).model_dump(exclude_none=True, mode="json"),
+                    ),
+                ),
+            ),
+        )
+        req10.required_resources["class-gpu-h100-nebius"].items.append(
+            fnv1.Resource(resource=resource.dict_to_struct(inference_class_h100_nebius)),
+        )
+
+        want10 = fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        {
+                            "status": {
+                                "providerConfigRef": {
+                                    "name": "test-cluster-cluster-kubeconfig-d0f89",
+                                },
+                                "namespace": "modelplane-system",
+                                "gpuPools": [
+                                    {
+                                        "name": "h100-pool",
+                                        "nodes": 4,
+                                        "devices": [
+                                            {
+                                                "name": "gpu",
+                                                "claim": "DRA",
+                                                "driver": "gpu.nvidia.com",
+                                                "deviceClassName": "gpu.nvidia.com",
+                                                "count": 8,
+                                                "capacity": {"memory": {"value": "81559Mi"}},
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        },
+                    ),
+                ),
+                resources={
+                    "nebius-cluster": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                                "kind": "NebiusCluster",
+                                "metadata": {
+                                    "name": "test-cluster",
+                                    "namespace": "modelplane-system",
+                                },
+                                "spec": {
+                                    "kubernetesVersion": "1.34",
+                                    "nodePools": [
+                                        {
+                                            "name": "h100-pool",
+                                            "role": "GPU",
+                                            "platform": "gpu-h100-sxm",
+                                            "preset": "8gpu-128vcpu-1600gb",
+                                            "diskSizeGb": 200,
+                                            "nodeCount": 2,
+                                            "maxNodeCount": 4,
+                                            "gpu": {
+                                                "acceleratorType": "nvidia-h100",
+                                                "driversPreset": "cuda13.0",
+                                            },
+                                            "fabric": "fabric-2",
+                                        },
+                                    ],
+                                },
+                            },
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(
+                    type="ClusterReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="Provisioning",
+                ),
+                fnv1.Condition(
+                    type="BackendReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="WaitingForCluster",
+                ),
+            ],
+            context=structpb.Struct(),
+        )
+        want10.requirements.resources["class-gpu-h100-nebius"].CopyFrom(class_selector_nebius)
+
+        # --- Case 11: Nebius cluster ready - kubeconfig and service account
+        # credentials observed on the NebiusCluster status. The function wires
+        # the ClusterProviderConfig with the Nebius identity (the mk8s
+        # kubeconfig has no embedded credentials), composes the ServingStack
+        # backend with both secrets, and emits the Usage that blocks
+        # NebiusCluster deletion until the ServingStack is gone. ---
+        req11 = fnv1.RunFunctionRequest()
+        req11.CopyFrom(req10)
+        req11.observed.resources["nebius-cluster"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                        "kind": "NebiusCluster",
+                        "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
+                        "spec": {
+                            "nodePools": [
+                                {
+                                    "name": "h100-pool",
+                                    "role": "GPU",
+                                    "platform": "gpu-h100-sxm",
+                                    "preset": "8gpu-128vcpu-1600gb",
+                                    "nodeCount": 2,
+                                },
+                            ],
+                        },
+                        "status": {
+                            "conditions": [
+                                {
+                                    "type": "Ready",
+                                    "status": "True",
+                                    "reason": "Available",
+                                    "lastTransitionTime": "2024-01-01T00:00:00Z",
+                                },
+                            ],
+                            "secrets": [
+                                {
+                                    "type": "Kubeconfig",
+                                    "name": "test-cluster-kubeconfig-abcde",
+                                    "key": "kubeconfig",
+                                },
+                                # The credential entry carries a namespace: it
+                                # is the Nebius ClusterProviderConfig's Secret,
+                                # which lives outside modelplane-system.
+                                {
+                                    "type": "NebiusServiceAccountCredentials",
+                                    "name": "nebius-credentials",
+                                    "key": "credentials.json",
+                                    "namespace": "crossplane-system",
+                                },
+                            ],
+                        },
+                    }
+                ),
+            ),
+        )
+
+        want11 = fnv1.RunFunctionResponse()
+        want11.CopyFrom(want10)
+        want11.desired.resources["nebius-cluster"].ready = fnv1.READY_TRUE
+        want11.desired.resources["cluster-provider-config-kubernetes"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                        "kind": "ClusterProviderConfig",
+                        "metadata": {"name": "test-cluster-cluster-kubeconfig-d0f89"},
+                        "spec": {
+                            "credentials": {
+                                "source": "Secret",
+                                "secretRef": {
+                                    "namespace": "modelplane-system",
+                                    "name": "test-cluster-kubeconfig-abcde",
+                                    "key": "kubeconfig",
+                                },
+                            },
+                            "identity": {
+                                "type": "NebiusServiceAccountCredentials",
+                                "source": "Secret",
+                                "secretRef": {
+                                    "namespace": "crossplane-system",
+                                    "name": "nebius-credentials",
+                                    "key": "credentials.json",
+                                },
+                            },
+                        },
+                    }
+                ),
+                ready=fnv1.READY_TRUE,
+            ),
+        )
+        want11.desired.resources["serving-stack"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                        "kind": "ServingStack",
+                        "metadata": {
+                            "name": "test-cluster-serving-stack-fd00b",
+                            "namespace": "modelplane-system",
+                        },
+                        "spec": {
+                            "secrets": [
+                                {
+                                    "type": "Kubeconfig",
+                                    "name": "test-cluster-kubeconfig-abcde",
+                                    "key": "kubeconfig",
+                                },
+                                {
+                                    "type": "NebiusServiceAccountCredentials",
+                                    "name": "nebius-credentials",
+                                    "key": "credentials.json",
+                                    "namespace": "crossplane-system",
+                                },
+                            ],
+                        },
+                    }
+                ),
+            ),
+        )
+        want11.desired.resources["usage-nebius-by-backend"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "protection.crossplane.io/v1beta1",
+                        "kind": "Usage",
+                        "metadata": {"namespace": "modelplane-system"},
+                        "spec": {
+                            "of": {
+                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                                "kind": "NebiusCluster",
+                                "resourceSelector": {"matchControllerRef": True},
+                            },
+                            "by": {
+                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                                "kind": "ServingStack",
+                                "resourceSelector": {"matchControllerRef": True},
+                            },
+                            "replayDeletion": True,
+                        },
+                    }
+                ),
+                ready=fnv1.READY_TRUE,
+            ),
+        )
+        del want11.conditions[:]
+        want11.conditions.extend(
+            [
+                fnv1.Condition(
+                    type="ClusterReady",
+                    status=fnv1.STATUS_CONDITION_TRUE,
+                    reason="ClusterRunning",
+                ),
+                fnv1.Condition(
+                    type="BackendReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="Installing",
+                ),
+            ]
+        )
+        want11.results.append(
+            fnv1.Result(
+                severity=fnv1.SEVERITY_NORMAL,
+                message="Nebius cluster ready, composing backend",
+            )
+        )
+
         # Every compose path emits the ModelReplica guard requirement.
-        for want in (want1, want2, want3, want4, want5, want6, want7, want8, want9):
+        for want in (want1, want2, want3, want4, want5, want6, want7, want8, want9, want10, want11):
             want.requirements.resources["model-replicas"].CopyFrom(_replicas_selector("test-cluster"))
 
         # The guard cases reuse case 1's request and response.
@@ -1533,6 +1853,12 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 name="EKS node pool with fabric EFA sets fabric on the EKSCluster pool",
                 req=req9,
                 want=want9,
+            ),
+            Case(name="Nebius cluster first pass composes NebiusCluster XR only", req=req10, want=want10),
+            Case(
+                name="Nebius cluster ready composes CPC with Nebius identity, ServingStack, and Usage",
+                req=req11,
+                want=want11,
             ),
             *guard_cases,
         ]

@@ -20,6 +20,7 @@ spec:
     maxNodeCount: 2
     zones:
     - us-east-2b
-    fabric: EFA
+    fabric:
+      type: EFA
     capacityBlock:
       capacityReservationId: cr-0123456789abcdef0  # replace with your reservation ID

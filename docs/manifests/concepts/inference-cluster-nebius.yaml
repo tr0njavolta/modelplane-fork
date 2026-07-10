@@ -1,0 +1,53 @@
+# An InferenceCluster backed by a Nebius mk8s cluster.
+#
+# Modelplane provisions the full mk8s cluster (VPC network and subnet,
+# control plane with a public endpoint, system + GPU node groups, GPU
+# clusters for InfiniBand fabrics) and installs the inference stack
+# (cert-manager, Traefik, Prometheus, KEDA, LeaderWorkerSet).
+#
+# The system node group that hosts control-plane components is
+# provisioned automatically and is not declared here. Only GPU node
+# pools - each referencing an InferenceClass that describes the
+# hardware shape and how to provision it - need to be declared.
+#
+# Nebius authenticates every Kubernetes client through Nebius IAM: the
+# mk8s kubeconfig carries only the cluster endpoint and CA certificate,
+# and Nebius has no API that mints service account keys server-side. So
+# Modelplane reuses the credentials Secret of the Nebius
+# ClusterProviderConfig named default - the same identity that
+# provisions the cluster - to authenticate to it. Nothing to create
+# beyond the ClusterProviderConfig the provider needs anyway.
+#
+# ModelCache RWX storage is provisioned automatically: a Nebius shared
+# filesystem mounted on every node group, served through Nebius's
+# csi-mounted-fs-path CSI driver as the modelplane-rwx-fs StorageClass.
+#
+# Delete this InferenceCluster with foreground cascading deletion for a
+# clean teardown:
+#
+#   kubectl delete inferencecluster nebius-eu-north --cascade=foreground
+#
+# The inference stack runs on the mk8s cluster and must uninstall while
+# the cluster's API server and kubeconfig still exist - otherwise its
+# Helm releases hang, and a load balancer one of them created can leak
+# and block the network from deleting. Foreground deletion holds the
+# cluster until the stack is uninstalled. Background deletion (the
+# kubectl default) tears everything down at once and can orphan cloud
+# resources.
+apiVersion: modelplane.ai/v1alpha1
+kind: InferenceCluster
+metadata:
+  name: nebius-eu-north
+  labels:
+    modelplane.ai/region: eu-north
+spec:
+  cluster:
+    source: Nebius
+    nebius: {}
+
+  nodePools:
+  - name: gpu-h100
+    className: nebius-h100-8x
+    nodeCount: 1
+    minNodeCount: 1
+    maxNodeCount: 4

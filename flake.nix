@@ -58,6 +58,7 @@
         "compose-inference-class"
         "compose-inference-cluster"
         "compose-inference-gateway"
+        "compose-nebius-cluster"
         "compose-serving-stack"
         "compose-model-cache"
         "compose-model-deployment"

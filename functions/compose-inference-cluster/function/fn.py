@@ -37,6 +37,7 @@ from models.ai.modelplane.inferenceclass import v1alpha1 as iclv1alpha1
 from models.ai.modelplane.inferencecluster import v1alpha1
 from models.ai.modelplane.infrastructure.ekscluster import v1alpha1 as eksv1alpha1
 from models.ai.modelplane.infrastructure.gkecluster import v1alpha1 as gkev1alpha1
+from models.ai.modelplane.infrastructure.nebiuscluster import v1alpha1 as nebiusv1alpha1
 from models.ai.modelplane.infrastructure.servingstack import v1alpha1 as ssv1alpha1
 from models.io.crossplane.m.kubernetes.clusterproviderconfig import (
     v1alpha1 as k8scpcv1alpha1,
@@ -48,6 +49,7 @@ from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 # Cluster source discriminator values from the XRD enum.
 CLUSTER_SOURCE_GKE = "GKE"
 CLUSTER_SOURCE_EKS = "EKS"
+CLUSTER_SOURCE_NEBIUS = "Nebius"
 CLUSTER_SOURCE_EXISTING = "Existing"
 
 # GKE installs the NVIDIA driver here rather than at the default / root; the
@@ -89,6 +91,9 @@ _NAMESPACE_SYSTEM = "modelplane-system"
 
 # Identity type for GCP service account credentials.
 _IDENTITY_TYPE_GCP = "GoogleApplicationCredentials"
+
+# Identity type for Nebius service account credentials.
+_IDENTITY_TYPE_NEBIUS = "NebiusServiceAccountCredentials"
 
 
 def _name(meta: metav1.ObjectMeta | None) -> str:
@@ -149,6 +154,8 @@ class Composer:
             self.compose_gke(cluster.gke)
         elif source == CLUSTER_SOURCE_EKS:
             self.compose_eks(cluster.eks)
+        elif source == CLUSTER_SOURCE_NEBIUS:
+            self.compose_nebius(cluster.nebius)
         elif source == CLUSTER_SOURCE_EXISTING:
             self.compose_existing(cluster.existing)
         else:
@@ -318,6 +325,52 @@ class Composer:
         self.write_status(self.gpu_pools())
         self.derive_conditions(cluster_ready=eks_ready)
 
+    def compose_nebius(self, nebius: v1alpha1.Nebius | None) -> None:
+        """Compose an InferenceCluster backed by a Modelplane-provisioned
+        Nebius mk8s cluster. Composes the NebiusCluster XR, waits for it to
+        be ready, then wires its secrets into the backend.
+
+        The mk8s kubeconfig carries only the cluster endpoint and CA
+        certificate - Nebius authenticates every client through Nebius IAM -
+        so the ClusterProviderConfig authenticates as the Nebius service
+        account identity relayed through the NebiusCluster's status (the
+        Nebius ClusterProviderConfig's credentials Secret)
+        """
+        if not nebius:
+            response.warning(self.rsp, "Nebius configuration is required when source is Nebius")
+            return
+
+        self.compose_nebius_cluster(nebius)
+
+        nebius_ready = (
+            resource.get_condition(self.req.observed.resources.get("nebius-cluster"), "Ready").status == "True"
+        )
+        kubeconfig = self.observed_nebius_secret(_SECRET_TYPE_KUBECONFIG)
+        credentials = self.observed_nebius_secret(_IDENTITY_TYPE_NEBIUS)
+        backend_exists = BACKEND_RESOURCE_KEY in self.req.observed.resources
+
+        if nebius_ready and kubeconfig:
+            self.compose_cluster_provider_config(
+                kubeconfig.name,
+                kubeconfig.key,
+                identity_ref=credentials,
+                identity_type=_IDENTITY_TYPE_NEBIUS,
+            )
+
+        backend_secrets = self.resolve_nebius_backend_secrets(nebius_ready=nebius_ready, backend_exists=backend_exists)
+        if backend_secrets or backend_exists:
+            if backend_secrets:
+                self.compose_serving_stack(backend_secrets)
+            self.compose_nebius_usage()
+
+        if nebius_ready:
+            self.rsp.desired.resources["nebius-cluster"].ready = fnv1.READY_TRUE
+            if not backend_exists:
+                response.normal(self.rsp, "Nebius cluster ready, composing backend")
+
+        self.write_status(self.gpu_pools())
+        self.derive_conditions(cluster_ready=nebius_ready)
+
     def compose_existing(self, existing: v1alpha1.Existing | None) -> None:
         """Compose an InferenceCluster backed by a user-supplied cluster.
         No gating needed — the kubeconfig secret is provided by the user."""
@@ -377,7 +430,7 @@ class Composer:
         self,
         kubeconfig_name: str,
         kubeconfig_key: str | None,
-        identity_ref: gkev1alpha1.Secret | v1alpha1.IdentitySecretRef | None = None,
+        identity_ref: gkev1alpha1.Secret | nebiusv1alpha1.Secret | v1alpha1.IdentitySecretRef | None = None,
         identity_type: str | None = None,
     ) -> None:
         """Compose a ClusterProviderConfig for provider-kubernetes so that
@@ -385,7 +438,9 @@ class Composer:
 
         When identity_ref is set, the ProviderConfig authenticates as the given
         identity_type (the cloud IAM identity) on top of the kubeconfig instead
-        of relying on the kubeconfig's embedded credentials.
+        of relying on the kubeconfig's embedded credentials. The identity
+        secret is in modelplane-system unless the ref carries a namespace
+        (Nebius credentials live with the Nebius ClusterProviderConfig).
         """
         cpc = k8scpcv1alpha1.ClusterProviderConfig(
             metadata=metav1.ObjectMeta(name=resource.child_name(_name(self.xr.metadata), "cluster-kubeconfig")),
@@ -405,7 +460,7 @@ class Composer:
                 type=identity_type,  # ty: ignore[invalid-argument-type]  # value comes from the XRD/GKE identity-type enums
                 source="Secret",
                 secretRef=k8scpcv1alpha1.SecretRef(
-                    namespace=_NAMESPACE_SYSTEM,
+                    namespace=getattr(identity_ref, "namespace", None) or _NAMESPACE_SYSTEM,
                     name=identity_ref.name,
                     key=identity_ref.key,  # ty: ignore[invalid-argument-type]  # XRD defaults the secret key
                 ),
@@ -571,8 +626,8 @@ class Composer:
                 )
             # Likewise only set fabric when the pool opts into one, so an
             # on-demand pool's EKSCluster spec stays free of fabric: None.
-            if pool.fabric and pool.fabric != "None":
-                node_pool.fabric = pool.fabric
+            if pool.fabric and pool.fabric.type == "EFA":
+                node_pool.fabric = pool.fabric.type
             eks_node_pools.append(node_pool)
 
         resource.update(
@@ -589,6 +644,150 @@ class Composer:
                 ),
             ),
         )
+
+    def compose_nebius_cluster(self, nebius: v1alpha1.Nebius) -> None:
+        """Compose a NebiusCluster XR.
+
+        Combines the cluster-level config (project, credentials) with GPU
+        node pools derived from the user's node pools + referenced classes.
+        The system pool is injected by compose-nebius-cluster.
+        """
+        nebius_node_pools: list[nebiusv1alpha1.NodePool] = []
+
+        for pool in self.xr.spec.nodePools or []:
+            cls = self.classes.get(pool.className)
+            if not cls or not cls.spec.provisioning or not cls.spec.provisioning.nebius:
+                msg = f"InferenceClass {pool.className} has no Nebius provisioning block"
+                response.set_conditions(
+                    self.rsp,
+                    resource.Condition(
+                        typ=CONDITION_TYPE_CLUSTER_READY,
+                        status="False",
+                        reason=CONDITION_REASON_INVALID_NODE_POOL,
+                        message=msg,
+                    ),
+                )
+                response.warning(self.rsp, msg)
+                return
+            prov = cls.spec.provisioning.nebius
+            node_pool = nebiusv1alpha1.NodePool(
+                name=pool.name,
+                role="GPU",
+                platform=prov.platform,
+                preset=prov.preset,
+                diskSizeGb=prov.diskSizeGb,
+                nodeCount=pool.nodeCount,
+                gpu=nebiusv1alpha1.Gpu(
+                    acceleratorType=prov.accelerator.type,
+                    driversPreset=prov.driversPreset,
+                ),
+            )
+            # mk8s node groups are either fixed size or autoscaled, never
+            # both. Only set the autoscaling bounds when the pool opts in, so
+            # fixed-size pools stay fixed (resource.update serializes with
+            # exclude_unset, keeping unset bounds out of the NebiusCluster
+            # spec rather than emitting maxNodeCount: null).
+            if pool.maxNodeCount is not None:
+                node_pool.maxNodeCount = pool.maxNodeCount
+            if pool.minNodeCount is not None:
+                node_pool.minNodeCount = pool.minNodeCount
+            # Likewise only set fabric when the pool opts into one. The XRD
+            # guarantees fabric.infiniband is set when fabric.type is
+            # InfiniBand; the value names the physical Nebius fabric the
+            # NebiusCluster composes a GPU cluster on.
+            if pool.fabric and pool.fabric.type == "InfiniBand" and pool.fabric.infiniband:
+                node_pool.fabric = pool.fabric.infiniband.fabric
+            nebius_node_pools.append(node_pool)
+
+        spec = nebiusv1alpha1.Spec(
+            kubernetesVersion=nebius.kubernetesVersion,
+            nodePools=nebius_node_pools,
+        )
+        resource.update(
+            self.rsp.desired.resources["nebius-cluster"],
+            nebiusv1alpha1.NebiusCluster(
+                metadata=metav1.ObjectMeta(
+                    name=_name(self.xr.metadata),
+                    namespace=_NAMESPACE_SYSTEM,
+                ),
+                spec=spec,
+            ),
+        )
+
+    def compose_nebius_usage(self) -> None:
+        """Block NebiusCluster deletion until the backend is deleted."""
+        resource.update(
+            self.rsp.desired.resources["usage-nebius-by-backend"],
+            usagev1beta1.Usage(
+                metadata=metav1.ObjectMeta(namespace=_NAMESPACE_SYSTEM),
+                spec=usagev1beta1.Spec(
+                    of=usagev1beta1.Of(
+                        apiVersion="infrastructure.modelplane.ai/v1alpha1",
+                        kind="NebiusCluster",
+                        resourceSelector=usagev1beta1.ResourceSelectorModel(matchControllerRef=True),
+                    ),
+                    by=usagev1beta1.By(
+                        apiVersion="infrastructure.modelplane.ai/v1alpha1",
+                        kind="ServingStack",
+                        resourceSelector=usagev1beta1.ResourceSelector(matchControllerRef=True),
+                    ),
+                    replayDeletion=True,
+                ),
+            ),
+        )
+        self.rsp.desired.resources["usage-nebius-by-backend"].ready = fnv1.READY_TRUE
+
+    def resolve_nebius_backend_secrets(
+        self, *, nebius_ready: bool, backend_exists: bool
+    ) -> list[ssv1alpha1.Secret] | None:
+        """Resolve secrets for the backend from NebiusCluster status. Falls
+        back to the observed backend's spec.secrets if NebiusCluster secrets
+        aren't available but the backend already exists. Entries keep their
+        namespace when set - the Nebius credential typically lives with the
+        Nebius ClusterProviderConfig, outside modelplane-system."""
+        nebius_secrets = self.observed_nebius_secrets()
+
+        if nebius_ready and nebius_secrets:
+            return [self._backend_secret(s.type, s.name, s.key, s.namespace) for s in nebius_secrets]
+
+        if backend_exists:
+            observed = self.req.observed.resources.get(BACKEND_RESOURCE_KEY)
+            if observed:
+                d = resource.struct_to_dict(observed.resource)
+                observed_secrets = d.get("spec", {}).get("secrets", [])
+                if observed_secrets:
+                    return [
+                        self._backend_secret(s["type"], s["name"], s["key"], s.get("namespace"))
+                        for s in observed_secrets
+                    ]
+
+        return None
+
+    @staticmethod
+    def _backend_secret(type_: str, name: str, key: str, namespace: str | None) -> ssv1alpha1.Secret:
+        """A ServingStack secret entry, with the namespace only when set so
+        entries in the backend's own namespace stay namespace-free."""
+        secret = ssv1alpha1.Secret(type=type_, name=name, key=key)  # ty: ignore[invalid-argument-type]  # values come from the XRD secret-type enums
+        if namespace:
+            secret.namespace = namespace
+        return secret
+
+    def observed_nebius_secrets(self) -> list[nebiusv1alpha1.Secret] | None:
+        """Read the NebiusCluster's status.secrets from observed state."""
+        nebius_observed = self.req.observed.resources.get("nebius-cluster")
+        if not nebius_observed:
+            return None
+        observed_nebius = nebiusv1alpha1.NebiusCluster.model_validate(resource.struct_to_dict(nebius_observed.resource))
+        if not observed_nebius.status:
+            return None
+        return observed_nebius.status.secrets
+
+    def observed_nebius_secret(self, secret_type: str) -> nebiusv1alpha1.Secret | None:
+        """Read a specific secret from the observed NebiusCluster status."""
+        nebius_secrets = self.observed_nebius_secrets()
+        if not nebius_secrets:
+            return None
+        return next((s for s in nebius_secrets if s.type == secret_type), None)
 
     def compose_eks_usage(self) -> None:
         """Block EKSCluster deletion until the backend is deleted."""
@@ -759,12 +958,16 @@ class Composer:
             return self._observed_cluster_cache_class("gke-cluster", gkev1alpha1.GKECluster)
         if cluster.source == CLUSTER_SOURCE_EKS:
             return self._observed_cluster_cache_class("eks-cluster", eksv1alpha1.EKSCluster)
+        if cluster.source == CLUSTER_SOURCE_NEBIUS:
+            return self._observed_cluster_cache_class("nebius-cluster", nebiusv1alpha1.NebiusCluster)
         if cluster.source == CLUSTER_SOURCE_EXISTING and cluster.existing and cluster.existing.cache:
             return cluster.existing.cache.storageClassName
         return None
 
     def _observed_cluster_cache_class(
-        self, key: str, model: type[gkev1alpha1.GKECluster] | type[eksv1alpha1.EKSCluster]
+        self,
+        key: str,
+        model: type[gkev1alpha1.GKECluster] | type[eksv1alpha1.EKSCluster] | type[nebiusv1alpha1.NebiusCluster],
     ) -> str | None:
         """Read status.cache.storageClassName from an observed cluster XR."""
         observed = self.req.observed.resources.get(key)

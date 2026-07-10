@@ -40,12 +40,14 @@ spec:
                   message: spec.cluster.gke is required when spec.cluster.source is GKE.
                 - rule: "self.source != 'EKS' || has(self.eks)"
                   message: spec.cluster.eks is required when spec.cluster.source is EKS.
+                - rule: "self.source != 'Nebius' || has(self.nebius)"
+                  message: spec.cluster.nebius is required when spec.cluster.source is Nebius.
                 properties:
                   source:
                     type: string
                     description: >-
                       Cluster provisioning method.
-                    enum: [GKE, EKS, Existing]
+                    enum: [GKE, EKS, Nebius, Existing]
                   existing:
                     type: object
                     description: >-
@@ -153,6 +155,23 @@ spec:
                           EKS cluster Kubernetes version. Defaults to a
                           version where Dynamic Resource Allocation (how GPUs
                           bind to pods) is generally available.
+                  nebius:
+                    type: object
+                    description: >-
+                      Nebius mk8s cluster configuration. Required when source
+                      is Nebius; may be empty, since every field has a
+                      default. The cluster is created in the project the
+                      Nebius ClusterProviderConfig named default sets as its
+                      projectID; Nebius projects are bound to a region, so
+                      the project also determines where the cluster runs.
+                    properties:
+                      kubernetesVersion:
+                        type: string
+                        default: "1.34"
+                        description: >-
+                          mk8s cluster Kubernetes version. Defaults to a
+                          version where Dynamic Resource Allocation (DRA)
+                          is generally available.
               nodePools:
                 type: array
                 description: >-
@@ -224,21 +243,59 @@ spec:
                           minLength: 4
                           maxLength: 64
                     fabric:
-                      type: string
-                      default: None
+                      type: object
                       description: >-
                         High-performance node-to-node fabric for multi-node
-                        engines. None uses standard VPC networking (ENA/TCP).
-                        EFA attaches Elastic Fabric Adapter interfaces to each
-                        node for GPUDirect RDMA across nodes, so a gang's
-                        tensor-parallel traffic isn't capped by TCP. EKS only.
-                        Only useful on EFA-capable instance types (e.g.
-                        p5en.48xlarge). When any pool sets EFA, Modelplane
-                        installs the EFA DRA driver on the cluster and the
-                        gang's pods claim EFA devices alongside their GPUs.
-                      enum:
-                      - None
-                      - EFA
+                        engines, so a gang's tensor-parallel traffic isn't
+                        capped by TCP. Omit for standard VPC networking.
+                      x-kubernetes-validations:
+                      - rule: "self.type != 'InfiniBand' || has(self.infiniband)"
+                        message: fabric.infiniband is required when fabric.type is InfiniBand.
+                      - rule: "!has(self.infiniband) || self.type == 'InfiniBand'"
+                        message: fabric.infiniband is only valid when fabric.type is InfiniBand.
+                      properties:
+                        type:
+                          type: string
+                          default: None
+                          description: >-
+                            Fabric technology. None uses standard VPC
+                            networking (TCP). EFA attaches Elastic Fabric
+                            Adapter interfaces to each node for GPUDirect
+                            RDMA across nodes; EKS only, and only useful on
+                            EFA-capable instance types (e.g. p5en.48xlarge).
+                            When any pool sets EFA, Modelplane installs the
+                            EFA DRA driver on the cluster and the gang's pods
+                            claim EFA devices alongside their GPUs.
+                            InfiniBand places the pool's nodes in a GPU
+                            cluster on a physical InfiniBand fabric for
+                            GPUDirect RDMA across nodes; Nebius only, and
+                            only useful on InfiniBand-capable platforms
+                            (e.g. gpu-h100-sxm).
+                          enum:
+                          - None
+                          - EFA
+                          - InfiniBand
+                        infiniband:
+                          type: object
+                          description: >-
+                            InfiniBand fabric configuration. Required when
+                            type is InfiniBand.
+                          required:
+                          - fabric
+                          properties:
+                            fabric:
+                              type: string
+                              description: >-
+                                Identifier of the physical InfiniBand fabric
+                                to join (e.g. fabric-2). This selects existing
+                                Nebius infrastructure, not a name for a new
+                                resource: fabrics are per-region - see
+                                https://docs.nebius.com/compute/clusters/gpu#fabrics
+                                - and multi-node GPU capacity is allocated on
+                                specific fabrics, so use the fabric your
+                                capacity lives on.
+                              minLength: 1
+                              maxLength: 63
           status:
             type: object
             properties:

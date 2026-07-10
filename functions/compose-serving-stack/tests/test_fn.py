@@ -437,6 +437,19 @@ _NODE_FEATURE_DISCOVERY = {
                 "version": "0.18.3",
             },
             "namespace": "node-feature-discovery",
+            # The worker labels GPU nodes for the DRA driver, so it must
+            # tolerate the GPU taint the cluster compositions apply.
+            "values": {
+                "worker": {
+                    "tolerations": [
+                        {
+                            "key": "nvidia.com/gpu",
+                            "operator": "Exists",
+                            "effect": "NoSchedule",
+                        },
+                    ],
+                },
+            },
         },
         "providerConfigRef": {
             "kind": "ProviderConfig",
