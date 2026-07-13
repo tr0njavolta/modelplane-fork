@@ -136,7 +136,10 @@ _PD_REPLICA_ENGINES = [
 # A one-replica deployment requesting a single GPU. Reused across most cases.
 _XR = v1alpha1.ModelDeployment(
     metadata=metav1.ObjectMeta(name="my-model", namespace="ml-team"),
-    spec=v1alpha1.SpecModel(replicas=1, engines=[_ENGINE]),
+    spec=v1alpha1.SpecModel1(
+        replicas=1,
+        template=v1alpha1.TemplateModel(spec=v1alpha1.SpecModel(engines=[_ENGINE])),
+    ),
 ).model_dump(exclude_none=True, mode="json")
 
 
@@ -374,10 +377,14 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         # A deployment that sets spec.modelCacheRef.
         xr_cached = v1alpha1.ModelDeployment(
             metadata=metav1.ObjectMeta(name="my-model", namespace="ml-team"),
-            spec=v1alpha1.SpecModel(
+            spec=v1alpha1.SpecModel1(
                 replicas=1,
-                modelCacheRef=v1alpha1.ModelCacheRef(name="qwen"),
-                engines=[_ENGINE],
+                template=v1alpha1.TemplateModel(
+                    spec=v1alpha1.SpecModel(
+                        modelCacheRef=v1alpha1.ModelCacheRef(name="qwen"),
+                        engines=[_ENGINE],
+                    )
+                ),
             ),
         ).model_dump(exclude_none=True, mode="json")
 
@@ -385,30 +392,41 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         # scheduler intersects it with the cache's footprint.
         xr_cached_selector = v1alpha1.ModelDeployment(
             metadata=metav1.ObjectMeta(name="my-model", namespace="ml-team"),
-            spec=v1alpha1.SpecModel(
+            spec=v1alpha1.SpecModel1(
                 replicas=1,
-                clusterSelector=v1alpha1.ClusterSelector(matchLabels={"region": "us-east"}),
-                modelCacheRef=v1alpha1.ModelCacheRef(name="qwen"),
-                engines=[_ENGINE],
+                template=v1alpha1.TemplateModel(
+                    spec=v1alpha1.SpecModel(
+                        clusterSelector=v1alpha1.ClusterSelector(matchLabels={"region": "us-east"}),
+                        modelCacheRef=v1alpha1.ModelCacheRef(name="qwen"),
+                        engines=[_ENGINE],
+                    )
+                ),
             ),
         ).model_dump(exclude_none=True, mode="json")
 
         # A two-replica deployment (no container args) for the co-location case.
         xr_two = v1alpha1.ModelDeployment(
             metadata=metav1.ObjectMeta(name="my-model", namespace="ml-team"),
-            spec=v1alpha1.SpecModel(replicas=2, engines=[_ENGINE_NO_ARGS]),
+            spec=v1alpha1.SpecModel1(
+                replicas=2,
+                template=v1alpha1.TemplateModel(spec=v1alpha1.SpecModel(engines=[_ENGINE_NO_ARGS])),
+            ),
         ).model_dump(exclude_none=True, mode="json")
 
         # A disaggregated (PrefillDecode) deployment: a Prefill and a Decode engine.
         xr_pd = v1alpha1.ModelDeployment(
             metadata=metav1.ObjectMeta(name="my-model", namespace="ml-team"),
-            spec=v1alpha1.SpecModel(
+            spec=v1alpha1.SpecModel1(
                 replicas=1,
-                serving=v1alpha1.Serving(mode="PrefillDecode"),
-                engines=[
-                    _ENGINE.model_copy(update={"name": "prefill", "phase": "Prefill"}),
-                    _ENGINE.model_copy(update={"name": "decode", "phase": "Decode"}),
-                ],
+                template=v1alpha1.TemplateModel(
+                    spec=v1alpha1.SpecModel(
+                        serving=v1alpha1.Serving(mode="PrefillDecode"),
+                        engines=[
+                            _ENGINE.model_copy(update={"name": "prefill", "phase": "Prefill"}),
+                            _ENGINE.model_copy(update={"name": "decode", "phase": "Decode"}),
+                        ],
+                    )
+                ),
             ),
         ).model_dump(exclude_none=True, mode="json")
 
@@ -1228,6 +1246,72 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                     json_format.MessageToDict(got),
                     "-want, +got",
                 )
+
+
+def _composed(resp: fnv1.RunFunctionResponse, kind: str) -> list[dict]:
+    """Composed desired resources of the given kind, as dicts."""
+    result = []
+    for r in resp.desired.resources.values():
+        d = resource.struct_to_dict(r.resource)
+        if d.get("kind") == kind:
+            result.append(d)
+    return result
+
+
+class TestTemplateLabels(unittest.IsolatedAsyncioTestCase):
+    """spec.template.metadata.labels land on the composed ModelReplicas and
+    ModelEndpoints, alongside the labels Modelplane manages."""
+
+    async def test_stamped_on_replica_and_endpoint(self) -> None:
+        xr = v1alpha1.ModelDeployment(
+            metadata=metav1.ObjectMeta(name="my-model", namespace="ml-team"),
+            spec=v1alpha1.SpecModel1(
+                replicas=1,
+                template=v1alpha1.TemplateModel(
+                    metadata=v1alpha1.Metadata(labels={"tier": "prod", "team": "search"}),
+                    spec=v1alpha1.SpecModel(engines=[_ENGINE]),
+                ),
+            ),
+        ).model_dump(exclude_none=True, mode="json")
+        # An observed, Ready replica lets the endpoint compose this reconcile.
+        req = _req(
+            xr,
+            clusters=[_CLUSTER_A],
+            replicas=[_EXISTING_REPLICA],
+            observed={"replica-cluster-a-0": _replica_status(_EXISTING_REPLICA, ready=True)},
+        )
+        got = await fn.FunctionRunner().RunFunction(req, None)
+
+        composed = _composed(got, "ModelReplica") + _composed(got, "ModelEndpoint")
+        self.assertEqual(len(composed), 2, "expected one ModelReplica and one ModelEndpoint")
+        for obj in composed:
+            labels = obj["metadata"]["labels"]
+            self.assertEqual(labels.get("tier"), "prod")
+            self.assertEqual(labels.get("team"), "search")
+            self.assertEqual(labels.get("modelplane.ai/deployment"), "my-model")
+            self.assertEqual(labels.get("modelplane.ai/cluster"), "cluster-a")
+            self.assertEqual(labels.get("modelplane.ai/replica-index"), "0")
+
+    async def test_managed_labels_win_a_collision(self) -> None:
+        """The XRD's CEL rejects a template label under the modelplane.ai/ prefix,
+        but the invariant lives in the function too: managed labels are stamped
+        last, so a colliding label can't override them even if that CEL rule is
+        relaxed or the function is reused elsewhere."""
+        xr = v1alpha1.ModelDeployment(
+            metadata=metav1.ObjectMeta(name="my-model", namespace="ml-team"),
+            spec=v1alpha1.SpecModel1(
+                replicas=1,
+                template=v1alpha1.TemplateModel(
+                    metadata=v1alpha1.Metadata(labels={"modelplane.ai/cluster": "wrong", "tier": "prod"}),
+                    spec=v1alpha1.SpecModel(engines=[_ENGINE]),
+                ),
+            ),
+        ).model_dump(exclude_none=True, mode="json")
+        got = await fn.FunctionRunner().RunFunction(_req(xr, clusters=[_CLUSTER_A]), None)
+
+        replica = _composed(got, "ModelReplica")[0]
+        self.assertEqual(replica["metadata"]["labels"]["modelplane.ai/cluster"], "cluster-a")
+        self.assertEqual(replica["metadata"]["labels"]["tier"], "prod")
 
 
 class TestResolveRequired(unittest.TestCase):

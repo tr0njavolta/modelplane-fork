@@ -5,21 +5,23 @@ metadata:
   namespace: ml-team
 spec:
   replicas: 2
-  engines:
-    - name: qwen3-8b
-      members:
+  template:
+    spec:
+      engines:
+      - name: qwen3-8b
+        members:
         - role: Standalone
           nodeSelector:
             devices:
-              - name: gpu
-                count: 1
-                selectors:
-                  - cel: |
-                      device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
+            - name: gpu
+              count: 1
+              selectors:
+              - cel: |
+                  device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
           template:
             spec:
               containers:
-                - name: engine
-                  image: vllm/vllm-openai:v0.23.0
-                  args:
-                    - --model=Qwen/Qwen3-8B
+              - name: engine
+                image: vllm/vllm-openai:v0.23.0
+                args:
+                - --model=Qwen/Qwen3-8B

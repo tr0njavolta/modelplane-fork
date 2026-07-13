@@ -22,29 +22,31 @@ metadata:
 spec:
   # One replica, matched to any compatible InferenceCluster by device capacity.
   replicas: 1
-  engines:
-  - name: qwen2-5-0-5b
-    members:
+  template:
+    spec:
+      engines:
+      - name: qwen2-5-0-5b
+        members:
     # A single self-contained vLLM pod. The container named "engine" is the
     # inference server; its image and args pass through verbatim.
-    - role: Standalone
-      nodeSelector:
-        devices:
-        - name: gpu
-          count: 1
-          selectors:
+        - role: Standalone
+          nodeSelector:
+            devices:
+            - name: gpu
+              count: 1
+              selectors:
           # The model needs almost no VRAM; >=20Gi simply pins it to the L4 pool
           # this example provisions (the L4 reports ~23Gi). DRA evaluates this CEL
           # against the InferenceClass device, then against the GPU's
           # ResourceSlice when it binds the claim.
-          - cel: |
-              device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
-      template:
-        spec:
-          containers:
-          - name: engine
-            image: vllm/vllm-openai:v0.23.0
-            args:
-            - "--model=Qwen/Qwen2.5-0.5B-Instruct"
-            - "--served-model-name=qwen2.5-0.5b"
-            - "--max-model-len=16384"
+              - cel: |
+                  device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
+          template:
+            spec:
+              containers:
+              - name: engine
+                image: vllm/vllm-openai:v0.23.0
+                args:
+                - "--model=Qwen/Qwen2.5-0.5B-Instruct"
+                - "--served-model-name=qwen2.5-0.5b"
+                - "--max-model-len=16384"

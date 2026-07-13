@@ -25,94 +25,96 @@ metadata:
   namespace: ml-team
 spec:
   replicas: 1
-  modelCacheRef:
-    name: kimi-k2
-  serving:
-    mode: PrefillDecode            # the two engines below are one P/D pair
-  engines:
-  - name: kimi-prefill
-    phase: Prefill
-    members:
-    - role: Standalone
-      nodeSelector:
-        devices:
-        - name: gpu
-          count: 8
-          selectors:
-          - cel: |
-              device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("130Gi")) >= 0
-        - name: efa
-          count: 16
-          selectors:
-          - cel: |
-              device.driver == "dra.net"
-      template:
-        spec:
-          containers:
-          - name: engine
-            image: vllm/vllm-openai:v0.23.0
-            command: ["vllm", "serve", "/mnt/models"]
-            args:
-            - --served-model-name=kimi-k2
-            - --quantization=compressed-tensors
-            - --tensor-parallel-size=1
-            - --data-parallel-size=8
-            - --enable-expert-parallel
-            - --block-size=64
-            - --max-model-len=131072
-            - --trust-remote-code
-            - --tool-call-parser=kimi_k2
-            - --enable-auto-tool-choice
-            - --load-format=runai_streamer
-            - --model-loader-extra-config={"concurrency":16,"distributed":true}
-            - --tokenizer=moonshotai/Kimi-K2-Instruct
-            - --override-generation-config={"eos_token_id":163586}
-            - --port=8000
-            - --kv-transfer-config={"kv_connector":"NixlConnector","kv_role":"kv_producer"}
-            env:
-            - name: HF_TOKEN
-              valueFrom:
-                secretKeyRef: { name: hf-token, key: HF_TOKEN }
-  - name: kimi-decode
-    phase: Decode
-    members:
-    - role: Standalone
-      nodeSelector:
-        devices:
-        - name: gpu
-          count: 8
-          selectors:
-          - cel: |
-              device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("130Gi")) >= 0
-        - name: efa
-          count: 16
-          selectors:
-          - cel: |
-              device.driver == "dra.net"
-      template:
-        spec:
-          containers:
-          - name: engine
-            image: vllm/vllm-openai:v0.23.0
-            command: ["vllm", "serve", "/mnt/models"]
-            args:
-            - --served-model-name=kimi-k2
-            - --quantization=compressed-tensors
-            - --tensor-parallel-size=1
-            - --data-parallel-size=8
-            - --enable-expert-parallel
-            - --block-size=64
-            - --max-model-len=131072
-            - --trust-remote-code
-            - --tool-call-parser=kimi_k2
-            - --enable-auto-tool-choice
-            - --load-format=runai_streamer
-            - --model-loader-extra-config={"concurrency":16,"distributed":true}
-            - --tokenizer=moonshotai/Kimi-K2-Instruct
-            - --override-generation-config={"eos_token_id":163586}
-            - --port=8001                                      # pd-sidecar owns 8000
-            - --kv-transfer-config={"kv_connector":"NixlConnector","kv_role":"kv_consumer"}
-            env:
-            - name: HF_TOKEN
-              valueFrom:
-                secretKeyRef: { name: hf-token, key: HF_TOKEN }
+  template:
+    spec:
+      modelCacheRef:
+        name: kimi-k2
+      serving:
+        mode: PrefillDecode        # the two engines below are one P/D pair
+      engines:
+      - name: kimi-prefill
+        phase: Prefill
+        members:
+        - role: Standalone
+          nodeSelector:
+            devices:
+            - name: gpu
+              count: 8
+              selectors:
+              - cel: |
+                  device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("130Gi")) >= 0
+            - name: efa
+              count: 16
+              selectors:
+              - cel: |
+                  device.driver == "dra.net"
+          template:
+            spec:
+              containers:
+              - name: engine
+                image: vllm/vllm-openai:v0.23.0
+                command: ["vllm", "serve", "/mnt/models"]
+                args:
+                - --served-model-name=kimi-k2
+                - --quantization=compressed-tensors
+                - --tensor-parallel-size=1
+                - --data-parallel-size=8
+                - --enable-expert-parallel
+                - --block-size=64
+                - --max-model-len=131072
+                - --trust-remote-code
+                - --tool-call-parser=kimi_k2
+                - --enable-auto-tool-choice
+                - --load-format=runai_streamer
+                - --model-loader-extra-config={"concurrency":16,"distributed":true}
+                - --tokenizer=moonshotai/Kimi-K2-Instruct
+                - --override-generation-config={"eos_token_id":163586}
+                - --port=8000
+                - --kv-transfer-config={"kv_connector":"NixlConnector","kv_role":"kv_producer"}
+                env:
+                - name: HF_TOKEN
+                  valueFrom:
+                    secretKeyRef: {name: hf-token, key: HF_TOKEN}
+      - name: kimi-decode
+        phase: Decode
+        members:
+        - role: Standalone
+          nodeSelector:
+            devices:
+            - name: gpu
+              count: 8
+              selectors:
+              - cel: |
+                  device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("130Gi")) >= 0
+            - name: efa
+              count: 16
+              selectors:
+              - cel: |
+                  device.driver == "dra.net"
+          template:
+            spec:
+              containers:
+              - name: engine
+                image: vllm/vllm-openai:v0.23.0
+                command: ["vllm", "serve", "/mnt/models"]
+                args:
+                - --served-model-name=kimi-k2
+                - --quantization=compressed-tensors
+                - --tensor-parallel-size=1
+                - --data-parallel-size=8
+                - --enable-expert-parallel
+                - --block-size=64
+                - --max-model-len=131072
+                - --trust-remote-code
+                - --tool-call-parser=kimi_k2
+                - --enable-auto-tool-choice
+                - --load-format=runai_streamer
+                - --model-loader-extra-config={"concurrency":16,"distributed":true}
+                - --tokenizer=moonshotai/Kimi-K2-Instruct
+                - --override-generation-config={"eos_token_id":163586}
+                - --port=8001                                  # pd-sidecar owns 8000
+                - --kv-transfer-config={"kv_connector":"NixlConnector","kv_role":"kv_consumer"}
+                env:
+                - name: HF_TOKEN
+                  valueFrom:
+                    secretKeyRef: {name: hf-token, key: HF_TOKEN}

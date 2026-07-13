@@ -200,11 +200,11 @@ class Composer:
         # never staged to, where its PVC wouldn't exist and the pod would be
         # stuck on a volume mount (#186).
         clusters_match_labels = None
-        if self.xr.spec.clusterSelector and self.xr.spec.clusterSelector.matchLabels:
-            clusters_match_labels = dict(self.xr.spec.clusterSelector.matchLabels)
+        if self.xr.spec.template.spec.clusterSelector and self.xr.spec.template.spec.clusterSelector.matchLabels:
+            clusters_match_labels = dict(self.xr.spec.template.spec.clusterSelector.matchLabels)
 
-        if self.xr.spec.modelCacheRef:
-            resolution, cache_match_labels = self.resolve_cache_footprint(self.xr.spec.modelCacheRef)
+        if self.xr.spec.template.spec.modelCacheRef:
+            resolution, cache_match_labels = self.resolve_cache_footprint(self.xr.spec.template.spec.modelCacheRef)
             if resolution is Resolution.PRESENT:
                 # The cache resolved, so its footprint is known; merge its labels
                 # so new replicas land only where it stages. Empty labels (the
@@ -350,6 +350,20 @@ class Composer:
 
         return matched
 
+    def _child_labels(self, cluster_info: scheduling.Candidate) -> dict[str, str]:
+        """Labels for a composed ModelReplica or ModelEndpoint.
+
+        The user's template labels first, then the labels Modelplane manages, so
+        a managed key always wins over a colliding one (the XRD also rejects
+        template labels under the modelplane.ai/ prefix).
+        """
+        metadata = self.xr.spec.template.metadata
+        labels = dict((metadata.labels if metadata else None) or {})
+        labels[_LABEL_DEPLOYMENT] = _name(self.xr.metadata)
+        labels[_LABEL_CLUSTER] = cluster_info.name
+        labels[_LABEL_INDEX] = str(cluster_info.index)
+        return labels
+
     def compose_replicas(self, matched: list[scheduling.Candidate]) -> None:
         """Compose a ModelReplica per matched cluster.
 
@@ -361,7 +375,7 @@ class Composer:
         """
         # Index the deployment's engines by name so each placement (keyed by
         # engine name) can be joined with its template and member shape.
-        engines_by_name = {e.name: e for e in self.xr.spec.engines}
+        engines_by_name = {e.name: e for e in self.xr.spec.template.spec.engines}
 
         for cluster_info in matched:
             replica_key = name.replica_key(cluster_info)
@@ -370,24 +384,22 @@ class Composer:
                 metadata=metav1.ObjectMeta(
                     name=name.replica(_name(self.xr.metadata), cluster_info),
                     namespace=_namespace(self.xr.metadata),
-                    labels={
-                        _LABEL_DEPLOYMENT: _name(self.xr.metadata),
-                        _LABEL_CLUSTER: cluster_info.name,
-                        _LABEL_INDEX: str(cluster_info.index),
-                    },
+                    labels=self._child_labels(cluster_info),
                 ),
                 spec=mrv1alpha1.SpecModel(
                     clusterName=cluster_info.name,
                     engines=[self._replica_engine(engines_by_name[ep.name], ep) for ep in cluster_info.engines],
                 ),
             )
-            if self.xr.spec.modelCacheRef:
-                replica.spec.modelCacheRef = mrv1alpha1.ModelCacheRef(name=self.xr.spec.modelCacheRef.name)
+            if self.xr.spec.template.spec.modelCacheRef:
+                replica.spec.modelCacheRef = mrv1alpha1.ModelCacheRef(
+                    name=self.xr.spec.template.spec.modelCacheRef.name
+                )
             # The replica backend reads serving to pick unified vs. disaggregated
             # routing; copy it down unchanged.
-            if self.xr.spec.serving:
+            if self.xr.spec.template.spec.serving:
                 replica.spec.serving = mrv1alpha1.Serving.model_validate(
-                    self.xr.spec.serving.model_dump(exclude_unset=True)
+                    self.xr.spec.template.spec.serving.model_dump(exclude_unset=True)
                 )
             resource.update(self.rsp.desired.resources[replica_key], replica)
 
@@ -487,11 +499,7 @@ class Composer:
                     metadata=metav1.ObjectMeta(
                         name=replica_name,
                         namespace=_namespace(self.xr.metadata),
-                        labels={
-                            _LABEL_DEPLOYMENT: _name(self.xr.metadata),
-                            _LABEL_CLUSTER: cluster_info.name,
-                            _LABEL_INDEX: str(cluster_info.index),
-                        },
+                        labels=self._child_labels(cluster_info),
                     ),
                     spec=mev1alpha1.Spec(
                         url=url,

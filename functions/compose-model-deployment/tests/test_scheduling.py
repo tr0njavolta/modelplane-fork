@@ -127,7 +127,10 @@ def _deployment(
         engines = [_engine(copies=count, pipeline=pipeline, requests=requests)]
     return mdv1alpha1.ModelDeployment(
         metadata=metav1.ObjectMeta(name=name, namespace="ml-team"),
-        spec=mdv1alpha1.SpecModel(replicas=replicas, engines=engines),
+        spec=mdv1alpha1.SpecModel1(
+            replicas=replicas,
+            template=mdv1alpha1.TemplateModel(spec=mdv1alpha1.SpecModel(engines=engines)),
+        ),
     )
 
 

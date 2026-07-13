@@ -5,19 +5,21 @@ metadata:
   namespace: ml-team
 spec:
   replicas: 1
-  engines:
-  - name: qwen
-    members:
-    - role: Standalone
-      nodeSelector:
-        devices:
-        - name: gpu
-          count: 1
-          selectors:
-          - cel: device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
-      template:
-        spec:
-          containers:
-          - name: engine
-            image: vllm/vllm-openai:v0.23.0
-            args: ["--model=Qwen/Qwen2.5-0.5B-Instruct"]
+  template:
+    spec:
+      engines:
+      - name: qwen
+        members:
+        - role: Standalone
+          nodeSelector:
+            devices:
+            - name: gpu
+              count: 1
+              selectors:
+              - cel: device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
+          template:
+            spec:
+              containers:
+              - name: engine
+                image: vllm/vllm-openai:v0.23.0
+                args: ["--model=Qwen/Qwen2.5-0.5B-Instruct"]

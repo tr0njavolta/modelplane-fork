@@ -35,35 +35,37 @@ metadata:
 spec:
   # One replica, matched to any compatible InferenceCluster by device capacity.
   replicas: 1
-  engines:
-  - name: qwen3-8b-spec
-    members:
+  template:
+    spec:
+      engines:
+      - name: qwen3-8b-spec
+        members:
     # A single self-contained vLLM pod. The container named "engine" is the
     # inference server; its image and args pass through verbatim.
-    - role: Standalone
-      nodeSelector:
-        devices:
-        - name: gpu
-          count: 1
-          selectors:
+        - role: Standalone
+          nodeSelector:
+            devices:
+            - name: gpu
+              count: 1
+              selectors:
           # An 8B model needs most of an L4. >=20Gi selects the L4 (which reports
           # ~23Gi) without over-constraining. DRA evaluates this CEL against the
           # InferenceClass device, then against the GPU's ResourceSlice on bind.
-          - cel: |
-              device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
-      template:
-        spec:
-          containers:
-          - name: engine
-            image: vllm/vllm-openai:v0.23.0
-            args:
-            - "--model=Qwen/Qwen3-8B"
+              - cel: |
+                  device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
+          template:
+            spec:
+              containers:
+              - name: engine
+                image: vllm/vllm-openai:v0.23.0
+                args:
+                - "--model=Qwen/Qwen3-8B"
             # The id clients pass as "model" in OpenAI requests.
-            - "--served-model-name=qwen3-8b-spec"
+                - "--served-model-name=qwen3-8b-spec"
             # Cap the context so the KV cache fits beside the weights on the L4.
-            - "--max-model-len=16384"
-            - "--gpu-memory-utilization=0.92"
+                - "--max-model-len=16384"
+                - "--gpu-memory-utilization=0.92"
             # Enable n-gram speculative decoding (no draft model, no cache).
-            - "--speculative-config={\"method\": \"ngram\", \"num_speculative_tokens\": 5, \"prompt_lookup_max\": 4, \"prompt_lookup_min\": 2}"
+                - "--speculative-config={\"method\": \"ngram\", \"num_speculative_tokens\": 5, \"prompt_lookup_max\": 4, \"prompt_lookup_min\": 2}"
             # Thinking off, so output copies the prompt and prompt-lookup pays off.
-            - "--default-chat-template-kwargs={\"enable_thinking\": false}"
+                - "--default-chat-template-kwargs={\"enable_thinking\": false}"

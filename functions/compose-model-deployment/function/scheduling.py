@@ -291,7 +291,7 @@ def compile_engines(deployment: mdv1alpha1.ModelDeployment) -> list[_CompiledEng
     malformed expression.
     """
     engines = []
-    for engine in deployment.spec.engines:
+    for engine in deployment.spec.template.spec.engines:
         copies = int(engine.copies or 1)
         members = [
             _CompiledMember(
