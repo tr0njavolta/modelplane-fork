@@ -166,11 +166,10 @@ def leader_address_env() -> dict:
     return {"name": LEADER_ADDRESS_ENV, "value": f"$({_LWS_LEADER_ADDRESS_ENV})"}
 
 
-# Response resource keys. A replica's shared Service and HTTPRoute keep stable
-# keys; each engine's workload gets an engine-scoped key and each member's
-# claim a member-scoped one (the engine name plus the member role) so a
-# multi-engine replica's resources don't collide in the response map.
-SERVICE_KEY = "model-service"
+# Response resource keys. A replica's HTTPRoute keeps a stable key; each engine's
+# workload gets an engine-scoped key and each member's claim a member-scoped one
+# (the engine name plus the member role) so a multi-engine replica's resources
+# don't collide in the response map.
 ROUTE_KEY = "model-route"
 _WORKLOAD_KEY = "model-serving"
 _CLAIM_KEY = "resource-claim"
@@ -270,58 +269,6 @@ def wrap_object(
             forProvider=k8sobjv1alpha1.ForProvider(manifest=manifest),
         ),
     )
-
-
-def serving_resources(replica: v1alpha1.ModelReplica, provider_config: str) -> dict[str, k8sobjv1alpha1.Object]:
-    """Compose the Service and HTTPRoute that front a replica's serving pods.
-
-    One Service spans every engine's serving pods (Standalone pods and LWS
-    leaders) via the shared serving label; one HTTPRoute exposes that Service at
-    the replica's per-placement path. Built once per replica, independent of how
-    many engines it has - the unified serving surface the design's Unified mode
-    describes.
-
-    Named after the replica (unique per placement) so co-located replicas on one
-    cluster don't collide. The replica name is reserved for these serving
-    resources; workloads are named per engine (see engine_name) so a
-    LeaderWorkerSet never shares this Service's name and its controller can
-    create the headless gang-DNS Service it needs. The route attaches to the
-    workload cluster's inference gateway; the control plane rewrites the public
-    /<ns>/<service>/ prefix to this replica's /<ns>/<replica>/, which the route
-    strips to /.
-    """
-    name = _name(replica.metadata)
-    service = {
-        "apiVersion": "v1",
-        "kind": "Service",
-        "metadata": {"name": name, "namespace": REMOTE_NAMESPACE},
-        "spec": {"selector": {LABEL_SERVING: name}, "ports": [{"port": 80, "targetPort": ENGINE_PORT}]},
-    }
-    http_route = {
-        "apiVersion": "gateway.networking.k8s.io/v1",
-        "kind": "HTTPRoute",
-        "metadata": {"name": name, "namespace": REMOTE_NAMESPACE},
-        "spec": {
-            "parentRefs": [{"name": "inference-gateway", "namespace": "modelplane-system"}],
-            "rules": [
-                {
-                    "matches": [{"path": {"type": "PathPrefix", "value": f"/{_namespace(replica.metadata)}/{name}/"}}],
-                    "timeouts": {"request": REQUEST_TIMEOUT},
-                    "filters": [
-                        {
-                            "type": "URLRewrite",
-                            "urlRewrite": {"path": {"type": "ReplacePrefixMatch", "replacePrefixMatch": "/"}},
-                        }
-                    ],
-                    "backendRefs": [{"name": name, "port": 80}],
-                }
-            ],
-        },
-    }
-    return {
-        SERVICE_KEY: wrap_object(provider_config, service),
-        ROUTE_KEY: wrap_object(provider_config, http_route),
-    }
 
 
 def serving_label(replica: v1alpha1.ModelReplica) -> str:

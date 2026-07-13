@@ -227,35 +227,6 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                             }
                         ),
                     ),
-                    "model-service": fnv1.Resource(
-                        resource=resource.dict_to_struct(
-                            {
-                                "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
-                                "kind": "Object",
-                                "spec": {
-                                    "providerConfigRef": {
-                                        "kind": "ClusterProviderConfig",
-                                        "name": "cluster-a-pc",
-                                    },
-                                    "readiness": {"policy": "SuccessfulCreate"},
-                                    "forProvider": {
-                                        "manifest": {
-                                            "apiVersion": "v1",
-                                            "kind": "Service",
-                                            "metadata": {
-                                                "name": "test-replica",
-                                                "namespace": "default",
-                                            },
-                                            "spec": {
-                                                "selector": {"modelplane.ai/serving": "test-replica"},
-                                                "ports": [{"port": 80, "targetPort": 8000}],
-                                            },
-                                        },
-                                    },
-                                },
-                            }
-                        ),
-                    ),
                     "model-route": fnv1.Resource(
                         resource=resource.dict_to_struct(
                             {
@@ -305,7 +276,11 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                             },
                                                         ],
                                                         "backendRefs": [
-                                                            {"name": "test-replica", "port": 80},
+                                                            {
+                                                                "group": "inference.networking.k8s.io",
+                                                                "kind": "InferencePool",
+                                                                "name": "test-replica-pool",
+                                                            },
                                                         ],
                                                     },
                                                 ],
@@ -496,14 +471,16 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 ),
             )
         )
-        # The other three are observed simply by being present; their content
-        # doesn't matter, only that the function can see them.
-        for key in ("model-service", "model-route", "resource-claim-main-standalone"):
+        # The other two are observed simply by being present; their content
+        # doesn't matter, only that the function can see them. (The InferencePool +
+        # endpoint picker resources aren't observed here, so they stay unready and
+        # are excluded from the golden below - test_backends covers their manifests.)
+        for key in ("model-route", "resource-claim-main-standalone"):
             req4.observed.resources[key].CopyFrom(fnv1.Resource(resource=structpb.Struct()))
 
         want4 = fnv1.RunFunctionResponse()
         want4.CopyFrom(want1)
-        for key in ("model-serving-main", "model-service", "model-route", "resource-claim-main-standalone"):
+        for key in ("model-serving-main", "model-route", "resource-claim-main-standalone"):
             want4.desired.resources[key].ready = fnv1.READY_TRUE
         del want4.conditions[:]
         want4.conditions.extend(
@@ -523,11 +500,32 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             Case(name="observed resources are marked ready", req=req4, want=want4),
         ]
 
+        # Unified routing fronts the serving pods with an InferencePool + endpoint
+        # picker; their manifests are asserted in detail in test_backends. Here we
+        # only check the function wired the whole set in (and dropped the plain
+        # Service), then drop them so the golden covers the dispatch and wiring the
+        # function itself owns.
+        routing_keys = {
+            "inference-pool",
+            "epp",
+            "epp-config",
+            "epp-role",
+            "epp-rolebinding",
+            "epp-serviceaccount",
+            "epp-service",
+        }
         for case in cases:
             with self.subTest(case.name):
                 got = await self.runner.RunFunction(case.req, None)
+                got_dict = json_format.MessageToDict(got)
+                resources = got_dict.get("desired", {}).get("resources", {})
+                if "model-serving-main" in resources:
+                    self.assertLessEqual(routing_keys, set(resources))
+                    self.assertNotIn("model-service", resources)
+                    for key in routing_keys:
+                        resources.pop(key, None)
                 self.assertEqual(
                     json_format.MessageToDict(case.want),
-                    json_format.MessageToDict(got),
+                    got_dict,
                     "-want, +got",
                 )
