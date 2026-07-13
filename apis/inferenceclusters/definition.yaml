@@ -172,6 +172,30 @@ spec:
                           mk8s cluster Kubernetes version. Defaults to a
                           version where Dynamic Resource Allocation (DRA)
                           is generally available.
+              taints:
+                type: array
+                description: >-
+                  Taints that repel ModelDeployments from this cluster unless
+                  they carry a matching toleration, following the Kubernetes
+                  taint model. NoSchedule keeps new replicas off the cluster
+                  while leaving existing ones in place; NoExecute additionally
+                  drains the replicas already here, which the scheduler
+                  reschedules onto other tolerated clusters (the declarative
+                  equivalent of draining a node before maintenance).
+                x-kubernetes-list-type: map
+                x-kubernetes-list-map-keys: [key, effect]
+                items:
+                  type: object
+                  required: [key, effect]
+                  properties:
+                    key:
+                      type: string
+                      minLength: 1
+                    value:
+                      type: string
+                    effect:
+                      type: string
+                      enum: [NoSchedule, NoExecute]
               nodePools:
                 type: array
                 description: >-
