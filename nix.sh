@@ -128,8 +128,18 @@ if [ -t 1 ]; then
 	INTERACTIVE_FLAGS="-it"
 fi
 
+# Forward registry credentials into the container when DOCKER_CONFIG is set,
+# so 'nix run .#push' can authenticate to the package registry:
+#   DOCKER_CONFIG=/tmp/dockercfg ./nix.sh run .#push -- --tag <tag>
+# DOCKER_CONFIG names a directory containing a Docker config.json.
+DOCKER_CONFIG_FLAGS=""
+if [ -n "${DOCKER_CONFIG:-}" ]; then
+	DOCKER_CONFIG_FLAGS="-v ${DOCKER_CONFIG}:/dockercfg:ro -e DOCKER_CONFIG=/dockercfg"
+fi
+
 # Run with --privileged for Docker-in-Docker (required for composition tests).
-docker run --rm --privileged --cgroupns=host ${INTERACTIVE_FLAGS} \
+# shellcheck disable=SC2086  # INTERACTIVE_FLAGS and DOCKER_CONFIG_FLAGS are intentionally word-split.
+docker run --rm --privileged --cgroupns=host ${INTERACTIVE_FLAGS} ${DOCKER_CONFIG_FLAGS} \
 	-v "$(pwd):/modelplane" \
 	-v "modelplane-nix:/nix" \
 	-w /modelplane \
