@@ -129,6 +129,7 @@
             pkgs.kind
             pkgs.kubectl
             pkgs.docker-client
+            pkgs.nix
           ];
           inheritPath = false;
           text = ''
@@ -137,6 +138,15 @@
             ln -s ${functionsPkg} _output/functions
 
             crossplane project run "$@"
+
+            # When running via nix.sh, the cluster lives inside the container's
+            # Docker daemon and would vanish when the container exits. Drop into
+            # a dev shell so the user can interact with it before exiting.
+            if [ "''${NIX_SH_CONTAINER:-}" = "1" ]; then
+              echo ""
+              echo "Entering development shell (exit to stop)..."
+              exec nix develop
+            fi
           '';
         }
       );
