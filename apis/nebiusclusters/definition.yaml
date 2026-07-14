@@ -1,0 +1,283 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: nebiusclusters.infrastructure.modelplane.ai
+spec:
+  group: infrastructure.modelplane.ai
+  names:
+    categories:
+    - crossplane
+    - modelplane
+    kind: NebiusCluster
+    plural: nebiusclusters
+    shortNames:
+    - mk8s
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    referenceable: true
+    schema:
+      openAPIV3Schema:
+        description: >-
+          A NebiusCluster provisions a Nebius Managed Service for Kubernetes
+          (mk8s) cluster with dedicated node groups for GPU inference and
+          system workloads. It outputs a Secret containing the cluster
+          kubeconfig. The kubeconfig carries only the cluster endpoint and CA
+          certificate - Nebius clusters authenticate every client through
+          Nebius IAM - so consumers pair it with the credentials Secret of
+          the Nebius ClusterProviderConfig named default, the same identity
+          that provisions the cluster. The cluster is created in the project
+          that ClusterProviderConfig sets as its projectID; Nebius projects
+          are bound to a region, so the project also determines where the
+          cluster runs.
+        properties:
+          spec:
+            description: NebiusClusterSpec defines the desired state of NebiusCluster.
+            required:
+            - nodePools
+            properties:
+              kubernetesVersion:
+                type: string
+                default: "1.34"
+                description: >-
+                  mk8s cluster Kubernetes version. Must be a version mk8s
+                  currently supports. Defaults to a version where Dynamic
+                  Resource Allocation (how GPUs bind to pods) is generally
+                  available.
+                minLength: 1
+                maxLength: 16
+              nodePools:
+                type: array
+                description: >-
+                  Node groups for the cluster. At least one System pool is
+                  required for controllers and infrastructure workloads.
+                minItems: 1
+                maxItems: 8
+                x-kubernetes-list-type: map
+                x-kubernetes-list-map-keys:
+                - name
+                items:
+                  type: object
+                  required:
+                  - name
+                  - role
+                  - platform
+                  - preset
+                  x-kubernetes-validations:
+                  - rule: "self.role != 'GPU' || has(self.gpu)"
+                    message: gpu is required when role is GPU.
+                  - rule: "!has(self.minNodeCount) || has(self.maxNodeCount)"
+                    message: maxNodeCount is required when minNodeCount is set.
+                  properties:
+                    name:
+                      type: string
+                      description: >-
+                        Unique name for this node group. Used as a suffix
+                        in the mk8s NodeGroup resource name.
+                      maxLength: 40
+                      minLength: 1
+                    role:
+                      type: string
+                      description: >-
+                        Determines what workloads this group runs. System
+                        groups host controllers, gateways, and infrastructure.
+                        GPU groups host inference workloads and are tainted to
+                        exclude non-GPU pods.
+                      enum:
+                      - System
+                      - GPU
+                    platform:
+                      type: string
+                      description: >-
+                        Nebius compute platform for the group's nodes (e.g.
+                        gpu-h100-sxm, gpu-l40s-a, cpu-d3). Together with
+                        preset this replaces the instance type used by other
+                        clouds.
+                      minLength: 1
+                      maxLength: 63
+                    preset:
+                      type: string
+                      description: >-
+                        Resource preset within the platform (e.g.
+                        8gpu-128vcpu-1600gb, 4vcpu-16gb). Determines the GPU,
+                        vCPU, and memory shape of each node.
+                      minLength: 1
+                      maxLength: 63
+                    diskSizeGb:
+                      type: integer
+                      default: 100
+                      description: Boot disk size in GB.
+                      minimum: 10
+                      maximum: 65536
+                    nodeCount:
+                      type: integer
+                      default: 1
+                      description: >-
+                        Number of nodes. Fixed unless maxNodeCount enables
+                        autoscaling.
+                      minimum: 0
+                      maximum: 1000
+                    minNodeCount:
+                      type: integer
+                      description: >-
+                        Minimum number of nodes for autoscaling. Defaults to
+                        nodeCount when maxNodeCount is set. Requires
+                        maxNodeCount.
+                      minimum: 0
+                      maximum: 1000
+                    maxNodeCount:
+                      type: integer
+                      description: >-
+                        Maximum number of nodes for autoscaling. When set the
+                        node group autoscales between minNodeCount (or
+                        nodeCount) and this; mk8s autoscaling is server-side,
+                        no in-cluster autoscaler is installed. Omit for
+                        fixed-size groups - unlike other clouds there is no
+                        default, because mk8s node groups are either fixed
+                        size or autoscaled, never both.
+                      minimum: 1
+                      maximum: 1000
+                    gpu:
+                      type: object
+                      description: >-
+                        GPU configuration. Required when role is GPU.
+                      required:
+                      - acceleratorType
+                      properties:
+                        acceleratorType:
+                          type: string
+                          description: >-
+                            GPU accelerator type (e.g. nvidia-h100,
+                            nvidia-l40s). Used to label GPU nodes; the actual
+                            GPU and count are determined by the platform and
+                            preset.
+                          minLength: 1
+                          maxLength: 63
+                        driversPreset:
+                          type: string
+                          default: cuda13.0
+                          description: >-
+                            NVIDIA driver stack mk8s preinstalls on the
+                            group's nodes (e.g. cuda12.4, cuda13.0). Valid
+                            values depend on the platform and Kubernetes
+                            version, and mk8s validates them, so new presets
+                            work without a Modelplane update. Defaults to
+                            the only preset mk8s implements on the default
+                            Kubernetes version; older presets remain for
+                            older versions.
+                          minLength: 1
+                          maxLength: 63
+                    fabric:
+                      type: object
+                      description: >-
+                        High-performance node-to-node fabric for multi-node
+                        engines, so a gang's tensor-parallel traffic isn't
+                        capped by TCP. Omit for standard VPC networking.
+                      x-kubernetes-validations:
+                      - rule: "self.type != 'InfiniBand' || has(self.infiniband)"
+                        message: fabric.infiniband is required when fabric.type is InfiniBand.
+                      - rule: "!has(self.infiniband) || self.type == 'InfiniBand'"
+                        message: fabric.infiniband is only valid when fabric.type is InfiniBand.
+                      properties:
+                        type:
+                          type: string
+                          default: None
+                          description: >-
+                            Fabric technology. None uses standard VPC
+                            networking (TCP). InfiniBand places the group's
+                            nodes in a GPU cluster on a physical InfiniBand
+                            fabric for GPUDirect RDMA across nodes; only
+                            useful on InfiniBand-capable platforms (e.g.
+                            gpu-h100-sxm). When set, Modelplane composes a
+                            GPU cluster on that fabric and places the
+                            group's nodes in it.
+                          enum:
+                          - None
+                          - InfiniBand
+                        infiniband:
+                          type: object
+                          description: >-
+                            InfiniBand fabric configuration. Required when
+                            type is InfiniBand.
+                          required:
+                          - fabric
+                          properties:
+                            fabric:
+                              type: string
+                              description: >-
+                                Identifier of the physical InfiniBand fabric
+                                to join (e.g. fabric-2). This selects existing
+                                Nebius infrastructure, not a name for a new
+                                resource: fabrics are per-region - see
+                                https://docs.nebius.com/compute/clusters/gpu#fabrics
+                                - and multi-node GPU capacity is allocated on
+                                specific fabrics, so use the fabric your
+                                capacity lives on.
+                              minLength: 1
+                              maxLength: 63
+            type: object
+          status:
+            description: NebiusClusterStatus defines the observed state of NebiusCluster.
+            properties:
+              secrets:
+                type: array
+                description: >-
+                  Secrets produced by or passed through this cluster.
+                  Consumers use these to authenticate to the cluster. Secrets
+                  are in the same namespace as this NebiusCluster unless an
+                  entry says otherwise.
+                items:
+                  type: object
+                  required:
+                  - type
+                  - name
+                  - key
+                  properties:
+                    type:
+                      type: string
+                      description: >-
+                        The type of credential this secret contains.
+                        Kubeconfig contains a kubeconfig file with the cluster
+                        endpoint and CA certificate.
+                        NebiusServiceAccountCredentials contains a Nebius
+                        service account JSON key that authenticates to the
+                        cluster via Nebius IAM.
+                      enum:
+                      - Kubeconfig
+                      - NebiusServiceAccountCredentials
+                    name:
+                      type: string
+                      description: Name of the Secret.
+                      maxLength: 253
+                    key:
+                      type: string
+                      description: >-
+                        Key within the Secret that holds the credential data.
+                      maxLength: 253
+                    namespace:
+                      type: string
+                      description: >-
+                        Namespace of the Secret, when it isn't this
+                        NebiusCluster's namespace. Set on the credentials
+                        entry when the credential is reused from the Secret
+                        the Nebius ClusterProviderConfig references.
+                      maxLength: 253
+              cache:
+                type: object
+                description: >-
+                  Observed ModelCache RWX storage state, served by the
+                  Nebius shared filesystem mounted on every node group and
+                  Nebius's csi-mounted-fs-path CSI driver.
+                properties:
+                  storageClassName:
+                    type: string
+                    description: >-
+                      Name of the Modelplane-managed ReadWriteMany StorageClass
+                      composed on this cluster for ModelCache PVCs. ModelCache
+                      reads this to target the cache PVC.
+                    maxLength: 253
+            type: object
+        required:
+        - spec
+        type: object
+    served: true

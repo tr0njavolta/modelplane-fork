@@ -38,10 +38,12 @@ spec:
                   message: spec.provisioning.gke is required when spec.provisioning.provider is GKE.
                 - rule: "self.provider != 'EKS' || has(self.eks)"
                   message: spec.provisioning.eks is required when spec.provisioning.provider is EKS.
+                - rule: "self.provider != 'Nebius' || has(self.nebius)"
+                  message: spec.provisioning.nebius is required when spec.provisioning.provider is Nebius.
                 properties:
                   provider:
                     type: string
-                    enum: [GKE, EKS]
+                    enum: [GKE, EKS, Nebius]
                   gke:
                     type: object
                     required: [machineType, accelerator]
@@ -103,6 +105,64 @@ spec:
                             description: >-
                               GPU accelerator type (e.g. nvidia-a10g,
                               nvidia-h100). Informational - reported on
+                              the consuming InferenceCluster's status.
+                            minLength: 1
+                            maxLength: 63
+                          count:
+                            type: integer
+                            minimum: 1
+                            maximum: 16
+                  nebius:
+                    type: object
+                    required: [platform, preset, accelerator]
+                    properties:
+                      platform:
+                        type: string
+                        description: >-
+                          Nebius compute platform (e.g. gpu-h100-sxm,
+                          gpu-l40s-a). Together with preset this determines
+                          the GPU model and count; the accelerator block
+                          below is informational.
+                        minLength: 1
+                        maxLength: 63
+                      preset:
+                        type: string
+                        description: >-
+                          Resource preset within the platform (e.g.
+                          8gpu-128vcpu-1600gb). Determines the GPU, vCPU,
+                          and memory shape of each node.
+                        minLength: 1
+                        maxLength: 63
+                      diskSizeGb:
+                        type: integer
+                        default: 100
+                        minimum: 10
+                      driversPreset:
+                        type: string
+                        default: cuda13.0
+                        description: >-
+                          NVIDIA driver stack mk8s preinstalls on the pool's
+                          nodes (e.g. cuda12.4, cuda13.0). Valid values
+                          depend on the platform and Kubernetes version, and
+                          mk8s validates them, so new presets work without a
+                          Modelplane update. Defaults to the only preset
+                          mk8s implements on the default Kubernetes version;
+                          older presets remain for older versions.
+                        minLength: 1
+                        maxLength: 63
+                      accelerator:
+                        type: object
+                        description: >-
+                          GPU accelerator to attach when provisioning the node
+                          group. Provisioning input only: the scheduler matches
+                          against spec.devices, not this block.
+                        required: [type, count]
+                        properties:
+                          type:
+                            type: string
+                            description: >-
+                              GPU accelerator type (e.g. nvidia-h100,
+                              nvidia-l40s). Informational - reported on
                               the consuming InferenceCluster's status.
                             minLength: 1
                             maxLength: 63

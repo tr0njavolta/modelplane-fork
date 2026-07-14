@@ -127,10 +127,39 @@ class Gke(BaseModel):
     machineType: constr(min_length=1)
 
 
+class AcceleratorModel1(BaseModel):
+    count: conint(ge=1, le=16)
+    type: constr(min_length=1, max_length=63)
+    """
+    GPU accelerator type (e.g. nvidia-h100, nvidia-l40s). Informational - reported on the consuming InferenceCluster's status.
+    """
+
+
+class Nebius(BaseModel):
+    accelerator: AcceleratorModel1
+    """
+    GPU accelerator to attach when provisioning the node group. Provisioning input only: the scheduler matches against spec.devices, not this block.
+    """
+    diskSizeGb: conint(ge=10) | None = 100
+    driversPreset: constr(min_length=1, max_length=63) | None = 'cuda13.0'
+    """
+    NVIDIA driver stack mk8s preinstalls on the pool's nodes (e.g. cuda12.4, cuda13.0). Valid values depend on the platform and Kubernetes version, and mk8s validates them, so new presets work without a Modelplane update. Defaults to the only preset mk8s implements on the default Kubernetes version; older presets remain for older versions.
+    """
+    platform: constr(min_length=1, max_length=63)
+    """
+    Nebius compute platform (e.g. gpu-h100-sxm, gpu-l40s-a). Together with preset this determines the GPU model and count; the accelerator block below is informational.
+    """
+    preset: constr(min_length=1, max_length=63)
+    """
+    Resource preset within the platform (e.g. 8gpu-128vcpu-1600gb). Determines the GPU, vCPU, and memory shape of each node.
+    """
+
+
 class Provisioning(BaseModel):
     eks: Eks | None = None
     gke: Gke | None = None
-    provider: Literal['GKE', 'EKS']
+    nebius: Nebius | None = None
+    provider: Literal['GKE', 'EKS', 'Nebius']
 
 
 class Spec(BaseModel):

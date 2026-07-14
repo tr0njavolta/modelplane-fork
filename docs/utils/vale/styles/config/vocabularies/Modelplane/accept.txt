@@ -512,6 +512,7 @@ CKS
 CMK
 VKE
 Nebius
+mk8s
 OVHcloud
 Vultr
 Fluidstack

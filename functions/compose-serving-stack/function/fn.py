@@ -364,12 +364,16 @@ class Composer:
             None,
         )
         if identity_secret:
+            # The identity entry may carry its own namespace - the Nebius
+            # credential is the Secret the Nebius ClusterProviderConfig
+            # references, not one in this ServingStack's namespace.
+            identity_namespace = identity_secret.namespace or _namespace(self.xr.metadata)
             k8s_pc_spec.identity = k8spcv1alpha1.Identity(
                 type=identity_secret.type,  # ty: ignore[invalid-argument-type]  # non-Kubeconfig types are exactly the provider identity types
                 source="Secret",
                 secretRef=k8spcv1alpha1.SecretRef(
                     name=identity_secret.name,
-                    namespace=_namespace(self.xr.metadata),
+                    namespace=identity_namespace,
                     key=identity_secret.key,
                 ),
             )
@@ -378,7 +382,7 @@ class Composer:
                 source="Secret",
                 secretRef=helmpcv1beta1.SecretRef(
                     name=identity_secret.name,
-                    namespace=_namespace(self.xr.metadata),
+                    namespace=identity_namespace,
                     key=identity_secret.key,
                 ),
             )
@@ -644,6 +648,31 @@ class Composer:
                 version=v.nodeFeatureDiscovery,  # ty: ignore[invalid-argument-type]  # XRD defaults this version and forbids null
                 namespace="node-feature-discovery",
                 provider_config=_pc_name(self.xr),
+                # The worker must run on the very nodes it is supposed to
+                # label: the DRA driver's kubelet plugin schedules only onto
+                # nodes carrying an NFD GPU label (feature.node.kubernetes.io/
+                # pci-10de.present and friends, see the chart's kubeletPlugin
+                # affinity). But the cluster compositions taint GPU nodes with
+                # nvidia.com/gpu, and the NFD chart's worker tolerates nothing
+                # by default. Without this toleration the chain breaks
+                # silently: no worker on the GPU node, no pci-10de label, no
+                # kubelet plugin, no ResourceSlices and every GPU
+                # ResourceClaim stays unallocatable ("cannot allocate all
+                # claims") with all components looking healthy. The DRA
+                # driver itself already tolerates this taint by default;
+                # Exists matches every value (true on EKS/Nebius, present on
+                # GKE).
+                values={
+                    "worker": {
+                        "tolerations": [
+                            {
+                                "key": "nvidia.com/gpu",
+                                "operator": "Exists",
+                                "effect": "NoSchedule",
+                            },
+                        ],
+                    },
+                },
             ),
         )
 

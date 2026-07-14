@@ -2,8 +2,9 @@
 # Qwen3-Coder-480B as a multi-node gang. The H200 nodes come from an EC2
 # Capacity Block reserved for ML.
 #
-# fabric: EFA turns on Elastic Fabric Adapter for the gang's cross-node traffic;
-# without it multi-node NCCL falls back to TCP, which is slow and unstable.
+# fabric.type: EFA turns on Elastic Fabric Adapter for the gang's cross-node
+# traffic; without it multi-node NCCL falls back to TCP, which is slow and
+# unstable.
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
 metadata:
@@ -23,6 +24,7 @@ spec:
     maxNodeCount: 2
     zones:
     - us-east-2b
-    fabric: EFA
+    fabric:
+      type: EFA
     capacityBlock:
       capacityReservationId: cr-0123456789abcdef0  # replace with your reservation ID

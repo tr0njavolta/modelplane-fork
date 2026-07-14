@@ -20,3 +20,4 @@ docs/utils/webpack/node_modules
 
 # Local superpowers planning artifacts (specs/plans/notes) — not repo content
 docs/superpowers/
+examples/

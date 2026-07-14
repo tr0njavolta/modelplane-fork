@@ -44,11 +44,12 @@ spec:
                 type: array
                 description: >-
                   Secrets used to authenticate to the target cluster. Typically
-                  sourced from a GKECluster's status.secrets. All secrets must
-                  be in the same namespace as this ServingStack. A Kubeconfig
-                  secret is required. If a cloud identity secret is present, the
-                  serving stack authenticates as that identity instead of
-                  relying on the kubeconfig's embedded credentials.
+                  sourced from a GKECluster's status.secrets. Secrets are in
+                  the same namespace as this ServingStack unless an entry says
+                  otherwise. A Kubeconfig secret is required. If a cloud
+                  identity secret is present, the serving stack authenticates
+                  as that identity instead of relying on the kubeconfig's
+                  embedded credentials.
                 minItems: 1
                 maxItems: 8
                 items:
@@ -78,6 +79,14 @@ spec:
                     key:
                       type: string
                       description: Key within the Secret that holds the credential data.
+                      maxLength: 253
+                    namespace:
+                      type: string
+                      description: >-
+                        Namespace of the Secret, when it isn't this
+                        ServingStack's namespace. Set on cloud identity
+                        entries whose credential is the Secret the cloud
+                        provider's ProviderConfig references.
                       maxLength: 253
               nvidiaDriverRoot:
                 type: string

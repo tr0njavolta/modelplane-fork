@@ -76,6 +76,10 @@ class Secret(BaseModel):
     """
     Name of the Secret.
     """
+    namespace: constr(max_length=253) | None = None
+    """
+    Namespace of the Secret, when it isn't this ServingStack's namespace. Set on cloud identity entries whose credential is the Secret the cloud provider's ProviderConfig references.
+    """
     type: Literal[
         'Kubeconfig',
         'GoogleApplicationCredentials',
@@ -133,7 +137,7 @@ class Spec(BaseModel):
     """
     secrets: list[Secret] = Field(..., max_length=8, min_length=1)
     """
-    Secrets used to authenticate to the target cluster. Typically sourced from a GKECluster's status.secrets. All secrets must be in the same namespace as this ServingStack. A Kubeconfig secret is required. If a cloud identity secret is present, the serving stack authenticates as that identity instead of relying on the kubeconfig's embedded credentials.
+    Secrets used to authenticate to the target cluster. Typically sourced from a GKECluster's status.secrets. Secrets are in the same namespace as this ServingStack unless an entry says otherwise. A Kubeconfig secret is required. If a cloud identity secret is present, the serving stack authenticates as that identity instead of relying on the kubeconfig's embedded credentials.
     """
     versions: Versions | None = None
     """

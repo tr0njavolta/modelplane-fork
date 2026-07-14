@@ -1,0 +1,18 @@
+# Points the Nebius provider at the credentials Secret you created. Named
+# default, so InferenceClusters with a Nebius source use it without further
+# configuration - Modelplane also reuses its credentials Secret to
+# authenticate to the clusters it provisions.
+apiVersion: nebius.m.upbound.io/v1beta1
+kind: ClusterProviderConfig
+metadata:
+  name: default
+spec:
+  identity:
+    type: ServiceAccount
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: nebius-credentials
+      key: credentials.json
+  projectID: project-e00example
