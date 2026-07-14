@@ -158,32 +158,63 @@ spec:
                           default: cuda13.0
                           description: >-
                             NVIDIA driver stack mk8s preinstalls on the
-                            group's nodes. Valid values depend on the platform
-                            and Kubernetes version. Defaults to the only
-                            preset mk8s implements on the default Kubernetes
-                            version; older presets remain for older versions.
-                          enum:
-                          - cuda12
-                          - cuda12.4
-                          - cuda12.8
-                          - cuda13.0
+                            group's nodes (e.g. cuda12.4, cuda13.0). Valid
+                            values depend on the platform and Kubernetes
+                            version, and mk8s validates them, so new presets
+                            work without a Modelplane update. Defaults to
+                            the only preset mk8s implements on the default
+                            Kubernetes version; older presets remain for
+                            older versions.
+                          minLength: 1
+                          maxLength: 63
                     fabric:
-                      type: string
+                      type: object
                       description: >-
-                        Identifier of the physical InfiniBand fabric to join
-                        (e.g. fabric-2), for GPUDirect RDMA across nodes in
-                        multi-node engines. This selects existing Nebius
-                        infrastructure, not a name for a new resource:
-                        fabrics are per-region - see
-                        https://docs.nebius.com/compute/clusters/gpu#fabrics
-                        - and multi-node GPU capacity is allocated on
-                        specific fabrics, so use the fabric your capacity
-                        lives on. When set, Modelplane composes a GPU cluster
-                        on that fabric and places the group's nodes in it.
-                        Only valid on InfiniBand-capable platforms (e.g.
-                        gpu-h100-sxm). Omit for standard VPC networking.
-                      minLength: 1
-                      maxLength: 63
+                        High-performance node-to-node fabric for multi-node
+                        engines, so a gang's tensor-parallel traffic isn't
+                        capped by TCP. Omit for standard VPC networking.
+                      x-kubernetes-validations:
+                      - rule: "self.type != 'InfiniBand' || has(self.infiniband)"
+                        message: fabric.infiniband is required when fabric.type is InfiniBand.
+                      - rule: "!has(self.infiniband) || self.type == 'InfiniBand'"
+                        message: fabric.infiniband is only valid when fabric.type is InfiniBand.
+                      properties:
+                        type:
+                          type: string
+                          default: None
+                          description: >-
+                            Fabric technology. None uses standard VPC
+                            networking (TCP). InfiniBand places the group's
+                            nodes in a GPU cluster on a physical InfiniBand
+                            fabric for GPUDirect RDMA across nodes; only
+                            useful on InfiniBand-capable platforms (e.g.
+                            gpu-h100-sxm). When set, Modelplane composes a
+                            GPU cluster on that fabric and places the
+                            group's nodes in it.
+                          enum:
+                          - None
+                          - InfiniBand
+                        infiniband:
+                          type: object
+                          description: >-
+                            InfiniBand fabric configuration. Required when
+                            type is InfiniBand.
+                          required:
+                          - fabric
+                          properties:
+                            fabric:
+                              type: string
+                              description: >-
+                                Identifier of the physical InfiniBand fabric
+                                to join (e.g. fabric-2). This selects existing
+                                Nebius infrastructure, not a name for a new
+                                resource: fabrics are per-region - see
+                                https://docs.nebius.com/compute/clusters/gpu#fabrics
+                                - and multi-node GPU capacity is allocated on
+                                specific fabrics, so use the fabric your
+                                capacity lives on.
+                              minLength: 1
+                              maxLength: 63
             type: object
           status:
             description: NebiusClusterStatus defines the observed state of NebiusCluster.
@@ -228,8 +259,8 @@ spec:
                       description: >-
                         Namespace of the Secret, when it isn't this
                         NebiusCluster's namespace. Set on the credentials
-                        entry when the credential is reused from the Nebius
-                        ClusterProviderConfig's Secret.
+                        entry when the credential is reused from the Secret
+                        the Nebius ClusterProviderConfig references.
                       maxLength: 253
               cache:
                 type: object

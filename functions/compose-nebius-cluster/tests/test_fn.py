@@ -486,6 +486,62 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 ),
             ),
             Case(
+                name="deleted provider config keeps credentials from the observed ProviderConfig",
+                req=_req(
+                    [_GPU_POOL],
+                    observed_resources={
+                        "provider-config-kubernetes": fnv1.Resource(
+                            resource=resource.dict_to_struct(
+                                _provider_config("kubernetes.m.crossplane.io/v1alpha1", "ProviderConfig"),
+                            ),
+                        ),
+                    },
+                    with_provider_config=False,
+                ),
+                want=fnv1.RunFunctionResponse(
+                    meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+                    desired=fnv1.State(
+                        composite=fnv1.Resource(resource=resource.dict_to_struct(_status())),
+                        resources={
+                            "network": fnv1.Resource(resource=resource.dict_to_struct(_network())),
+                            "subnet": fnv1.Resource(resource=resource.dict_to_struct(_subnet())),
+                            "cluster": fnv1.Resource(resource=resource.dict_to_struct(_cluster())),
+                            "filesystem": fnv1.Resource(resource=resource.dict_to_struct(_filesystem())),
+                            "cloud-init": fnv1.Resource(
+                                resource=resource.dict_to_struct(_cloud_init_secret()),
+                                ready=fnv1.READY_TRUE,
+                            ),
+                            "nodegroup-system": fnv1.Resource(resource=resource.dict_to_struct(_nodegroup_system())),
+                            "nodegroup-gpu-h100": fnv1.Resource(
+                                resource=resource.dict_to_struct(
+                                    _nodegroup_gpu({}, autoscaling={"minNodeCount": 1, "maxNodeCount": 4}),
+                                ),
+                            ),
+                            "provider-config-kubernetes": fnv1.Resource(
+                                resource=resource.dict_to_struct(
+                                    _provider_config("kubernetes.m.crossplane.io/v1alpha1", "ProviderConfig"),
+                                ),
+                                ready=fnv1.READY_TRUE,
+                            ),
+                            "provider-config-helm": fnv1.Resource(
+                                resource=resource.dict_to_struct(
+                                    _provider_config("helm.m.crossplane.io/v1beta1", "ProviderConfig"),
+                                ),
+                                ready=fnv1.READY_TRUE,
+                            ),
+                        },
+                    ),
+                    results=[
+                        fnv1.Result(
+                            severity=fnv1.SEVERITY_NORMAL,
+                            message="Nebius ClusterProviderConfig default not found; keeping the "
+                            "credentials the composed ProviderConfig already carries",
+                        ),
+                    ],
+                    context=structpb.Struct(),
+                ),
+            ),
+            Case(
                 name="fixed-size fabric pool composes a GPU cluster and fixedNodeCount",
                 req=_req(
                     [
@@ -496,7 +552,10 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                             preset="8gpu-128vcpu-1600gb",
                             diskSizeGb=200,
                             nodeCount=2,
-                            fabric="fabric-2",
+                            fabric=v1alpha1.Fabric(
+                                type="InfiniBand",
+                                infiniband=v1alpha1.Infiniband(fabric="fabric-2"),
+                            ),
                             gpu=v1alpha1.Gpu(acceleratorType="nvidia-h100"),
                         ),
                     ]

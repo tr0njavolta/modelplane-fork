@@ -365,8 +365,8 @@ class Composer:
         )
         if identity_secret:
             # The identity entry may carry its own namespace - the Nebius
-            # credential lives with the Nebius ClusterProviderConfig's Secret
-            # rather than in this ServingStack's namespace.
+            # credential is the Secret the Nebius ClusterProviderConfig
+            # references, not one in this ServingStack's namespace.
             identity_namespace = identity_secret.namespace or _namespace(self.xr.metadata)
             k8s_pc_spec.identity = k8spcv1alpha1.Identity(
                 type=identity_secret.type,  # ty: ignore[invalid-argument-type]  # non-Kubeconfig types are exactly the provider identity types

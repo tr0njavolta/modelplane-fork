@@ -142,11 +142,14 @@ spec:
                         default: cuda13.0
                         description: >-
                           NVIDIA driver stack mk8s preinstalls on the pool's
-                          nodes. Valid values depend on the platform and
-                          Kubernetes version. Defaults to the only preset
+                          nodes (e.g. cuda12.4, cuda13.0). Valid values
+                          depend on the platform and Kubernetes version, and
+                          mk8s validates them, so new presets work without a
+                          Modelplane update. Defaults to the only preset
                           mk8s implements on the default Kubernetes version;
                           older presets remain for older versions.
-                        enum: [cuda12, cuda12.4, cuda12.8, cuda13.0]
+                        minLength: 1
+                        maxLength: 63
                       accelerator:
                         type: object
                         description: >-

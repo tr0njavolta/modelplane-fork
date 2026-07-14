@@ -41,16 +41,32 @@ class Crossplane(BaseModel):
     resourceRefs: list[ResourceRef] | None = None
 
 
+class Infiniband(BaseModel):
+    fabric: constr(min_length=1, max_length=63)
+    """
+    Identifier of the physical InfiniBand fabric to join (e.g. fabric-2). This selects existing Nebius infrastructure, not a name for a new resource: fabrics are per-region - see https://docs.nebius.com/compute/clusters/gpu#fabrics - and multi-node GPU capacity is allocated on specific fabrics, so use the fabric your capacity lives on.
+    """
+
+
+class Fabric(BaseModel):
+    infiniband: Infiniband | None = None
+    """
+    InfiniBand fabric configuration. Required when type is InfiniBand.
+    """
+    type: Literal['None', 'InfiniBand'] | None = 'None'
+    """
+    Fabric technology. None uses standard VPC networking (TCP). InfiniBand places the group's nodes in a GPU cluster on a physical InfiniBand fabric for GPUDirect RDMA across nodes; only useful on InfiniBand-capable platforms (e.g. gpu-h100-sxm). When set, Modelplane composes a GPU cluster on that fabric and places the group's nodes in it.
+    """
+
+
 class Gpu(BaseModel):
     acceleratorType: constr(min_length=1, max_length=63)
     """
     GPU accelerator type (e.g. nvidia-h100, nvidia-l40s). Used to label GPU nodes; the actual GPU and count are determined by the platform and preset.
     """
-    driversPreset: Literal['cuda12', 'cuda12.4', 'cuda12.8', 'cuda13.0'] | None = (
-        'cuda13.0'
-    )
+    driversPreset: constr(min_length=1, max_length=63) | None = 'cuda13.0'
     """
-    NVIDIA driver stack mk8s preinstalls on the group's nodes. Valid values depend on the platform and Kubernetes version. Defaults to the only preset mk8s implements on the default Kubernetes version; older presets remain for older versions.
+    NVIDIA driver stack mk8s preinstalls on the group's nodes (e.g. cuda12.4, cuda13.0). Valid values depend on the platform and Kubernetes version, and mk8s validates them, so new presets work without a Modelplane update. Defaults to the only preset mk8s implements on the default Kubernetes version; older presets remain for older versions.
     """
 
 
@@ -59,9 +75,9 @@ class NodePool(BaseModel):
     """
     Boot disk size in GB.
     """
-    fabric: constr(min_length=1, max_length=63) | None = None
+    fabric: Fabric | None = None
     """
-    Identifier of the physical InfiniBand fabric to join (e.g. fabric-2), for GPUDirect RDMA across nodes in multi-node engines. This selects existing Nebius infrastructure, not a name for a new resource: fabrics are per-region - see https://docs.nebius.com/compute/clusters/gpu#fabrics - and multi-node GPU capacity is allocated on specific fabrics, so use the fabric your capacity lives on. When set, Modelplane composes a GPU cluster on that fabric and places the group's nodes in it. Only valid on InfiniBand-capable platforms (e.g. gpu-h100-sxm). Omit for standard VPC networking.
+    High-performance node-to-node fabric for multi-node engines, so a gang's tensor-parallel traffic isn't capped by TCP. Omit for standard VPC networking.
     """
     gpu: Gpu | None = None
     """
@@ -139,7 +155,7 @@ class Secret(BaseModel):
     """
     namespace: constr(max_length=253) | None = None
     """
-    Namespace of the Secret, when it isn't this NebiusCluster's namespace. Set on the credentials entry when the credential is reused from the Nebius ClusterProviderConfig's Secret.
+    Namespace of the Secret, when it isn't this NebiusCluster's namespace. Set on the credentials entry when the credential is reused from the Secret the Nebius ClusterProviderConfig references.
     """
     type: Literal['Kubeconfig', 'NebiusServiceAccountCredentials']
     """

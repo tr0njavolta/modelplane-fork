@@ -1503,9 +1503,9 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
         )
 
         # --- Case 10: Nebius first pass composes the NebiusCluster XR only.
-        # The pool's fabric.infiniband.fabric flows through to the
-        # NebiusCluster pool's fabric, and minNodeCount stays unset so the
-        # pool's autoscaling floor defaults to its node count downstream. ---
+        # The pool's InfiniBand fabric flows through to the NebiusCluster
+        # pool's fabric, and minNodeCount stays unset so the pool's
+        # autoscaling floor defaults to its node count downstream. ---
         inference_class_h100_nebius = {
             "apiVersion": "modelplane.ai/v1alpha1",
             "kind": "InferenceClass",
@@ -1630,7 +1630,10 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                                                 "acceleratorType": "nvidia-h100",
                                                 "driversPreset": "cuda13.0",
                                             },
-                                            "fabric": "fabric-2",
+                                            "fabric": {
+                                                "type": "InfiniBand",
+                                                "infiniband": {"fabric": "fabric-2"},
+                                            },
                                         },
                                     ],
                                 },

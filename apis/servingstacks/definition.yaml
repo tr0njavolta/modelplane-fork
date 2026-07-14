@@ -85,8 +85,8 @@ spec:
                       description: >-
                         Namespace of the Secret, when it isn't this
                         ServingStack's namespace. Set on cloud identity
-                        entries whose credential lives with the cloud
-                        provider's ProviderConfig.
+                        entries whose credential is the Secret the cloud
+                        provider's ProviderConfig references.
                       maxLength: 253
               nvidiaDriverRoot:
                 type: string

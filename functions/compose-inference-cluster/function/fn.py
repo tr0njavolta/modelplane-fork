@@ -439,8 +439,10 @@ class Composer:
         When identity_ref is set, the ProviderConfig authenticates as the given
         identity_type (the cloud IAM identity) on top of the kubeconfig instead
         of relying on the kubeconfig's embedded credentials. The identity
-        secret is in modelplane-system unless the ref carries a namespace
-        (Nebius credentials live with the Nebius ClusterProviderConfig).
+        secret is in modelplane-system unless the ref carries a namespace: the
+        Nebius credential is reused from the Secret the cluster-scoped Nebius
+        ClusterProviderConfig references, so its ref names that Secret's
+        namespace explicitly.
         """
         cpc = k8scpcv1alpha1.ClusterProviderConfig(
             metadata=metav1.ObjectMeta(name=resource.child_name(_name(self.xr.metadata), "cluster-kubeconfig")),
@@ -693,10 +695,13 @@ class Composer:
                 node_pool.minNodeCount = pool.minNodeCount
             # Likewise only set fabric when the pool opts into one. The XRD
             # guarantees fabric.infiniband is set when fabric.type is
-            # InfiniBand; the value names the physical Nebius fabric the
+            # InfiniBand; the fabric names the physical Nebius fabric the
             # NebiusCluster composes a GPU cluster on.
             if pool.fabric and pool.fabric.type == "InfiniBand" and pool.fabric.infiniband:
-                node_pool.fabric = pool.fabric.infiniband.fabric
+                node_pool.fabric = nebiusv1alpha1.Fabric(
+                    type="InfiniBand",
+                    infiniband=nebiusv1alpha1.Infiniband(fabric=pool.fabric.infiniband.fabric),
+                )
             nebius_node_pools.append(node_pool)
 
         spec = nebiusv1alpha1.Spec(
@@ -743,12 +748,21 @@ class Composer:
         """Resolve secrets for the backend from NebiusCluster status. Falls
         back to the observed backend's spec.secrets if NebiusCluster secrets
         aren't available but the backend already exists. Entries keep their
-        namespace when set - the Nebius credential typically lives with the
-        Nebius ClusterProviderConfig, outside modelplane-system."""
+        namespace when set - the Nebius credential is reused from the Secret
+        the Nebius ClusterProviderConfig references, outside
+        modelplane-system."""
         nebius_secrets = self.observed_nebius_secrets()
 
         if nebius_ready and nebius_secrets:
-            return [self._backend_secret(s.type, s.name, s.key, s.namespace) for s in nebius_secrets]
+            secrets = []
+            for s in nebius_secrets:
+                secret = ssv1alpha1.Secret(type=s.type, name=s.name, key=s.key)  # ty: ignore[invalid-argument-type]  # values come from the XRD secret-type enums
+                # Only set namespace when the entry carries one, so entries in
+                # the backend's own namespace stay namespace-free.
+                if s.namespace:
+                    secret.namespace = s.namespace
+                secrets.append(secret)
+            return secrets
 
         if backend_exists:
             observed = self.req.observed.resources.get(BACKEND_RESOURCE_KEY)
@@ -756,21 +770,15 @@ class Composer:
                 d = resource.struct_to_dict(observed.resource)
                 observed_secrets = d.get("spec", {}).get("secrets", [])
                 if observed_secrets:
-                    return [
-                        self._backend_secret(s["type"], s["name"], s["key"], s.get("namespace"))
-                        for s in observed_secrets
-                    ]
+                    secrets = []
+                    for s in observed_secrets:
+                        secret = ssv1alpha1.Secret(type=s["type"], name=s["name"], key=s["key"])
+                        if s.get("namespace"):
+                            secret.namespace = s["namespace"]
+                        secrets.append(secret)
+                    return secrets
 
         return None
-
-    @staticmethod
-    def _backend_secret(type_: str, name: str, key: str, namespace: str | None) -> ssv1alpha1.Secret:
-        """A ServingStack secret entry, with the namespace only when set so
-        entries in the backend's own namespace stay namespace-free."""
-        secret = ssv1alpha1.Secret(type=type_, name=name, key=key)  # ty: ignore[invalid-argument-type]  # values come from the XRD secret-type enums
-        if namespace:
-            secret.namespace = namespace
-        return secret
 
     def observed_nebius_secrets(self) -> list[nebiusv1alpha1.Secret] | None:
         """Read the NebiusCluster's status.secrets from observed state."""

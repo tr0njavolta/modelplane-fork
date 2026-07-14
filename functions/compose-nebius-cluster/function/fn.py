@@ -184,6 +184,15 @@ def _cloud_init_secret_name(xr: v1alpha1.NebiusCluster) -> str:
     return resource.child_name(_name(xr.metadata), "cloud-init")
 
 
+def _pool_fabric(pool: v1alpha1.NodePool) -> str | None:
+    """The InfiniBand fabric the pool joins, or None for standard VPC
+    networking. The XRD guarantees fabric.infiniband is set when fabric.type
+    is InfiniBand."""
+    if pool.fabric and pool.fabric.type == "InfiniBand" and pool.fabric.infiniband:
+        return pool.fabric.infiniband.fabric
+    return None
+
+
 @dataclasses.dataclass
 class Credentials:
     """A reference to the Nebius service account credentials Secret."""
@@ -220,10 +229,13 @@ class Composer:
         self.xr = v1alpha1.NebiusCluster(**resource.struct_to_dict(req.observed.composite.resource))
 
     def compose(self) -> None:
-        # Resolving credentials can gate on the Nebius ClusterProviderConfig
-        # being fetched, but the infrastructure doesn't need them - only the
-        # ProviderConfigs and the status credential entry do - so the cluster
-        # provisions in parallel with the first fetch.
+        # Credentials gate only their consumers: the ProviderConfigs, the CSI
+        # driver and RWX StorageClass installed through them, and the status
+        # credential entry. The infrastructure is composed unconditionally so
+        # that a transiently unresolvable Nebius ClusterProviderConfig never
+        # drops provisioned cloud resources from desired state - the gated
+        # pieces just recompose on a later reconcile once credentials resolve
+        # again.
         creds = self.resolve_credentials()
         self.compose_network()
         self.compose_cluster()
@@ -244,7 +256,13 @@ class Composer:
         The credentials Secret is read off the Nebius ClusterProviderConfig
         the composed resources use - the cluster identity is the identity
         that provisioned it. None while the ClusterProviderConfig hasn't been
-        fetched yet, or when it doesn't source credentials from a Secret."""
+        fetched yet, or when it doesn't source credentials from a Secret.
+
+        When the ClusterProviderConfig is gone but a composed ProviderConfig
+        is observed, falls back to the credentials that ProviderConfig was
+        last written with: a mistakenly deleted ClusterProviderConfig
+        shouldn't tear the credential consumers out of desired state, and a
+        recreated one takes over again on a later reconcile."""
         response.require_resources(
             self.rsp,
             name="nebius-provider-config",
@@ -254,6 +272,14 @@ class Composer:
         )
         d = request.get_required_resource(self.req, "nebius-provider-config")
         if d is None:
+            creds = self._observed_credentials()
+            if creds:
+                response.normal(
+                    self.rsp,
+                    f"Nebius ClusterProviderConfig {_NEBIUS_PROVIDER_CONFIG_NAME} not found; keeping the "
+                    "credentials the composed ProviderConfig already carries",
+                )
+                return creds
             response.normal(self.rsp, f"Waiting for Nebius ClusterProviderConfig {_NEBIUS_PROVIDER_CONFIG_NAME}")
             return None
 
@@ -267,6 +293,18 @@ class Composer:
             )
             return None
         return Credentials(namespace=secret_ref.namespace, name=secret_ref.name, key=secret_ref.key)
+
+    def _observed_credentials(self) -> Credentials | None:
+        """The credentials the composed kubernetes ProviderConfig was last
+        written with, None before one is observed."""
+        observed = self.req.observed.resources.get("provider-config-kubernetes")
+        if not observed:
+            return None
+        pc = k8spcv1alpha1.ProviderConfig.model_validate(resource.struct_to_dict(observed.resource))
+        ref = pc.spec.identity.secretRef if pc.spec.identity else None
+        if not ref:
+            return None
+        return Credentials(namespace=ref.namespace, name=ref.name, key=ref.key)
 
     def compose_network(self) -> None:
         """Compose a dedicated VPC network and subnet for the cluster. Nebius
@@ -507,11 +545,12 @@ class Composer:
                     ),
                 ]
 
-            if pool.fabric:
+            fabric = _pool_fabric(pool)
+            if fabric:
                 template.gpuCluster = nodegroupv1beta1.GpuCluster(
                     idSelector=nodegroupv1beta1.IdSelector(
                         matchControllerRef=True,
-                        matchLabels={_LABEL_FABRIC: pool.fabric},
+                        matchLabels={_LABEL_FABRIC: fabric},
                     ),
                 )
 
@@ -724,6 +763,7 @@ class Composer:
         first-use order."""
         fabrics: list[str] = []
         for pool in self.xr.spec.nodePools:
-            if pool.fabric and pool.fabric not in fabrics:
-                fabrics.append(pool.fabric)
+            fabric = _pool_fabric(pool)
+            if fabric and fabric not in fabrics:
+                fabrics.append(fabric)
         return fabrics

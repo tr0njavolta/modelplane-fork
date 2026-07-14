@@ -141,11 +141,9 @@ class Nebius(BaseModel):
     GPU accelerator to attach when provisioning the node group. Provisioning input only: the scheduler matches against spec.devices, not this block.
     """
     diskSizeGb: conint(ge=10) | None = 100
-    driversPreset: Literal['cuda12', 'cuda12.4', 'cuda12.8', 'cuda13.0'] | None = (
-        'cuda13.0'
-    )
+    driversPreset: constr(min_length=1, max_length=63) | None = 'cuda13.0'
     """
-    NVIDIA driver stack mk8s preinstalls on the pool's nodes. Valid values depend on the platform and Kubernetes version. Defaults to the only preset mk8s implements on the default Kubernetes version; older presets remain for older versions.
+    NVIDIA driver stack mk8s preinstalls on the pool's nodes (e.g. cuda12.4, cuda13.0). Valid values depend on the platform and Kubernetes version, and mk8s validates them, so new presets work without a Modelplane update. Defaults to the only preset mk8s implements on the default Kubernetes version; older presets remain for older versions.
     """
     platform: constr(min_length=1, max_length=63)
     """

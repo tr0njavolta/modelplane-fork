@@ -20,7 +20,10 @@ spec:
       maxNodeCount: 8
       # Joins an existing physical InfiniBand fabric in the project's region;
       # use the fabric your GPU capacity is allocated on.
-      fabric: fabric-2
+      fabric:
+        type: InfiniBand
+        infiniband:
+          fabric: fabric-2
       gpu:
         acceleratorType: nvidia-h100
         driversPreset: cuda13.0

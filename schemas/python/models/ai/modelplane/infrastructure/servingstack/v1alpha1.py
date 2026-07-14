@@ -78,7 +78,7 @@ class Secret(BaseModel):
     """
     namespace: constr(max_length=253) | None = None
     """
-    Namespace of the Secret, when it isn't this ServingStack's namespace. Set on cloud identity entries whose credential lives with the cloud provider's ProviderConfig.
+    Namespace of the Secret, when it isn't this ServingStack's namespace. Set on cloud identity entries whose credential is the Secret the cloud provider's ProviderConfig references.
     """
     type: Literal[
         'Kubeconfig',
