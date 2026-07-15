@@ -21,31 +21,33 @@ metadata:
 spec:
   # One replica, matched to any compatible InferenceCluster by device capacity.
   replicas: 1
-  engines:
-  - name: llama
-    members:
+  template:
+    spec:
+      engines:
+      - name: llama
+        members:
     # A single self-contained vLLM pod. The container named "engine" is the
     # inference server; its image and args pass through verbatim.
-    - role: Standalone
-      nodeSelector:
-        devices:
-        - name: gpu
-          count: 1
-          selectors:
+        - role: Standalone
+          nodeSelector:
+            devices:
+            - name: gpu
+              count: 1
+              selectors:
           # An 8B model needs most of an L4. >=20Gi selects the L4 (which
           # reports ~23Gi) without over-constraining. DRA evaluates this CEL
           # against the InferenceClass device, then against the GPU's
           # ResourceSlice when it binds the claim.
-          - cel: |
-              device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
-      template:
-        spec:
-          containers:
-          - name: engine
-            image: vllm/vllm-openai:v0.7.3
-            args:
-            - "--model=NousResearch/Meta-Llama-3.1-8B-Instruct"
+              - cel: |
+                  device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
+          template:
+            spec:
+              containers:
+              - name: engine
+                image: vllm/vllm-openai:v0.7.3
+                args:
+                - "--model=NousResearch/Meta-Llama-3.1-8B-Instruct"
             # The id clients pass as "model" in OpenAI requests.
-            - "--served-model-name=llama-3.1-8b"
+                - "--served-model-name=llama-3.1-8b"
             # Cap the context so the KV cache fits beside the weights on the L4.
-            - "--max-model-len=8192"
+                - "--max-model-len=8192"

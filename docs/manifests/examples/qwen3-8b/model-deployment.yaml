@@ -23,31 +23,33 @@ metadata:
   namespace: ml-team
 spec:
   replicas: 1
-  clusterSelector:
-    matchLabels:
-      modelplane.ai/region: us
-  engines:
-  - name: qwen3-8b
-    members:
-    - role: Standalone
-      nodeSelector:
-        devices:
-        - name: gpu
-          count: 1
-          selectors:
-          - cel: |
-              device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
-      template:
-        spec:
-          containers:
-          - name: engine
-            image: vllm/vllm-openai:v0.23.0
-            args:
-            - "--model=Qwen/Qwen3-8B"
-            - "--served-model-name=qwen"
-            - "--max-model-len=16384"
-            - "--gpu-memory-utilization=0.92"
-            - "--reasoning-parser=qwen3"
-            - "--default-chat-template-kwargs={\"enable_thinking\": false}"
-            - "--enable-auto-tool-choice"
-            - "--tool-call-parser=hermes"
+  template:
+    spec:
+      clusterSelector:
+        matchLabels:
+          modelplane.ai/region: us
+      engines:
+      - name: qwen3-8b
+        members:
+        - role: Standalone
+          nodeSelector:
+            devices:
+            - name: gpu
+              count: 1
+              selectors:
+              - cel: |
+                  device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("20Gi")) >= 0
+          template:
+            spec:
+              containers:
+              - name: engine
+                image: vllm/vllm-openai:v0.23.0
+                args:
+                - "--model=Qwen/Qwen3-8B"
+                - "--served-model-name=qwen"
+                - "--max-model-len=16384"
+                - "--gpu-memory-utilization=0.92"
+                - "--reasoning-parser=qwen3"
+                - "--default-chat-template-kwargs={\"enable_thinking\": false}"
+                - "--enable-auto-tool-choice"
+                - "--tool-call-parser=hermes"

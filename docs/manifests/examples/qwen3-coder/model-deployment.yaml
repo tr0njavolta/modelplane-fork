@@ -28,89 +28,91 @@ metadata:
   namespace: ml-team
 spec:
   replicas: 1
-  clusterSelector:
-    matchLabels:
-      modelplane.ai/region: us
-  modelCacheRef:
-    name: qwen3-coder
-  engines:
-  - name: qwen3-coder
-    members:
-    - role: Leader
-      nodeSelector:
-        devices:
-        - name: gpu
-          count: 8
-          selectors:
-          - cel: |
-              device.driver == "gpu.nvidia.com" && device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("120Gi")) >= 0
-        - name: efa
-          count: 16
-          selectors:
-          - cel: |
-              device.driver == "dra.net"
-      template:
-        spec:
-          containers:
-          - name: engine
-            image: vllm/vllm-openai:v0.23.0
-            env:
-            - name: NCCL_DEBUG
-              value: "INFO"
-            - name: FI_PROVIDER
-              value: "efa"
-            command:
-            - /bin/sh
-            - -c
-            - >-
-              exec vllm serve /mnt/models
-              --served-model-name=qwen3-coder
-              --tensor-parallel-size=8
-              --pipeline-parallel-size=2
-              --distributed-executor-backend=mp
-              --nnodes=2 --node-rank=0
-              --master-addr=$(MODELPLANE_LEADER_ADDRESS)
-              --max-model-len=32768
-              --gpu-memory-utilization=0.92
-              --enable-auto-tool-choice
-              --tool-call-parser=qwen3_xml
-              --port=8000
-    - role: Worker
-      worker:
-        nodes: 1
-      nodeSelector:
-        devices:
-        - name: gpu
-          count: 8
-          selectors:
-          - cel: |
-              device.driver == "gpu.nvidia.com" && device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("120Gi")) >= 0
-        - name: efa
-          count: 16
-          selectors:
-          - cel: |
-              device.driver == "dra.net"
-      template:
-        spec:
-          containers:
-          - name: engine
-            image: vllm/vllm-openai:v0.23.0
-            env:
-            - name: NCCL_DEBUG
-              value: "INFO"
-            - name: FI_PROVIDER
-              value: "efa"
-            command:
-            - /bin/sh
-            - -c
-            - >-
-              exec vllm serve /mnt/models
-              --served-model-name=qwen3-coder
-              --tensor-parallel-size=8
-              --pipeline-parallel-size=2
-              --distributed-executor-backend=mp
-              --nnodes=2 --node-rank=1
-              --master-addr=$(MODELPLANE_LEADER_ADDRESS)
-              --headless
-              --max-model-len=32768
-              --gpu-memory-utilization=0.92
+  template:
+    spec:
+      clusterSelector:
+        matchLabels:
+          modelplane.ai/region: us
+      modelCacheRef:
+        name: qwen3-coder
+      engines:
+      - name: qwen3-coder
+        members:
+        - role: Leader
+          nodeSelector:
+            devices:
+            - name: gpu
+              count: 8
+              selectors:
+              - cel: |
+                  device.driver == "gpu.nvidia.com" && device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("120Gi")) >= 0
+            - name: efa
+              count: 16
+              selectors:
+              - cel: |
+                  device.driver == "dra.net"
+          template:
+            spec:
+              containers:
+              - name: engine
+                image: vllm/vllm-openai:v0.23.0
+                env:
+                - name: NCCL_DEBUG
+                  value: "INFO"
+                - name: FI_PROVIDER
+                  value: "efa"
+                command:
+                - /bin/sh
+                - -c
+                - >-
+                  exec vllm serve /mnt/models
+                  --served-model-name=qwen3-coder
+                  --tensor-parallel-size=8
+                  --pipeline-parallel-size=2
+                  --distributed-executor-backend=mp
+                  --nnodes=2 --node-rank=0
+                  --master-addr=$(MODELPLANE_LEADER_ADDRESS)
+                  --max-model-len=32768
+                  --gpu-memory-utilization=0.92
+                  --enable-auto-tool-choice
+                  --tool-call-parser=qwen3_xml
+                  --port=8000
+        - role: Worker
+          worker:
+            nodes: 1
+          nodeSelector:
+            devices:
+            - name: gpu
+              count: 8
+              selectors:
+              - cel: |
+                  device.driver == "gpu.nvidia.com" && device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("120Gi")) >= 0
+            - name: efa
+              count: 16
+              selectors:
+              - cel: |
+                  device.driver == "dra.net"
+          template:
+            spec:
+              containers:
+              - name: engine
+                image: vllm/vllm-openai:v0.23.0
+                env:
+                - name: NCCL_DEBUG
+                  value: "INFO"
+                - name: FI_PROVIDER
+                  value: "efa"
+                command:
+                - /bin/sh
+                - -c
+                - >-
+                  exec vllm serve /mnt/models
+                  --served-model-name=qwen3-coder
+                  --tensor-parallel-size=8
+                  --pipeline-parallel-size=2
+                  --distributed-executor-backend=mp
+                  --nnodes=2 --node-rank=1
+                  --master-addr=$(MODELPLANE_LEADER_ADDRESS)
+                  --headless
+                  --max-model-len=32768
+                  --gpu-memory-utilization=0.92

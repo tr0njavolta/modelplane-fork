@@ -16,33 +16,35 @@ metadata:
   namespace: ml-team
 spec:
   replicas: 1
-  engines:
-  - name: glm
-    members:
-    - role: Standalone
-      nodeSelector:
-        devices:
-        - name: gpu
-          count: 1
-          selectors:
-          - cel: |
-              device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("35Gi")) >= 0
-      template:
-        spec:
-          containers:
-          - name: engine
-            image: ghcr.io/ggml-org/llama.cpp:server-cuda
-            args:
-            - "-hf"
-            - "unsloth/GLM-4.5-Air-GGUF:IQ4_XS"
-            - "--host"
-            - "0.0.0.0"
-            - "--port"
-            - "8000"
-            - "-ngl"
-            - "999"
-            - "--n-cpu-moe"
-            - "99"
-            - "--jinja"
-            - "-c"
-            - "8192"
+  template:
+    spec:
+      engines:
+      - name: glm
+        members:
+        - role: Standalone
+          nodeSelector:
+            devices:
+            - name: gpu
+              count: 1
+              selectors:
+              - cel: |
+                  device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("35Gi")) >= 0
+          template:
+            spec:
+              containers:
+              - name: engine
+                image: ghcr.io/ggml-org/llama.cpp:server-cuda
+                args:
+                - "-hf"
+                - "unsloth/GLM-4.5-Air-GGUF:IQ4_XS"
+                - "--host"
+                - "0.0.0.0"
+                - "--port"
+                - "8000"
+                - "-ngl"
+                - "999"
+                - "--n-cpu-moe"
+                - "99"
+                - "--jinja"
+                - "-c"
+                - "8192"

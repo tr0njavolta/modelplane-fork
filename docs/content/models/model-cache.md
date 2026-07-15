@@ -7,9 +7,10 @@ description: Stage model weights on cluster storage before serving.
 **API:** [`modelplane.ai/v1alpha1` · ModelCache]({{< ref "/reference/modelcaches" >}})
 
 A `ModelCache` stages a model's weights on shared workload-cluster storage,
-fetched once from the configured source rather than downloaded again on every pod
-start. `ModelDeployments` reference a cache via `spec.modelCacheRef.name`, and
-Modelplane mounts it at `/mnt/models` in every serving pod, shared across the
+fetched once from the configured source rather than downloaded again on every
+pod start. `ModelDeployments` reference a cache via
+`spec.template.spec.modelCacheRef.name`, and Modelplane mounts it at
+`/mnt/models` in every serving pod, shared across the
 pods of a multi-node engine. The engine reads weights locally from the mount.
 
 `ModelCache` is recommended for multi-node deployments and optional for

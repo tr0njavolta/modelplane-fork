@@ -10,10 +10,6 @@ from pydantic import AwareDatetime, BaseModel, Field, conint, constr
 from ....io.k8s.apimachinery.pkg.apis.meta import v1
 
 
-class ClusterSelector(BaseModel):
-    matchLabels: dict[str, str] | None = None
-
-
 class CompositionRef(BaseModel):
     name: str
 
@@ -45,6 +41,17 @@ class Crossplane(BaseModel):
     resourceRefs: list[ResourceRef] | None = None
 
 
+class Metadata(BaseModel):
+    labels: dict[str, constr(max_length=63)] | None = Field(None, max_length=32)
+    """
+    Labels to set on the ModelReplicas and ModelEndpoints this deployment composes, alongside the labels Modelplane manages. Use them to organize and select your own resources (kubectl get modelreplica -l tier=prod) or to route to a subset of endpoints from a ModelService. Keys under the modelplane.ai/ prefix are reserved.
+    """
+
+
+class ClusterSelector(BaseModel):
+    matchLabels: dict[str, str] | None = None
+
+
 class Selector(BaseModel):
     cel: constr(min_length=1, max_length=10240) | None = None
     """
@@ -74,7 +81,7 @@ class NodeSelector(BaseModel):
     """
 
 
-class Metadata(BaseModel):
+class MetadataModel(BaseModel):
     annotations: dict[str, str] | None = None
     labels: dict[str, str] | None = None
 
@@ -150,7 +157,7 @@ class Spec(BaseModel):
 
 
 class Template(BaseModel):
-    metadata: Metadata | None = None
+    metadata: MetadataModel | None = None
     """
     Metadata applied to the member's pods. Useful for labels and annotations that control cluster-level features like service mesh injection.
     """
@@ -224,10 +231,6 @@ class SpecModel(BaseModel):
     """
     Optional label selector to filter InferenceClusters. If omitted, all ready clusters are candidates.
     """
-    crossplane: Crossplane | None = None
-    """
-    Configures how Crossplane will reconcile this composite resource
-    """
     engines: list[Engine] = Field(..., max_length=8, min_length=1)
     """
     A ModelReplica's inference engines. An engine is one serving unit: a single Standalone pod, or a gang of a Leader and one or more Workers coordinating across nodes. Modelplane composes the whole array once per ModelReplica; an engine composes to a Deployment (Standalone) or a LeaderWorkerSet (Leader/Worker), but the workload kind is an implementation detail. Modelplane is unopinionated about the engine itself: parallelism, quantization, and KV transfer all live in the members' engine flags, written by the user, never injected by Modelplane.
@@ -236,13 +239,29 @@ class SpecModel(BaseModel):
     """
     Reference to a ModelCache in the same namespace. Optional for single-node engines; required for any engine that spans multiple nodes (a Leader with one or more Workers), since every pod in the gang mounts it.
     """
+    serving: Serving | None = None
+    """
+    How the deployment is served from the cluster edge to its engines. Unified (the default) fronts the engines with a Service. PrefillDecode serves prefill and decode from the two engines marking those phases, with inference-aware routing that sequences prefill then decode. Omitted means Unified.
+    """
+
+
+class TemplateModel(BaseModel):
+    metadata: Metadata | None = None
+    spec: SpecModel
+
+
+class SpecModel1(BaseModel):
+    crossplane: Crossplane | None = None
+    """
+    Configures how Crossplane will reconcile this composite resource
+    """
     replicas: conint(ge=1, le=10)
     """
     How many ModelReplicas to fan out to. Each replica is a complete serving instance scheduled to one InferenceCluster.
     """
-    serving: Serving | None = None
+    template: TemplateModel
     """
-    How the deployment is served from the cluster edge to its engines. Unified (the default) fronts the engines with a Service. PrefillDecode serves prefill and decode from the two engines marking those phases, with inference-aware routing that sequences prefill then decode. Omitted means Unified.
+    Template for the ModelReplicas this deployment fans out to. Everything but the replica count lives here, mirroring a Kubernetes Deployment's spec.template.
     """
 
 
@@ -281,7 +300,7 @@ class ModelDeployment(BaseModel):
     """
     Standard object's metadata. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#metadata
     """
-    spec: SpecModel
+    spec: SpecModel1
     status: Status | None = None
 
 
