@@ -318,6 +318,49 @@ def _cluster_ready(cluster: icv1alpha1.InferenceCluster) -> bool:
     return any(c.type == "Ready" and c.status == "True" for c in cluster.status.conditions or [])
 
 
+_EFFECT_NO_SCHEDULE = "NoSchedule"
+_EFFECT_NO_EXECUTE = "NoExecute"
+
+
+def _tolerates(toleration: mdv1alpha1.Toleration, taint: icv1alpha1.Taint) -> bool:
+    """Whether a toleration matches a taint, following Kubernetes semantics.
+
+    An empty toleration effect matches any effect; otherwise the effects must be
+    equal. Operator Exists matches any taint with the key (an empty key matches
+    every taint); Equal (the default) matches on key and value.
+    """
+    if toleration.effect and toleration.effect != taint.effect:
+        return False
+    if (toleration.operator or "Equal") == "Exists":
+        return not toleration.key or toleration.key == taint.key
+    return toleration.key == taint.key and (toleration.value or "") == (taint.value or "")
+
+
+def _has_untolerated_taint(
+    cluster: icv1alpha1.InferenceCluster,
+    tolerations: list[mdv1alpha1.Toleration],
+    effects: tuple[str, ...],
+) -> bool:
+    """Whether the cluster carries a taint with one of `effects` that no toleration matches."""
+    return any(
+        taint.effect in effects and not any(_tolerates(t, taint) for t in tolerations)
+        for taint in cluster.spec.taints or []
+    )
+
+
+def _repels_new(cluster: icv1alpha1.InferenceCluster, tolerations: list[mdv1alpha1.Toleration]) -> bool:
+    """Whether an untolerated taint keeps NEW replicas off this cluster.
+
+    Both NoSchedule and NoExecute block new placements.
+    """
+    return _has_untolerated_taint(cluster, tolerations, (_EFFECT_NO_SCHEDULE, _EFFECT_NO_EXECUTE))
+
+
+def _evicts_existing(cluster: icv1alpha1.InferenceCluster, tolerations: list[mdv1alpha1.Toleration]) -> bool:
+    """Whether an untolerated NoExecute taint drains the replicas already here."""
+    return _has_untolerated_taint(cluster, tolerations, (_EFFECT_NO_EXECUTE,))
+
+
 def _device_satisfies(device: icv1alpha1.Device, programs: list[cel.Program]) -> bool:
     """Whether a pool device satisfies every selector (all ANDed)."""
     # by_alias keeps the DRA wire names (bool/int, not the generated bool_/int_
@@ -566,6 +609,11 @@ def _retain(
         if identity in seen:
             continue
         cluster = clusters_by_name[cluster_name]
+        # A NoExecute taint the deployment doesn't tolerate drains this replica:
+        # drop it from the retained set so the fill phase reschedules it onto a
+        # tolerated cluster (delete-plus-create, like a Kubernetes drain).
+        if _evicts_existing(cluster, deployment.spec.template.spec.tolerations or []):
+            continue
         placements = _retained_placements(r, cluster, engines)
         if placements is None:
             continue
@@ -972,7 +1020,12 @@ def schedule(
         # must not charge our dropped or scaled-down replicas, whose nodes are
         # freeing up. Fill then decrements it only as it places NEW replicas.
         ledger = _build_ledger(deployment, clusters, retained, all_replicas)
-        placed = _fill(engines, clusters, retained, ledger, desired - len(retained))
+        # New replicas avoid clusters carrying an untolerated taint (NoSchedule
+        # or NoExecute). The ledger still spans every cluster, so a tainted
+        # cluster's capacity is accounted for other deployments' replicas.
+        tolerations = deployment.spec.template.spec.tolerations or []
+        schedulable = [c for c in clusters if not _repels_new(c, tolerations)]
+        placed = _fill(engines, schedulable, retained, ledger, desired - len(retained))
 
     result = retained + placed
     result.sort(key=lambda c: (c.name, c.index))

@@ -185,6 +185,12 @@ class NodePool(BaseModel):
     """
 
 
+class Taint(BaseModel):
+    effect: Literal['NoSchedule', 'NoExecute']
+    key: constr(min_length=1)
+    value: str | None = None
+
+
 class Spec(BaseModel):
     cluster: Cluster
     crossplane: Crossplane | None = None
@@ -194,6 +200,10 @@ class Spec(BaseModel):
     nodePools: list[NodePool] | None = Field(None, max_length=8, min_length=1)
     """
     GPU node pools available on this cluster. Each pool references an InferenceClass that describes the hardware shape and (for provisioned clusters) how to create the pool. System pools for control-plane components are provisioned automatically.
+    """
+    taints: list[Taint] | None = None
+    """
+    Taints that repel ModelDeployments from this cluster unless they carry a matching toleration, following the Kubernetes taint model. NoSchedule keeps new replicas off the cluster while leaving existing ones in place; NoExecute additionally drains the replicas already here, which the scheduler reschedules onto other tolerated clusters (the declarative equivalent of draining a node before maintenance).
     """
 
 

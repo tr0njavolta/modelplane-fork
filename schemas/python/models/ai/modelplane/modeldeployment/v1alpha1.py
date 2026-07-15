@@ -226,6 +226,22 @@ class Serving(BaseModel):
     """
 
 
+class Toleration(BaseModel):
+    effect: Literal['NoSchedule', 'NoExecute'] | None = None
+    """
+    Taint effect to match. Empty matches all effects.
+    """
+    key: str | None = None
+    """
+    Taint key to match. Empty with operator Exists tolerates every taint.
+    """
+    operator: Literal['Exists', 'Equal'] | None = 'Equal'
+    """
+    Exists matches any taint with the key (ignoring value); Equal matches key and value.
+    """
+    value: str | None = None
+
+
 class SpecModel(BaseModel):
     clusterSelector: ClusterSelector | None = None
     """
@@ -242,6 +258,10 @@ class SpecModel(BaseModel):
     serving: Serving | None = None
     """
     How the deployment is served from the cluster edge to its engines. Unified (the default) fronts the engines with a Service. PrefillDecode serves prefill and decode from the two engines marking those phases, with inference-aware routing that sequences prefill then decode. Omitted means Unified.
+    """
+    tolerations: list[Toleration] | None = None
+    """
+    Tolerations that let this deployment's replicas schedule onto, and stay on, InferenceClusters carrying matching taints, following the Kubernetes toleration model. A replica tolerating a cluster's NoSchedule taint can be placed there; one tolerating a NoExecute taint is not drained when that taint is applied.
     """
 
 

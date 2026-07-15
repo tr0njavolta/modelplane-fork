@@ -115,6 +115,7 @@ def _deployment(
     count: int = 1,
     requests: list[mdv1alpha1.Device] | None = None,
     engines: list[mdv1alpha1.Engine] | None = None,
+    tolerations: list[mdv1alpha1.Toleration] | None = None,
 ) -> mdv1alpha1.ModelDeployment:
     """Construct a ModelDeployment.
 
@@ -129,7 +130,9 @@ def _deployment(
         metadata=metav1.ObjectMeta(name=name, namespace="ml-team"),
         spec=mdv1alpha1.SpecModel1(
             replicas=replicas,
-            template=mdv1alpha1.TemplateModel(spec=mdv1alpha1.SpecModel(engines=engines)),
+            template=mdv1alpha1.TemplateModel(
+                spec=mdv1alpha1.SpecModel(engines=engines, tolerations=tolerations),
+            ),
         ),
     )
 
@@ -182,6 +185,7 @@ def _cluster(
     ready: bool = True,
     gateway_address: str = "10.0.0.1",
     pools: list[dict] | None = None,
+    taints: list[icv1alpha1.Taint] | None = None,
 ) -> icv1alpha1.InferenceCluster:
     """Construct an InferenceCluster with the given readiness and pools.
 
@@ -210,6 +214,7 @@ def _cluster(
                 source="Existing",
                 existing=icv1alpha1.Existing(secretRef=icv1alpha1.SecretRef(name="k")),
             ),
+            taints=taints,
         ),
         status=icv1alpha1.Status(
             conditions=conditions,
@@ -1606,6 +1611,99 @@ class TestScheduleMembers(unittest.TestCase):
             with self.subTest(case.name):
                 got = scheduling.schedule(case.deployment, case.clusters, case.all_replicas)
                 self.assertEqual(case.want, got, f"{case.name}: -want, +got")
+
+
+class TestScheduleTaints(unittest.TestCase):
+    """Taints on InferenceClusters gate placement; a matching toleration on the
+    ModelDeployment overrides them. NoSchedule keeps new replicas off a cluster
+    but leaves existing ones; NoExecute additionally drains the existing ones,
+    which fill reschedules onto a tolerated cluster."""
+
+    _MAINT = icv1alpha1.Taint(key="modelplane.ai/maintenance", value="on", effect="NoSchedule")
+    _DECOMM = icv1alpha1.Taint(key="modelplane.ai/decommission", effect="NoExecute")
+
+    def _names(self, got: list[scheduling.Candidate]) -> list[tuple[str, int]]:
+        return [(c.name, c.index) for c in got]
+
+    def test_noschedule_keeps_new_replicas_off(self) -> None:
+        clusters = [_cluster("cluster-a", taints=[self._MAINT]), _cluster("cluster-b", gateway_address="10.0.0.2")]
+        got = scheduling.schedule(_deployment(replicas=1), clusters, [])
+        self.assertEqual(self._names(got), [("cluster-b", 0)])
+
+    def test_noschedule_leaves_existing_replica_in_place(self) -> None:
+        existing = _replica("my-model", "cluster-a")
+        got = scheduling.schedule(_deployment(replicas=1), [_cluster("cluster-a", taints=[self._MAINT])], [existing])
+        self.assertEqual(self._names(got), [("cluster-a", 0)])
+
+    def test_toleration_allows_placement_on_tainted(self) -> None:
+        tol = mdv1alpha1.Toleration(key="modelplane.ai/maintenance", operator="Exists")
+        got = scheduling.schedule(
+            _deployment(replicas=1, tolerations=[tol]), [_cluster("cluster-a", taints=[self._MAINT])], []
+        )
+        self.assertEqual(self._names(got), [("cluster-a", 0)])
+
+    def test_noexecute_drains_and_reschedules(self) -> None:
+        existing = _replica("my-model", "cluster-a")
+        clusters = [_cluster("cluster-a", taints=[self._DECOMM]), _cluster("cluster-b", gateway_address="10.0.0.2")]
+        got = scheduling.schedule(_deployment(replicas=1), clusters, [existing])
+        self.assertEqual(self._names(got), [("cluster-b", 0)])
+
+    def test_noexecute_toleration_retains_in_place(self) -> None:
+        tol = mdv1alpha1.Toleration(key="modelplane.ai/decommission", operator="Exists")
+        existing = _replica("my-model", "cluster-a")
+        got = scheduling.schedule(
+            _deployment(replicas=1, tolerations=[tol]), [_cluster("cluster-a", taints=[self._DECOMM])], [existing]
+        )
+        self.assertEqual(self._names(got), [("cluster-a", 0)])
+
+    def test_noexecute_drain_leaves_count_unmet_when_nowhere_to_go(self) -> None:
+        """Draining with no tolerated cluster to reschedule onto yields fewer
+        than spec.replicas; the deploy function surfaces the shortfall."""
+        existing = _replica("my-model", "cluster-a")
+        got = scheduling.schedule(_deployment(replicas=1), [_cluster("cluster-a", taints=[self._DECOMM])], [existing])
+        self.assertEqual(got, [])
+
+    def test_noschedule_toleration_does_not_cover_a_noexecute_taint(self) -> None:
+        """Matching the key but not the effect doesn't tolerate: an operator who
+        tolerates only NoSchedule is still drained by a NoExecute taint."""
+        tol = mdv1alpha1.Toleration(key="modelplane.ai/decommission", operator="Exists", effect="NoSchedule")
+        existing = _replica("my-model", "cluster-a")
+        clusters = [_cluster("cluster-a", taints=[self._DECOMM]), _cluster("cluster-b", gateway_address="10.0.0.2")]
+        got = scheduling.schedule(_deployment(replicas=1, tolerations=[tol]), clusters, [existing])
+        self.assertEqual(self._names(got), [("cluster-b", 0)])
+
+    def test_untolerated_second_taint_still_repels(self) -> None:
+        """Tolerating one of a cluster's taints isn't enough; any untolerated
+        taint keeps new replicas off."""
+        other = icv1alpha1.Taint(key="modelplane.ai/reserved", effect="NoSchedule")
+        tol = mdv1alpha1.Toleration(key="modelplane.ai/maintenance", operator="Exists")
+        clusters = [
+            _cluster("cluster-a", taints=[self._MAINT, other]),
+            _cluster("cluster-b", gateway_address="10.0.0.2"),
+        ]
+        got = scheduling.schedule(_deployment(replicas=1, tolerations=[tol]), clusters, [])
+        self.assertEqual(self._names(got), [("cluster-b", 0)])
+
+    def test_equal_toleration_matches_on_value(self) -> None:
+        """Equal tolerates only when key and value both match."""
+        match = mdv1alpha1.Toleration(key="modelplane.ai/maintenance", operator="Equal", value="on")
+        placed = scheduling.schedule(
+            _deployment(replicas=1, tolerations=[match]), [_cluster("cluster-a", taints=[self._MAINT])], []
+        )
+        self.assertEqual(self._names(placed), [("cluster-a", 0)])
+
+        mismatch = mdv1alpha1.Toleration(key="modelplane.ai/maintenance", operator="Equal", value="off")
+        repelled = scheduling.schedule(
+            _deployment(replicas=1, tolerations=[mismatch]), [_cluster("cluster-a", taints=[self._MAINT])], []
+        )
+        self.assertEqual(repelled, [])
+
+    def test_keyless_exists_tolerates_every_taint(self) -> None:
+        """An Exists toleration with no key tolerates any taint on the cluster."""
+        tol = mdv1alpha1.Toleration(operator="Exists")
+        clusters = [_cluster("cluster-a", taints=[self._MAINT, self._DECOMM])]
+        got = scheduling.schedule(_deployment(replicas=1, tolerations=[tol]), clusters, [])
+        self.assertEqual(self._names(got), [("cluster-a", 0)])
 
 
 if __name__ == "__main__":

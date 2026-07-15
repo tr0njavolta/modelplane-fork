@@ -143,6 +143,43 @@ spec:
                               Unified serves prefill and decode on one engine.
                               PrefillDecode splits them across two engines, each marking
                               its phase as Prefill or Decode.
+                      tolerations:
+                        type: array
+                        description: >-
+                          Tolerations that let this deployment's replicas
+                          schedule onto, and stay on, InferenceClusters carrying
+                          matching taints, following the Kubernetes toleration
+                          model. A replica tolerating a cluster's NoSchedule
+                          taint can be placed there; one tolerating a NoExecute
+                          taint is not drained when that taint is applied.
+                        x-kubernetes-list-type: atomic
+                        items:
+                          type: object
+                          x-kubernetes-validations:
+                          - rule: "self.operator != 'Equal' || (has(self.key) && self.key != '')"
+                            message: "an Equal toleration must set a key"
+                          - rule: "self.operator != 'Exists' || !has(self.value)"
+                            message: "an Exists toleration must not set a value"
+                          properties:
+                            key:
+                              type: string
+                              description: >-
+                                Taint key to match. Empty with operator Exists
+                                tolerates every taint.
+                            operator:
+                              type: string
+                              enum: [Exists, Equal]
+                              default: Equal
+                              description: >-
+                                Exists matches any taint with the key (ignoring
+                                value); Equal matches key and value.
+                            value:
+                              type: string
+                            effect:
+                              type: string
+                              enum: [NoSchedule, NoExecute]
+                              description: >-
+                                Taint effect to match. Empty matches all effects.
                       engines:
                         type: array
                         description: >-
