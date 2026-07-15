@@ -10,6 +10,17 @@ from pydantic import AwareDatetime, BaseModel, Field, conint, constr
 from ....io.k8s.apimachinery.pkg.apis.meta import v1
 
 
+class Aks(BaseModel):
+    kubernetesVersion: str | None = '1.34'
+    """
+    AKS cluster Kubernetes version. Defaults to a version where Dynamic Resource Allocation (how GPUs bind to pods) is generally available.
+    """
+    location: constr(min_length=1, max_length=32)
+    """
+    Azure region for the cluster (e.g. westeurope, eastus2).
+    """
+
+
 class Eks(BaseModel):
     kubernetesVersion: str | None = '1.36'
     """
@@ -78,6 +89,10 @@ class Nebius(BaseModel):
 
 
 class Cluster(BaseModel):
+    aks: Aks | None = None
+    """
+    AKS cluster configuration. Required when source is AKS.
+    """
     eks: Eks | None = None
     """
     EKS cluster configuration. Required when source is EKS.
@@ -94,7 +109,7 @@ class Cluster(BaseModel):
     """
     Nebius mk8s cluster configuration. Required when source is Nebius; may be empty, since every field has a default. The cluster is created in the project the Nebius ClusterProviderConfig named default sets as its projectID; Nebius projects are bound to a region, so the project also determines where the cluster runs.
     """
-    source: Literal['GKE', 'EKS', 'Nebius', 'Existing']
+    source: Literal['GKE', 'EKS', 'AKS', 'Nebius', 'Existing']
     """
     Cluster provisioning method.
     """
@@ -151,11 +166,11 @@ class Infiniband(BaseModel):
 class Fabric(BaseModel):
     infiniband: Infiniband | None = None
     """
-    InfiniBand fabric configuration. Required when type is InfiniBand.
+    InfiniBand fabric configuration. Required when type is InfiniBand and the cluster source is Nebius; not used on AKS.
     """
     type: Literal['None', 'EFA', 'InfiniBand'] | None = 'None'
     """
-    Fabric technology. None uses standard VPC networking (TCP). EFA attaches Elastic Fabric Adapter interfaces to each node for GPUDirect RDMA across nodes; EKS only, and only useful on EFA-capable instance types (e.g. p5en.48xlarge). When any pool sets EFA, Modelplane installs the EFA DRA driver on the cluster and the gang's pods claim EFA devices alongside their GPUs. InfiniBand places the pool's nodes in a GPU cluster on a physical InfiniBand fabric for GPUDirect RDMA across nodes; Nebius only, and only useful on InfiniBand-capable platforms (e.g. gpu-h100-sxm).
+    Fabric technology. None uses standard VPC networking (TCP). EFA attaches Elastic Fabric Adapter interfaces to each node for GPUDirect RDMA across nodes; EKS only, and only useful on EFA-capable instance types (e.g. p5en.48xlarge). When any pool sets EFA, Modelplane installs the EFA DRA driver on the cluster and the gang's pods claim EFA devices alongside their GPUs. InfiniBand places the pool's nodes on a physical InfiniBand fabric for GPUDirect RDMA across nodes; Nebius and AKS only, and only useful on InfiniBand-capable shapes (e.g. gpu-h100-sxm on Nebius, Standard_ND96isr_H100_v5 on AKS). On Nebius the pool joins the fabric named in infiniband.fabric; on AKS the pool's VM Scale Set placement group lands its nodes on one fabric, and Modelplane installs the NVIDIA network operator on the cluster.
     """
 
 

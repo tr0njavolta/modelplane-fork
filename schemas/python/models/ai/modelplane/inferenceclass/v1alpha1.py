@@ -94,12 +94,32 @@ class Accelerator(BaseModel):
     count: conint(ge=1, le=16)
     type: constr(min_length=1, max_length=63)
     """
+    GPU accelerator type (e.g. nvidia-a100, nvidia-h100). Informational - reported on the consuming InferenceCluster's status.
+    """
+
+
+class Aks(BaseModel):
+    accelerator: Accelerator
+    """
+    GPU accelerator to attach when provisioning the node pool. Provisioning input only: the scheduler matches against spec.devices, not this block.
+    """
+    diskSizeGb: conint(ge=10) | None = 100
+    vmSize: constr(min_length=1)
+    """
+    Azure VM size (e.g. Standard_NC24ads_A100_v4, Standard_ND96isr_H100_v5). The VM size determines the GPU model and count; the accelerator block below is informational.
+    """
+
+
+class AcceleratorModel(BaseModel):
+    count: conint(ge=1, le=16)
+    type: constr(min_length=1, max_length=63)
+    """
     GPU accelerator type (e.g. nvidia-a10g, nvidia-h100). Informational - reported on the consuming InferenceCluster's status.
     """
 
 
 class Eks(BaseModel):
-    accelerator: Accelerator
+    accelerator: AcceleratorModel
     """
     GPU accelerator to attach when provisioning the node group. Provisioning input only: the scheduler matches against spec.devices, not this block.
     """
@@ -110,7 +130,7 @@ class Eks(BaseModel):
     """
 
 
-class AcceleratorModel(BaseModel):
+class AcceleratorModel1(BaseModel):
     count: conint(ge=1, le=16)
     type: constr(min_length=1, max_length=63)
     """
@@ -119,7 +139,7 @@ class AcceleratorModel(BaseModel):
 
 
 class Gke(BaseModel):
-    accelerator: AcceleratorModel
+    accelerator: AcceleratorModel1
     """
     GPU accelerator to attach when provisioning the node pool. Provisioning input only: the scheduler matches against spec.devices, not this block, so count here is the GCP machine's GPU count and need not be restated in devices.
     """
@@ -127,7 +147,7 @@ class Gke(BaseModel):
     machineType: constr(min_length=1)
 
 
-class AcceleratorModel1(BaseModel):
+class AcceleratorModel2(BaseModel):
     count: conint(ge=1, le=16)
     type: constr(min_length=1, max_length=63)
     """
@@ -136,7 +156,7 @@ class AcceleratorModel1(BaseModel):
 
 
 class Nebius(BaseModel):
-    accelerator: AcceleratorModel1
+    accelerator: AcceleratorModel2
     """
     GPU accelerator to attach when provisioning the node group. Provisioning input only: the scheduler matches against spec.devices, not this block.
     """
@@ -156,10 +176,11 @@ class Nebius(BaseModel):
 
 
 class Provisioning(BaseModel):
+    aks: Aks | None = None
     eks: Eks | None = None
     gke: Gke | None = None
     nebius: Nebius | None = None
-    provider: Literal['GKE', 'EKS', 'Nebius']
+    provider: Literal['GKE', 'EKS', 'AKS', 'Nebius']
 
 
 class Spec(BaseModel):
