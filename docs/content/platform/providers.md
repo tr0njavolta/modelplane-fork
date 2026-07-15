@@ -13,7 +13,7 @@ A provider can show up here in three ways:
 {{< hint "note" >}}
 - **Provisioning supported.** Modelplane creates and manages the whole cluster
   from an `InferenceCluster`, selected through `provisioning.provider`. GKE,
-  EKS, and Nebius mk8s work this way today.
+  EKS, AKS, and Nebius mk8s work this way today.
 - **Bring your own supported.** Register a cluster you already run with
   `source: Existing`. This works on any provider whose Kubernetes meets
   Modelplane's requirements (Dynamic Resource Allocation and a recent Kubernetes
@@ -46,7 +46,7 @@ native provisioning.
 | IBM Cloud (IKS) | {{< accel nvidia >}} | Planned | ✓ | none active |
 | Lambda | {{< accel nvidia >}} | Planned | ✓ | none yet |
 | Linode / Akamai (LKE) | {{< accel nvidia >}} | Planned | ✓ | {{< repolink "https://github.com/linode/provider-linode" "provider-linode" "official" >}} |
-| Microsoft Azure (AKS) | {{< accel nvidia >}} | Planned | ✓ | {{< repolink "https://github.com/crossplane-contrib/provider-upjet-azure" "provider-upjet-azure" "community" >}} |
+| Microsoft Azure (AKS) | {{< accel nvidia >}} | ✓ | ✓ | {{< repolink "https://github.com/crossplane-contrib/provider-upjet-azure" "provider-upjet-azure" "community" >}} |
 | Nebius (mk8s) | {{< accel nvidia >}} | ✓ | ✓ | {{< repolink "https://github.com/upbound/provider-upjet-nebius" "provider-upjet-nebius" "official" >}} |
 | Oracle Cloud (OKE) | {{< accel nvidia >}} {{< accel amd >}} | Planned | ✓ | {{< repolink "https://github.com/oracle/crossplane-provider-oci" "crossplane-provider-oci" "official" >}} |
 | OVHcloud | {{< accel nvidia >}} | Planned | ✓ | {{< repolink "https://github.com/edixos/provider-ovh" "edixos/provider-ovh" "community" >}} |

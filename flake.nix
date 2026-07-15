@@ -53,6 +53,7 @@
 
       # The composition functions that make up Modelplane.
       functionNames = [
+        "compose-aks-cluster"
         "compose-eks-cluster"
         "compose-gke-cluster"
         "compose-inference-class"

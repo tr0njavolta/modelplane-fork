@@ -29,6 +29,9 @@ spec:
           spec:
             type: object
             required: [cluster]
+            x-kubernetes-validations:
+            - rule: "self.cluster.source != 'Nebius' || !has(self.nodePools) || self.nodePools.all(p, !has(p.fabric) || p.fabric.type != 'InfiniBand' || has(p.fabric.infiniband))"
+              message: fabric.infiniband is required when fabric.type is InfiniBand and cluster.source is Nebius.
             properties:
               cluster:
                 type: object
@@ -40,6 +43,8 @@ spec:
                   message: spec.cluster.gke is required when spec.cluster.source is GKE.
                 - rule: "self.source != 'EKS' || has(self.eks)"
                   message: spec.cluster.eks is required when spec.cluster.source is EKS.
+                - rule: "self.source != 'AKS' || has(self.aks)"
+                  message: spec.cluster.aks is required when spec.cluster.source is AKS.
                 - rule: "self.source != 'Nebius' || has(self.nebius)"
                   message: spec.cluster.nebius is required when spec.cluster.source is Nebius.
                 properties:
@@ -47,7 +52,7 @@ spec:
                     type: string
                     description: >-
                       Cluster provisioning method.
-                    enum: [GKE, EKS, Nebius, Existing]
+                    enum: [GKE, EKS, AKS, Nebius, Existing]
                   existing:
                     type: object
                     description: >-
@@ -153,6 +158,26 @@ spec:
                         default: "1.36"
                         description: >-
                           EKS cluster Kubernetes version. Defaults to a
+                          version where Dynamic Resource Allocation (how GPUs
+                          bind to pods) is generally available.
+                  aks:
+                    type: object
+                    description: >-
+                      AKS cluster configuration. Required when source is AKS.
+                    required: [location]
+                    properties:
+                      location:
+                        type: string
+                        description: >-
+                          Azure region for the cluster (e.g. westeurope,
+                          eastus2).
+                        minLength: 1
+                        maxLength: 32
+                      kubernetesVersion:
+                        type: string
+                        default: "1.34"
+                        description: >-
+                          AKS cluster Kubernetes version. Defaults to a
                           version where Dynamic Resource Allocation (how GPUs
                           bind to pods) is generally available.
                   nebius:
@@ -273,8 +298,6 @@ spec:
                         engines, so a gang's tensor-parallel traffic isn't
                         capped by TCP. Omit for standard VPC networking.
                       x-kubernetes-validations:
-                      - rule: "self.type != 'InfiniBand' || has(self.infiniband)"
-                        message: fabric.infiniband is required when fabric.type is InfiniBand.
                       - rule: "!has(self.infiniband) || self.type == 'InfiniBand'"
                         message: fabric.infiniband is only valid when fabric.type is InfiniBand.
                       properties:
@@ -290,11 +313,16 @@ spec:
                             When any pool sets EFA, Modelplane installs the
                             EFA DRA driver on the cluster and the gang's pods
                             claim EFA devices alongside their GPUs.
-                            InfiniBand places the pool's nodes in a GPU
-                            cluster on a physical InfiniBand fabric for
-                            GPUDirect RDMA across nodes; Nebius only, and
-                            only useful on InfiniBand-capable platforms
-                            (e.g. gpu-h100-sxm).
+                            InfiniBand places the pool's nodes on a physical
+                            InfiniBand fabric for GPUDirect RDMA across
+                            nodes; Nebius and AKS only, and only useful on
+                            InfiniBand-capable shapes (e.g. gpu-h100-sxm on
+                            Nebius, Standard_ND96isr_H100_v5 on AKS). On
+                            Nebius the pool joins the fabric named in
+                            infiniband.fabric; on AKS the pool's VM Scale Set
+                            placement group lands its nodes on one fabric,
+                            and Modelplane installs the NVIDIA network
+                            operator on the cluster.
                           enum:
                           - None
                           - EFA
@@ -303,7 +331,8 @@ spec:
                           type: object
                           description: >-
                             InfiniBand fabric configuration. Required when
-                            type is InfiniBand.
+                            type is InfiniBand and the cluster source is
+                            Nebius; not used on AKS.
                           required:
                           - fabric
                           properties:

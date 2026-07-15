@@ -1,0 +1,54 @@
+# An InferenceCluster backed by an Azure AKS cluster.
+#
+# Modelplane provisions the full AKS cluster (a dedicated resource
+# group, virtual network and subnet, control plane with a
+# system-assigned managed identity, system + GPU node pools) and
+# installs the inference stack (cert-manager, Traefik, Prometheus,
+# KEDA, LeaderWorkerSet).
+#
+# The system node pool that hosts control-plane components is
+# provisioned automatically and is not declared here. Only GPU node
+# pools - each referencing an InferenceClass that describes the
+# hardware shape and how to provision it - need to be declared. AKS
+# caps pool names at 12 lowercase alphanumeric characters.
+#
+# The cluster's kubeconfig embeds a client certificate for a
+# cluster-admin local account, so Modelplane authenticates to the
+# cluster with the kubeconfig alone - no separate cloud identity, like
+# EKS and unlike Nebius.
+#
+# ModelCache RWX storage is served by Azure Files: AKS bundles the
+# Azure Files CSI driver, so Modelplane only creates the
+# modelplane-rwx-fs StorageClass (Premium)
+# and the driver provisions the backing storage account on demand.
+#
+# Delete this InferenceCluster with foreground cascading deletion for a
+# clean teardown:
+#
+#   kubectl delete inferencecluster aks-westeurope --cascade=foreground
+#
+# The inference stack runs on the AKS cluster and must uninstall while
+# the cluster's API server and kubeconfig still exist - otherwise its
+# Helm releases hang, and a load balancer one of them created can leak
+# and block the network from deleting. Foreground deletion holds the
+# cluster until the stack is uninstalled. Background deletion (the
+# kubectl default) tears everything down at once and can orphan cloud
+# resources.
+apiVersion: modelplane.ai/v1alpha1
+kind: InferenceCluster
+metadata:
+  name: aks-westeurope
+  labels:
+    modelplane.ai/region: westeurope
+spec:
+  cluster:
+    source: AKS
+    aks:
+      location: westeurope
+
+  nodePools:
+  - name: gpuh100
+    className: aks-h100-8x
+    nodeCount: 1
+    minNodeCount: 1
+    maxNodeCount: 4

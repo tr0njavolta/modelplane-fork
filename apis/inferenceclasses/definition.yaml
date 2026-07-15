@@ -38,12 +38,14 @@ spec:
                   message: spec.provisioning.gke is required when spec.provisioning.provider is GKE.
                 - rule: "self.provider != 'EKS' || has(self.eks)"
                   message: spec.provisioning.eks is required when spec.provisioning.provider is EKS.
+                - rule: "self.provider != 'AKS' || has(self.aks)"
+                  message: spec.provisioning.aks is required when spec.provisioning.provider is AKS.
                 - rule: "self.provider != 'Nebius' || has(self.nebius)"
                   message: spec.provisioning.nebius is required when spec.provisioning.provider is Nebius.
                 properties:
                   provider:
                     type: string
-                    enum: [GKE, EKS, Nebius]
+                    enum: [GKE, EKS, AKS, Nebius]
                   gke:
                     type: object
                     required: [machineType, accelerator]
@@ -104,6 +106,42 @@ spec:
                             type: string
                             description: >-
                               GPU accelerator type (e.g. nvidia-a10g,
+                              nvidia-h100). Informational - reported on
+                              the consuming InferenceCluster's status.
+                            minLength: 1
+                            maxLength: 63
+                          count:
+                            type: integer
+                            minimum: 1
+                            maximum: 16
+                  aks:
+                    type: object
+                    required: [vmSize, accelerator]
+                    properties:
+                      vmSize:
+                        type: string
+                        description: >-
+                          Azure VM size (e.g. Standard_NC24ads_A100_v4,
+                          Standard_ND96isr_H100_v5). The VM size determines
+                          the GPU model and count; the accelerator block
+                          below is informational.
+                        minLength: 1
+                      diskSizeGb:
+                        type: integer
+                        default: 100
+                        minimum: 10
+                      accelerator:
+                        type: object
+                        description: >-
+                          GPU accelerator to attach when provisioning the node
+                          pool. Provisioning input only: the scheduler matches
+                          against spec.devices, not this block.
+                        required: [type, count]
+                        properties:
+                          type:
+                            type: string
+                            description: >-
+                              GPU accelerator type (e.g. nvidia-a100,
                               nvidia-h100). Informational - reported on
                               the consuming InferenceCluster's status.
                             minLength: 1
