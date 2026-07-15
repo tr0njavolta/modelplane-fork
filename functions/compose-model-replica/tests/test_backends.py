@@ -15,8 +15,8 @@
 """Tests for compose-model-replica backends.
 
 A backend builds the workload (Deployment or LeaderWorkerSet) and the
-ResourceClaimTemplates for one worker engine; the shared Service and HTTPRoute
-that front a replica's engines are built by base.serving_resources. Manifests are
+ResourceClaimTemplates for one worker engine; the InferencePool, endpoint picker,
+and HTTPRoute that front a replica's engines are built by routing.apply. Manifests are
 asserted with a `Case` table: each case builds an engine's backend and compares
 the composed manifests to a full `want`. Backend selection, serving, and the
 Dynamo stub are dispatch/behaviour tests below the table.
@@ -192,40 +192,6 @@ _CLUSTER = icv1alpha1.InferenceCluster(
 _PC = "cluster-a-pc"
 
 
-def _route(name: str) -> dict:
-    """The replica's HTTPRoute — replica-named, prefix-stripped."""
-    return {
-        "apiVersion": "gateway.networking.k8s.io/v1",
-        "kind": "HTTPRoute",
-        "metadata": {"name": name, "namespace": "default"},
-        "spec": {
-            "parentRefs": [{"name": "inference-gateway", "namespace": "modelplane-system"}],
-            "rules": [
-                {
-                    "matches": [{"path": {"type": "PathPrefix", "value": f"/ml-team/{name}/"}}],
-                    "timeouts": {"request": "0s"},
-                    "filters": [
-                        {
-                            "type": "URLRewrite",
-                            "urlRewrite": {"path": {"type": "ReplacePrefixMatch", "replacePrefixMatch": "/"}},
-                        }
-                    ],
-                    "backendRefs": [{"name": name, "port": 80}],
-                }
-            ],
-        },
-    }
-
-
-def _service(name: str) -> dict:
-    return {
-        "apiVersion": "v1",
-        "kind": "Service",
-        "metadata": {"name": name, "namespace": "default"},
-        "spec": {"selector": {_SERVING: name}, "ports": [{"port": 80, "targetPort": 8000}]},
-    }
-
-
 _NATIVE_WANT = {
     "model-serving-main": {
         "apiVersion": "apps/v1",
@@ -394,14 +360,6 @@ class TestBackendManifests(unittest.TestCase):
                 got = {key: obj.spec.forProvider.manifest for key, obj in out.items()}
                 self.assertEqual(case.want, got, "-want, +got")
 
-    def test_serving_resources(self) -> None:
-        # The shared Service + HTTPRoute front a replica regardless of how many
-        # engines it has, named after the replica.
-        replica = _replica()
-        out = base.serving_resources(replica, _PC)
-        got = {key: obj.spec.forProvider.manifest for key, obj in out.items()}
-        self.assertEqual({"model-service": _service("r"), "model-route": _route("r")}, got)
-
     def test_leader_address_injected_into_gang_engines(self) -> None:
         # Every engine container in a multi-node gang gets
         # MODELPLANE_LEADER_ADDRESS, aliasing LWS_LEADER_ADDRESS, ahead of the
@@ -463,21 +421,6 @@ class TestBackendManifests(unittest.TestCase):
         out_b = native.NativeBackend().build(b, b.spec.engines[0], _PC, base.serving_label(b))
         self.assertEqual(self._names(out_a) & self._names(out_b), set())
 
-    def test_lws_name_differs_from_serving_service_name(self) -> None:
-        # Regression: LWS's controller creates a headless Service named after
-        # the LWS for gang pod DNS - but only if no Service of that name
-        # exists. When the LWS shared the serving Service's name (the replica
-        # name), that headless Service was never created, the followers could
-        # never resolve the leader, and the gang deadlocked. The workload name
-        # must differ from the Service's.
-        engine = _gang_engine(leader_command=_LEADER_CMD, worker_command=_WORKER_CMD)
-        replica = _replica(engines=[engine])
-        workload = llmd.LLMDBackend().build(replica, engine, _PC, base.serving_label(replica))
-        serving = base.serving_resources(replica, _PC)
-        lws_name = workload["model-serving-main"].spec.forProvider.manifest["metadata"]["name"]
-        service_name = serving["model-service"].spec.forProvider.manifest["metadata"]["name"]
-        self.assertNotEqual(lws_name, service_name)
-
     def test_multi_engine_qualifies_workload_names(self) -> None:
         # A replica with two engines names each engine's workload distinctly so
         # they don't collide on the remote cluster.
@@ -508,15 +451,6 @@ class TestBackendManifests(unittest.TestCase):
                         readiness = obj.spec.readiness
                         assert readiness is not None
                         self.assertEqual(readiness.policy, "SuccessfulCreate")
-
-    def test_serving_readiness_policies(self) -> None:
-        replica = _replica()
-        out = base.serving_resources(replica, _PC)
-        service_readiness = out["model-service"].spec.readiness
-        route_readiness = out["model-route"].spec.readiness
-        assert service_readiness is not None and route_readiness is not None
-        self.assertEqual(service_readiness.policy, "SuccessfulCreate")
-        self.assertEqual(route_readiness.policy, "SuccessfulCreate")
 
     def test_multiple_device_requests_single_container_claim(self) -> None:
         # resources.claims is a list-map keyed on name alone, so N device
@@ -776,7 +710,6 @@ class TestDisaggregated(unittest.TestCase):
 
     def test_replaces_unified_service_with_pool_and_epp(self) -> None:
         out = self._apply()
-        self.assertNotIn(base.SERVICE_KEY, out)  # unified Service gone
         self.assertIn("inference-pool", out)
         self.assertIn("epp", out)
         self.assertIn("epp-config", out)
@@ -810,7 +743,7 @@ class TestDisaggregated(unittest.TestCase):
         true default never populates). And it must NOT carry the prepareDataPlugins
         feature gate, which the v0.8.0 EPP image rejects and crashloops on.
         """
-        cfg = self._apply()["epp-config"].spec.forProvider.manifest["data"]["pd-epp-config.yaml"]
+        cfg = self._apply()["epp-config"].spec.forProvider.manifest["data"]["epp-config.yaml"]
         self.assertIn("prefix-based-pd-decider", cfg)
         self.assertIn("nonCachedTokens: 16", cfg)
         self.assertIn("approx-prefix-cache-producer", cfg)
@@ -903,17 +836,66 @@ class TestDisaggregated(unittest.TestCase):
 
 
 class TestUnifiedRouting(unittest.TestCase):
-    """With no serving block (or mode Unified), routing.apply adds a plain
-    Service + HTTPRoute and no InferencePool."""
+    """Unified serving (or no serving block) fronts the pods with an
+    InferencePool + endpoint picker in place of a plain Service, so requests
+    route by prefix cache and load rather than round-robin - one pod or many.
+    Mirrors how fn.py composes engines then calls routing.apply."""
 
-    def test_adds_service_and_route(self) -> None:
-        engine = _standalone_engine(name="main")
+    def _apply(self, copies: int = 1) -> dict[str, k8sobjv1alpha1.Object]:
+        engine = _standalone_engine(copies=copies)
         replica = _replica(engines=[engine])
         composed = native.NativeBackend().build(replica, engine, _PC, base.serving_label(replica))
-        out = routing.apply(composed, replica, _PC)
-        self.assertIn(base.SERVICE_KEY, out)
-        self.assertIn(base.ROUTE_KEY, out)
-        self.assertNotIn("inference-pool", out)
+        return routing.apply(composed, replica, _PC)
+
+    def test_fronts_with_pool_and_epp(self) -> None:
+        out = self._apply()
+        self.assertIn("inference-pool", out)
+        self.assertIn("epp", out)
+        self.assertIn("epp-config", out)
+        pool = out["inference-pool"].spec.forProvider.manifest
+        self.assertEqual(pool["kind"], "InferencePool")
+        self.assertEqual(pool["spec"]["endpointPickerRef"]["name"], "r-epp")
+
+    def test_single_pod_also_pools(self) -> None:
+        """A single serving pod has nothing to pick between, but still gets the
+        pool. Always fronting with one avoids swapping a Service for a pool when a
+        second pod appears - a swap that would drop in-flight requests."""
+        for copies in (1, 2):
+            with self.subTest(copies=copies):
+                out = self._apply(copies=copies)
+                self.assertIn("inference-pool", out)
+                self.assertIn("epp", out)
+
+    def test_pool_selects_pods_by_the_serving_label(self) -> None:
+        """The pool selects the pods by the serving label they already carry, so
+        no relabeling is needed."""
+        pool = self._apply()["inference-pool"].spec.forProvider.manifest
+        self.assertEqual(pool["spec"]["selector"]["matchLabels"], {base.LABEL_SERVING: "r"})
+
+    def test_route_targets_inference_pool(self) -> None:
+        route = self._apply()[base.ROUTE_KEY].spec.forProvider.manifest
+        ref = route["spec"]["rules"][0]["backendRefs"][0]
+        self.assertEqual(ref["kind"], "InferencePool")
+        self.assertEqual(ref["name"], "r-pool")
+
+    def test_epp_config_is_unified_not_disaggregated(self) -> None:
+        """The unified picker scores by prefix cache and queue depth in a single
+        profile, with no prefill/decode split, and still needs the
+        approx-prefix-cache-producer that feeds the prefix-cache scorer."""
+        cfg = self._apply()["epp-config"].spec.forProvider.manifest["data"]["epp-config.yaml"]
+        self.assertIn("prefix-cache-scorer", cfg)
+        self.assertIn("queue-scorer", cfg)
+        self.assertIn("approx-prefix-cache-producer", cfg)
+        self.assertNotIn("prefill", cfg)
+        self.assertNotIn("decider", cfg)
+
+    def test_epp_pod_carries_config_checksum(self) -> None:
+        """The EPP reads its config once at startup, so a config change must roll
+        the pod. The pod template carries a sha256 of the rendered config to drive
+        that rollout."""
+        template = self._apply()["epp"].spec.forProvider.manifest["spec"]["template"]
+        checksum = template["metadata"]["annotations"]["modelplane.ai/epp-config-checksum"]
+        self.assertEqual(len(checksum), 64)
 
 
 class TestKvBlockSize(unittest.TestCase):
@@ -935,7 +917,7 @@ class TestKvBlockSize(unittest.TestCase):
         self.assertEqual(routing._kv_block_size(["--block-size", "auto"]), 16)
 
     def test_rendered_config_uses_block_size(self) -> None:
-        cfg = routing._epp_config_yaml(32)
+        cfg = routing._disaggregated_epp_config_yaml(32)
         self.assertIn("blockSizeTokens: 32", cfg)
         self.assertNotIn("BLOCK_SIZE_TOKENS", cfg)
 
