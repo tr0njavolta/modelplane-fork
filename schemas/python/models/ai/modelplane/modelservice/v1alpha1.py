@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import AwareDatetime, BaseModel, Field
+from pydantic import AwareDatetime, BaseModel, Field, conint
 
 from ....io.k8s.apimachinery.pkg.apis.meta import v1
 
@@ -47,6 +47,10 @@ class Selector(BaseModel):
 
 class Endpoint(BaseModel):
     selector: Selector
+    weight: conint(ge=1, le=1000000) | None = 1
+    """
+    Weight determines the share of traffic sent to this entry's endpoints, relative to the other entries. An entry with weight 2 receives twice the traffic of an entry with weight 1. The weight is spread as evenly as possible across all endpoints the entry matches.
+    """
 
 
 class Spec(BaseModel):
@@ -56,7 +60,7 @@ class Spec(BaseModel):
     """
     endpoints: list[Endpoint] = Field(..., min_length=1)
     """
-    Endpoints to route traffic to. Each entry selects a set of ModelEndpoints by label. Matched endpoints are load-balanced equally.
+    Endpoints to route traffic to. Each entry selects a set of ModelEndpoints by label. Traffic is split across entries in proportion to their weights, and load-balanced as evenly as possible across the endpoints an entry matches.
     """
 
 

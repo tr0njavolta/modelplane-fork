@@ -31,13 +31,25 @@ spec:
                 type: array
                 description: >-
                   Endpoints to route traffic to. Each entry selects a
-                  set of ModelEndpoints by label. Matched endpoints are
-                  load-balanced equally.
+                  set of ModelEndpoints by label. Traffic is split across
+                  entries in proportion to their weights, and load-balanced
+                  as evenly as possible across the endpoints an entry matches.
                 minItems: 1
                 items:
                   type: object
                   required: [selector]
                   properties:
+                    weight:
+                      type: integer
+                      description: >-
+                        Weight determines the share of traffic sent to this
+                        entry's endpoints, relative to the other entries. An
+                        entry with weight 2 receives twice the traffic of an
+                        entry with weight 1. The weight is spread as evenly as
+                        possible across all endpoints the entry matches.
+                      minimum: 1
+                      maximum: 1000000
+                      default: 1
                     selector:
                       type: object
                       required: [matchLabels]

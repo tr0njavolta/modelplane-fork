@@ -60,8 +60,9 @@ spec:
 ## Route across several deployments
 
 Give more than one entry to front several deployments behind the same URL. Each
-entry contributes its matched endpoints, and traffic spreads evenly across every
-one.
+entry contributes its matched endpoints. By default every entry carries equal
+weight, so traffic splits evenly between entries and then spreads as evenly as
+possible across the endpoints each one matches.
 
 ```yaml {nocopy=true}
 spec:
@@ -74,11 +75,29 @@ spec:
         modelplane.ai/deployment: qwen3-8b-v2
 ```
 
-This is the shape an A/B test or a canary rollout would take, but note traffic is
-split **evenly** across the matched endpoints today. Weighting one entry over
-another, to send, say, 5% of traffic to a canary, is tracked in
-[#90](https://github.com/modelplaneai/modelplane/issues/90). Until then the split
-follows endpoint counts, not a ratio you set.
+## Split traffic by weight
+
+Set a `weight` on an entry to give it a fixed share of traffic instead of an
+equal one. Weights are relative: an entry weighted 80 next to one weighted 20
+takes 80% of requests. The weight applies to the entry as a whole and spreads
+as evenly as possible across the endpoints it matches, so scaling a deployment
+up or down doesn't change its share. An entry without a `weight` defaults to 1.
+
+This is the shape of a canary rollout: send most traffic to the stable deployment
+and a sliver to the new one, then shift the ratio as confidence grows.
+
+```yaml {nocopy=true}
+spec:
+  endpoints:
+  - weight: 95
+    selector:
+      matchLabels:
+        modelplane.ai/deployment: qwen3-8b
+  - weight: 5
+    selector:
+      matchLabels:
+        modelplane.ai/deployment: qwen3-8b-v2
+```
 
 The entries don't have to be deployments. One can select a manually created
 [ModelEndpoint]({{< ref "model-endpoint.md" >}}) that points at an external
