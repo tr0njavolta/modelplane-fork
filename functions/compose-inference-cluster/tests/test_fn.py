@@ -1825,8 +1825,308 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
             )
         )
 
+        # --- Case 12: AKS first pass composes the AKSCluster XR only. The
+        # pool's InfiniBand fabric flows through to the AKSCluster pool as the
+        # plain fabric string - Azure has no user-selectable fabric ID. ---
+        inference_class_h100_aks = {
+            "apiVersion": "modelplane.ai/v1alpha1",
+            "kind": "InferenceClass",
+            "metadata": {"name": "gpu-h100-aks"},
+            "spec": {
+                "devices": [
+                    {
+                        "name": "gpu",
+                        "claim": "DRA",
+                        "driver": "gpu.nvidia.com",
+                        "deviceClassName": "gpu.nvidia.com",
+                        "count": 8,
+                        "capacity": {"memory": {"value": "81559Mi"}},
+                    },
+                ],
+                "provisioning": {
+                    "provider": "AKS",
+                    "aks": {
+                        "vmSize": "Standard_ND96isr_H100_v5",
+                        "diskSizeGb": 200,
+                        "accelerator": {"type": "nvidia-h100", "count": 8},
+                    },
+                },
+            },
+        }
+        class_selector_aks = fnv1.ResourceSelector(
+            api_version="modelplane.ai/v1alpha1",
+            kind="InferenceClass",
+            match_name="gpu-h100-aks",
+        )
+
+        req12 = fnv1.RunFunctionRequest(
+            observed=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        v1alpha1.InferenceCluster(
+                            metadata=metav1.ObjectMeta(
+                                name="test-cluster",
+                                namespace="modelplane-system",
+                            ),
+                            spec=v1alpha1.Spec(
+                                cluster=v1alpha1.Cluster(
+                                    source="AKS",
+                                    aks=v1alpha1.Aks(location="westeurope"),
+                                ),
+                                nodePools=[
+                                    v1alpha1.NodePool(
+                                        name="h100pool",
+                                        className="gpu-h100-aks",
+                                        nodeCount=2,
+                                        # AKS GPU pools keep minNodeCount at
+                                        # 1: the AKS autoscaler can't scale a
+                                        # DRA pool up from zero nodes.
+                                        minNodeCount=1,
+                                        maxNodeCount=4,
+                                        fabric=v1alpha1.Fabric(type="InfiniBand"),
+                                    ),
+                                ],
+                            ),
+                        ).model_dump(exclude_none=True, mode="json"),
+                    ),
+                ),
+            ),
+        )
+        req12.required_resources["class-gpu-h100-aks"].items.append(
+            fnv1.Resource(resource=resource.dict_to_struct(inference_class_h100_aks)),
+        )
+
+        want12 = fnv1.RunFunctionResponse(
+            meta=fnv1.ResponseMeta(ttl=durationpb.Duration(seconds=60)),
+            desired=fnv1.State(
+                composite=fnv1.Resource(
+                    resource=resource.dict_to_struct(
+                        {
+                            "status": {
+                                "providerConfigRef": {
+                                    "name": "test-cluster-cluster-kubeconfig-d0f89",
+                                },
+                                "namespace": "modelplane-system",
+                                "gpuPools": [
+                                    {
+                                        "name": "h100pool",
+                                        "nodes": 4,
+                                        "devices": [
+                                            {
+                                                "name": "gpu",
+                                                "claim": "DRA",
+                                                "driver": "gpu.nvidia.com",
+                                                "deviceClassName": "gpu.nvidia.com",
+                                                "count": 8,
+                                                "capacity": {"memory": {"value": "81559Mi"}},
+                                            },
+                                        ],
+                                    },
+                                ],
+                            },
+                        },
+                    ),
+                ),
+                resources={
+                    "aks-cluster": fnv1.Resource(
+                        resource=resource.dict_to_struct(
+                            {
+                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                                "kind": "AKSCluster",
+                                "metadata": {
+                                    "name": "test-cluster",
+                                    "namespace": "modelplane-system",
+                                },
+                                "spec": {
+                                    "location": "westeurope",
+                                    "kubernetesVersion": "1.34",
+                                    "nodePools": [
+                                        {
+                                            "name": "h100pool",
+                                            "role": "GPU",
+                                            "vmSize": "Standard_ND96isr_H100_v5",
+                                            "diskSizeGb": 200,
+                                            "nodeCount": 2,
+                                            "minNodeCount": 1,
+                                            "maxNodeCount": 4,
+                                            "gpu": {
+                                                "acceleratorType": "nvidia-h100",
+                                            },
+                                            "fabric": "InfiniBand",
+                                        },
+                                    ],
+                                },
+                            },
+                        ),
+                    ),
+                },
+            ),
+            conditions=[
+                fnv1.Condition(
+                    type="ClusterReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="Provisioning",
+                ),
+                fnv1.Condition(
+                    type="BackendReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="WaitingForCluster",
+                ),
+            ],
+            context=structpb.Struct(),
+        )
+        want12.requirements.resources["class-gpu-h100-aks"].CopyFrom(class_selector_aks)
+
+        # --- Case 13: AKS cluster ready - kubeconfig observed on the
+        # AKSCluster status. The kubeconfig embeds a client certificate, so
+        # the ClusterProviderConfig carries no identity (unlike GKE/Nebius).
+        # The function composes the ServingStack backend and the Usage that
+        # blocks AKSCluster deletion until the ServingStack is gone, and
+        # relays the AKSCluster's status.cache up to status.cache. ---
+        req13 = fnv1.RunFunctionRequest()
+        req13.CopyFrom(req12)
+        req13.observed.resources["aks-cluster"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                        "kind": "AKSCluster",
+                        "metadata": {"name": "test-cluster", "namespace": "modelplane-system"},
+                        "spec": {
+                            "location": "westeurope",
+                            "nodePools": [
+                                {
+                                    "name": "h100pool",
+                                    "role": "GPU",
+                                    "vmSize": "Standard_ND96isr_H100_v5",
+                                    "nodeCount": 2,
+                                },
+                            ],
+                        },
+                        "status": {
+                            "conditions": [
+                                {
+                                    "type": "Ready",
+                                    "status": "True",
+                                    "reason": "Available",
+                                    "lastTransitionTime": "2024-01-01T00:00:00Z",
+                                },
+                            ],
+                            "secrets": [
+                                {
+                                    "type": "Kubeconfig",
+                                    "name": "test-cluster-kubeconfig-abcde",
+                                    "key": "kubeconfig",
+                                },
+                            ],
+                            # The backing AKSCluster reports its effective RWX
+                            # StorageClass; the InferenceCluster relays it up.
+                            "cache": {"storageClassName": "modelplane-rwx-fs"},
+                        },
+                    }
+                ),
+            ),
+        )
+
+        want13 = fnv1.RunFunctionResponse()
+        want13.CopyFrom(want12)
+        want13.desired.resources["aks-cluster"].ready = fnv1.READY_TRUE
+        status13 = want13.desired.composite.resource.fields["status"].struct_value
+        status13.fields["cache"].struct_value.fields["storageClassName"].string_value = "modelplane-rwx-fs"
+        want13.desired.resources["cluster-provider-config-kubernetes"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "kubernetes.m.crossplane.io/v1alpha1",
+                        "kind": "ClusterProviderConfig",
+                        "metadata": {"name": "test-cluster-cluster-kubeconfig-d0f89"},
+                        "spec": {
+                            "credentials": {
+                                "source": "Secret",
+                                "secretRef": {
+                                    "namespace": "modelplane-system",
+                                    "name": "test-cluster-kubeconfig-abcde",
+                                    "key": "kubeconfig",
+                                },
+                            },
+                        },
+                    }
+                ),
+                ready=fnv1.READY_TRUE,
+            ),
+        )
+        want13.desired.resources["serving-stack"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                        "kind": "ServingStack",
+                        "metadata": {
+                            "name": "test-cluster-serving-stack-fd00b",
+                            "namespace": "modelplane-system",
+                        },
+                        "spec": {
+                            "secrets": [
+                                {
+                                    "type": "Kubeconfig",
+                                    "name": "test-cluster-kubeconfig-abcde",
+                                    "key": "kubeconfig",
+                                },
+                            ],
+                        },
+                    }
+                ),
+            ),
+        )
+        want13.desired.resources["usage-aks-by-backend"].CopyFrom(
+            fnv1.Resource(
+                resource=resource.dict_to_struct(
+                    {
+                        "apiVersion": "protection.crossplane.io/v1beta1",
+                        "kind": "Usage",
+                        "metadata": {"namespace": "modelplane-system"},
+                        "spec": {
+                            "of": {
+                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                                "kind": "AKSCluster",
+                                "resourceSelector": {"matchControllerRef": True},
+                            },
+                            "by": {
+                                "apiVersion": "infrastructure.modelplane.ai/v1alpha1",
+                                "kind": "ServingStack",
+                                "resourceSelector": {"matchControllerRef": True},
+                            },
+                            "replayDeletion": True,
+                        },
+                    }
+                ),
+                ready=fnv1.READY_TRUE,
+            ),
+        )
+        del want13.conditions[:]
+        want13.conditions.extend(
+            [
+                fnv1.Condition(
+                    type="ClusterReady",
+                    status=fnv1.STATUS_CONDITION_TRUE,
+                    reason="ClusterRunning",
+                ),
+                fnv1.Condition(
+                    type="BackendReady",
+                    status=fnv1.STATUS_CONDITION_FALSE,
+                    reason="Installing",
+                ),
+            ]
+        )
+        want13.results.append(
+            fnv1.Result(
+                severity=fnv1.SEVERITY_NORMAL,
+                message="AKS cluster ready, composing backend",
+            )
+        )
+
         # Every compose path emits the ModelReplica guard requirement.
-        for want in (want1, want2, want3, want4, want5, want6, want7, want8, want9, want10, want11):
+        for want in (want1, want2, want3, want4, want5, want6, want7, want8, want9, want10, want11, want12, want13):
             want.requirements.resources["model-replicas"].CopyFrom(_replicas_selector("test-cluster"))
 
         # The guard cases reuse case 1's request and response.
@@ -1862,6 +2162,12 @@ class TestFunctionRunner(unittest.IsolatedAsyncioTestCase):
                 name="Nebius cluster ready composes CPC with Nebius identity, ServingStack, and Usage",
                 req=req11,
                 want=want11,
+            ),
+            Case(name="AKS cluster first pass composes AKSCluster XR only", req=req12, want=want12),
+            Case(
+                name="AKS cluster ready composes CPC without identity, ServingStack, and Usage",
+                req=req13,
+                want=want13,
             ),
             *guard_cases,
         ]

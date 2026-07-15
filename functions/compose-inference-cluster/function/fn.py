@@ -35,6 +35,7 @@ from crossplane.function.proto.v1 import run_function_pb2 as fnv1
 from crossplane.function.proto.v1 import run_function_pb2_grpc as grpcv1
 from models.ai.modelplane.inferenceclass import v1alpha1 as iclv1alpha1
 from models.ai.modelplane.inferencecluster import v1alpha1
+from models.ai.modelplane.infrastructure.akscluster import v1alpha1 as aksv1alpha1
 from models.ai.modelplane.infrastructure.ekscluster import v1alpha1 as eksv1alpha1
 from models.ai.modelplane.infrastructure.gkecluster import v1alpha1 as gkev1alpha1
 from models.ai.modelplane.infrastructure.nebiuscluster import v1alpha1 as nebiusv1alpha1
@@ -49,6 +50,7 @@ from models.io.k8s.apimachinery.pkg.apis.meta import v1 as metav1
 # Cluster source discriminator values from the XRD enum.
 CLUSTER_SOURCE_GKE = "GKE"
 CLUSTER_SOURCE_EKS = "EKS"
+CLUSTER_SOURCE_AKS = "AKS"
 CLUSTER_SOURCE_NEBIUS = "Nebius"
 CLUSTER_SOURCE_EXISTING = "Existing"
 
@@ -154,6 +156,8 @@ class Composer:
             self.compose_gke(cluster.gke)
         elif source == CLUSTER_SOURCE_EKS:
             self.compose_eks(cluster.eks)
+        elif source == CLUSTER_SOURCE_AKS:
+            self.compose_aks(cluster.aks)
         elif source == CLUSTER_SOURCE_NEBIUS:
             self.compose_nebius(cluster.nebius)
         elif source == CLUSTER_SOURCE_EXISTING:
@@ -324,6 +328,42 @@ class Composer:
 
         self.write_status(self.gpu_pools())
         self.derive_conditions(cluster_ready=eks_ready)
+
+    def compose_aks(self, aks: v1alpha1.Aks | None) -> None:
+        """Compose an InferenceCluster backed by a Modelplane-provisioned
+        AKS cluster. Composes the AKSCluster XR, waits for it to be ready,
+        then wires its kubeconfig into the backend.
+
+        The kubeconfig from the cluster's connection secret embeds a client
+        certificate for a cluster-admin local account, so the kubeconfig
+        alone is enough to reach the cluster.
+        """
+        if not aks:
+            response.warning(self.rsp, "AKS configuration is required when source is AKS")
+            return
+
+        self.compose_aks_cluster(aks)
+
+        aks_ready = resource.get_condition(self.req.observed.resources.get("aks-cluster"), "Ready").status == "True"
+        kubeconfig = self.observed_aks_secret(_SECRET_TYPE_KUBECONFIG)
+        backend_exists = BACKEND_RESOURCE_KEY in self.req.observed.resources
+
+        if aks_ready and kubeconfig:
+            self.compose_cluster_provider_config(kubeconfig.name, kubeconfig.key)
+
+        backend_secrets = self.resolve_aks_backend_secrets(aks_ready=aks_ready, backend_exists=backend_exists)
+        if backend_secrets or backend_exists:
+            if backend_secrets:
+                self.compose_serving_stack(backend_secrets)
+            self.compose_aks_usage()
+
+        if aks_ready:
+            self.rsp.desired.resources["aks-cluster"].ready = fnv1.READY_TRUE
+            if not backend_exists:
+                response.normal(self.rsp, "AKS cluster ready, composing backend")
+
+        self.write_status(self.gpu_pools())
+        self.derive_conditions(cluster_ready=aks_ready)
 
     def compose_nebius(self, nebius: v1alpha1.Nebius | None) -> None:
         """Compose an InferenceCluster backed by a Modelplane-provisioned
@@ -647,6 +687,71 @@ class Composer:
             ),
         )
 
+    def compose_aks_cluster(self, aks: v1alpha1.Aks) -> None:
+        """Compose an AKSCluster XR.
+
+        Combines the cluster-level config (location) with GPU node pools
+        derived from the user's node pools + referenced classes. The
+        system pool is injected by compose-aks-cluster.
+        """
+        aks_node_pools: list[aksv1alpha1.NodePool] = []
+
+        for pool in self.xr.spec.nodePools or []:
+            cls = self.classes.get(pool.className)
+            if not cls or not cls.spec.provisioning or not cls.spec.provisioning.aks:
+                msg = f"InferenceClass {pool.className} has no AKS provisioning block"
+                response.set_conditions(
+                    self.rsp,
+                    resource.Condition(
+                        typ=CONDITION_TYPE_CLUSTER_READY,
+                        status="False",
+                        reason=CONDITION_REASON_INVALID_NODE_POOL,
+                        message=msg,
+                    ),
+                )
+                response.warning(self.rsp, msg)
+                return
+            prov = cls.spec.provisioning.aks
+            node_pool = aksv1alpha1.NodePool(
+                name=pool.name,
+                role="GPU",
+                vmSize=prov.vmSize,
+                diskSizeGb=prov.diskSizeGb,
+                nodeCount=pool.nodeCount,
+                minNodeCount=pool.minNodeCount,
+                maxNodeCount=pool.maxNodeCount,
+                gpu=aksv1alpha1.Gpu(
+                    acceleratorType=prov.accelerator.type,
+                ),
+            )
+            # Only set zones when the pool names some: the AKSCluster XRD
+            # requires a non-empty list, and many GPU VM sizes aren't zonal.
+            if pool.zones:
+                node_pool.zones = [aksv1alpha1.Zone(z) for z in pool.zones]
+            # Only set fabric when the pool opts into one, so an on-demand
+            # pool's AKSCluster spec stays free of fabric: None. Azure has no
+            # user-selectable fabric identifier - a pool's VM Scale Set
+            # placement group lands its nodes on one physical fabric - so any
+            # infiniband block is ignored here.
+            if pool.fabric and pool.fabric.type == "InfiniBand":
+                node_pool.fabric = pool.fabric.type
+            aks_node_pools.append(node_pool)
+
+        resource.update(
+            self.rsp.desired.resources["aks-cluster"],
+            aksv1alpha1.AKSCluster(
+                metadata=metav1.ObjectMeta(
+                    name=_name(self.xr.metadata),
+                    namespace=_NAMESPACE_SYSTEM,
+                ),
+                spec=aksv1alpha1.Spec(
+                    location=aks.location,
+                    kubernetesVersion=aks.kubernetesVersion,
+                    nodePools=aks_node_pools,
+                ),
+            ),
+        )
+
     def compose_nebius_cluster(self, nebius: v1alpha1.Nebius) -> None:
         """Compose a NebiusCluster XR.
 
@@ -856,6 +961,65 @@ class Composer:
             return None
         return next((s for s in eks_secrets if s.type == secret_type), None)
 
+    def compose_aks_usage(self) -> None:
+        """Block AKSCluster deletion until the backend is deleted."""
+        resource.update(
+            self.rsp.desired.resources["usage-aks-by-backend"],
+            usagev1beta1.Usage(
+                metadata=metav1.ObjectMeta(namespace=_NAMESPACE_SYSTEM),
+                spec=usagev1beta1.Spec(
+                    of=usagev1beta1.Of(
+                        apiVersion="infrastructure.modelplane.ai/v1alpha1",
+                        kind="AKSCluster",
+                        resourceSelector=usagev1beta1.ResourceSelectorModel(matchControllerRef=True),
+                    ),
+                    by=usagev1beta1.By(
+                        apiVersion="infrastructure.modelplane.ai/v1alpha1",
+                        kind="ServingStack",
+                        resourceSelector=usagev1beta1.ResourceSelector(matchControllerRef=True),
+                    ),
+                    replayDeletion=True,
+                ),
+            ),
+        )
+        self.rsp.desired.resources["usage-aks-by-backend"].ready = fnv1.READY_TRUE
+
+    def resolve_aks_backend_secrets(self, *, aks_ready: bool, backend_exists: bool) -> list[ssv1alpha1.Secret] | None:
+        """Resolve secrets for the backend from AKSCluster status. Falls
+        back to the observed backend's spec.secrets if AKSCluster secrets
+        aren't available but the backend already exists."""
+        aks_secrets = self.observed_aks_secrets()
+
+        if aks_ready and aks_secrets:
+            return [ssv1alpha1.Secret(type=s.type, name=s.name, key=s.key) for s in aks_secrets]
+
+        if backend_exists:
+            observed = self.req.observed.resources.get(BACKEND_RESOURCE_KEY)
+            if observed:
+                d = resource.struct_to_dict(observed.resource)
+                observed_secrets = d.get("spec", {}).get("secrets", [])
+                if observed_secrets:
+                    return [ssv1alpha1.Secret(type=s["type"], name=s["name"], key=s["key"]) for s in observed_secrets]
+
+        return None
+
+    def observed_aks_secrets(self) -> list[aksv1alpha1.Secret] | None:
+        """Read the AKSCluster's status.secrets from observed state."""
+        aks_observed = self.req.observed.resources.get("aks-cluster")
+        if not aks_observed:
+            return None
+        observed_aks = aksv1alpha1.AKSCluster.model_validate(resource.struct_to_dict(aks_observed.resource))
+        if not observed_aks.status:
+            return None
+        return observed_aks.status.secrets
+
+    def observed_aks_secret(self, secret_type: str) -> aksv1alpha1.Secret | None:
+        """Read a specific secret from the observed AKSCluster status."""
+        aks_secrets = self.observed_aks_secrets()
+        if not aks_secrets:
+            return None
+        return next((s for s in aks_secrets if s.type == secret_type), None)
+
     def compose_gke_usage(self) -> None:
         """Block GKECluster deletion until the backend is deleted."""
         resource.update(
@@ -966,6 +1130,8 @@ class Composer:
             return self._observed_cluster_cache_class("gke-cluster", gkev1alpha1.GKECluster)
         if cluster.source == CLUSTER_SOURCE_EKS:
             return self._observed_cluster_cache_class("eks-cluster", eksv1alpha1.EKSCluster)
+        if cluster.source == CLUSTER_SOURCE_AKS:
+            return self._observed_cluster_cache_class("aks-cluster", aksv1alpha1.AKSCluster)
         if cluster.source == CLUSTER_SOURCE_NEBIUS:
             return self._observed_cluster_cache_class("nebius-cluster", nebiusv1alpha1.NebiusCluster)
         if cluster.source == CLUSTER_SOURCE_EXISTING and cluster.existing and cluster.existing.cache:
@@ -975,7 +1141,10 @@ class Composer:
     def _observed_cluster_cache_class(
         self,
         key: str,
-        model: type[gkev1alpha1.GKECluster] | type[eksv1alpha1.EKSCluster] | type[nebiusv1alpha1.NebiusCluster],
+        model: type[gkev1alpha1.GKECluster]
+        | type[eksv1alpha1.EKSCluster]
+        | type[aksv1alpha1.AKSCluster]
+        | type[nebiusv1alpha1.NebiusCluster],
     ) -> str | None:
         """Read status.cache.storageClassName from an observed cluster XR."""
         observed = self.req.observed.resources.get(key)

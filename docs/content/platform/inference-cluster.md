@@ -11,8 +11,8 @@ serving. Platform teams create these to provide GPU capacity.
 
 Each cluster has:
 
-- A **cluster source**: `GKE`, `EKS`, or `Nebius` (Modelplane provisions the
-  full cluster) or `Existing` (bring a cluster you manage yourself). See
+- A **cluster source**: `GKE`, `EKS`, `AKS`, or `Nebius` (Modelplane provisions
+  the full cluster) or `Existing` (bring a cluster you manage yourself). See
   [Supported Providers]({{< ref "platform/providers.md" >}}) for the clouds and
   neoclouds Modelplane runs on.
 - One or more **node pools**, each referencing an `InferenceClass` for its
@@ -39,7 +39,7 @@ existing cluster the platform team must meet the requirements.
 
 The `cluster.source` discriminator picks one of two models:
 
-- **Provisioned (`GKE`, `EKS`, `Nebius`).** Modelplane creates the cluster and its GPU node
+- **Provisioned (`GKE`, `EKS`, `AKS`, `Nebius`).** Modelplane creates the cluster and its GPU node
   pools from each pool's `InferenceClass`, labels the pool's nodes so the
   scheduler's placement is enforced, and provisions the storage class for model
   weights. It also injects a non-GPU **system pool** with opinionated defaults to
@@ -61,6 +61,9 @@ The `cluster.source` discriminator picks one of two models:
 {{< tab "EKS" >}}
 {{< manifests path="concepts/inference-cluster-eks.yaml" apply="false" >}}
 {{< /tab >}}
+{{< tab "AKS" >}}
+{{< manifests path="concepts/inference-cluster-aks.yaml" apply="false" >}}
+{{< /tab >}}
 {{< tab "Nebius" >}}
 {{< manifests path="concepts/inference-cluster-nebius.yaml" apply="false" >}}
 {{< /tab >}}
@@ -76,9 +79,9 @@ A [ModelCache]({{< ref "/models/model-cache.md" >}}) stages model weights on a
 depends on the source:
 
 <!-- vale Google.Acronyms = NO -->
-- **`GKE`** (Filestore Enterprise), **`EKS`** (EFS), and **`Nebius`** (shared
-  filesystem): auto-provisioned. Those classes are fixed; nothing for the
-  admin to do.
+- **`GKE`** (Filestore Enterprise), **`EKS`** (EFS), **`AKS`** (Azure Files),
+  and **`Nebius`** (shared filesystem): auto-provisioned. Those classes are
+  fixed; nothing for the admin to do.
 - **`Existing`**: bring your own. Create an RWX StorageClass on the cluster, with
   any backend that supports automatic PVC provisioning (WekaIO, NetApp Trident,
   `FSx` for NetApp, and similar), and name it in

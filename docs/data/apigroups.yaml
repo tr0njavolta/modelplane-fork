@@ -32,8 +32,10 @@ groups:
       directly; they're created when you deploy models and register clusters.
     kinds:
       - ModelReplica
+      - AKSCluster
       - EKSCluster
       - GKECluster
+      - NebiusCluster
       - ServingStack
 
 # Link each kind back to its concept doc in the Documentation tab (by content

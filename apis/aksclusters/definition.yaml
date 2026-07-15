@@ -1,0 +1,247 @@
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: aksclusters.infrastructure.modelplane.ai
+spec:
+  group: infrastructure.modelplane.ai
+  names:
+    categories:
+    - crossplane
+    - modelplane
+    kind: AKSCluster
+    plural: aksclusters
+    shortNames:
+    - aks
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    referenceable: true
+    additionalPrinterColumns:
+    - name: LOCATION
+      type: string
+      jsonPath: .spec.location
+    schema:
+      openAPIV3Schema:
+        description: >-
+          An AKSCluster provisions an Azure Kubernetes Service cluster with a
+          dedicated resource group, virtual network, and node pools for GPU
+          inference and system workloads. It outputs a Secret containing the
+          cluster kubeconfig that consumers use to target the cluster. The
+          kubeconfig embeds a client certificate, so consumers need no
+          separate cloud identity.
+        properties:
+          spec:
+            description: AKSClusterSpec defines the desired state of AKSCluster.
+            required:
+            - location
+            - nodePools
+            properties:
+              location:
+                type: string
+                description: >-
+                  Azure region for the cluster (e.g. westeurope, eastus2).
+                minLength: 1
+                maxLength: 32
+              kubernetesVersion:
+                type: string
+                default: "1.34"
+                description: >-
+                  AKS cluster Kubernetes version. Must be a version AKS
+                  currently supports. Defaults to a version where Dynamic
+                  Resource Allocation (how GPUs bind to pods) is generally
+                  available.
+                minLength: 1
+                maxLength: 16
+              networking:
+                type: object
+                description: >-
+                  Virtual network configuration. Azure subnets span all
+                  Availability Zones in a region, so one subnet serves every
+                  node pool. Override when peering multiple clusters to avoid
+                  CIDR collisions. CIDRs must not overlap the cluster's
+                  service CIDR (10.96.0.0/16) or the overlay pod CIDR
+                  (10.244.0.0/16).
+                properties:
+                  vnetCidr:
+                    type: string
+                    default: "10.0.0.0/16"
+                    description: Address space for the virtual network.
+                    maxLength: 18
+                  subnetCidr:
+                    type: string
+                    default: "10.0.0.0/20"
+                    description: >-
+                      CIDR of the node subnet, carved from vnetCidr.
+                    maxLength: 18
+              nodePools:
+                type: array
+                description: >-
+                  Node pools for the cluster. At least one System pool is
+                  required for controllers and infrastructure workloads.
+                minItems: 1
+                maxItems: 8
+                x-kubernetes-list-type: map
+                x-kubernetes-list-map-keys:
+                - name
+                items:
+                  type: object
+                  required:
+                  - name
+                  - role
+                  - vmSize
+                  x-kubernetes-validations:
+                  - rule: "self.role != 'GPU' || has(self.gpu)"
+                    message: gpu is required when role is GPU.
+                  properties:
+                    name:
+                      type: string
+                      description: >-
+                        Unique name for this node pool, used as the AKS agent
+                        pool name. AKS restricts Linux pool names to at most
+                        12 lowercase alphanumeric characters starting with a
+                        letter.
+                      pattern: "^[a-z][a-z0-9]{0,11}$"
+                      minLength: 1
+                      maxLength: 12
+                    role:
+                      type: string
+                      description: >-
+                        Determines what workloads this pool runs. System pools
+                        host controllers, gateways, and infrastructure. GPU
+                        pools host inference workloads and get the NVIDIA
+                        driver installed by AKS.
+                      enum:
+                      - System
+                      - GPU
+                    vmSize:
+                      type: string
+                      description: >-
+                        Azure VM size (e.g. Standard_D4s_v5,
+                        Standard_NC24ads_A100_v4, Standard_ND96isr_H100_v5).
+                      minLength: 1
+                      maxLength: 63
+                    diskSizeGb:
+                      type: integer
+                      default: 100
+                      description: OS disk size in GB.
+                      minimum: 10
+                      maximum: 65536
+                    nodeCount:
+                      type: integer
+                      default: 1
+                      description: Initial number of nodes.
+                      minimum: 0
+                      maximum: 1000
+                    minNodeCount:
+                      type: integer
+                      default: 0
+                      description: >-
+                        Minimum number of nodes for autoscaling. Set it to 1
+                        or higher for GPU pools: the AKS cluster autoscaler
+                        currently cannot scale a pool whose GPUs bind through
+                        DRA up from zero nodes, so a pod scheduled to an
+                        empty pool waits forever.
+                      minimum: 0
+                      maximum: 1000
+                    maxNodeCount:
+                      type: integer
+                      default: 8
+                      description: Maximum number of nodes for autoscaling.
+                      minimum: 0
+                      maximum: 1000
+                    zones:
+                      type: array
+                      description: >-
+                        Availability Zones to restrict this pool to (e.g.
+                        ["1"]). Optional because many GPU VM sizes are not
+                        zonal.
+                      minItems: 1
+                      maxItems: 3
+                      items:
+                        type: string
+                        minLength: 1
+                        maxLength: 8
+                    gpu:
+                      type: object
+                      description: >-
+                        GPU configuration. Required when role is GPU.
+                      required:
+                      - acceleratorType
+                      properties:
+                        acceleratorType:
+                          type: string
+                          description: >-
+                            GPU accelerator type (e.g. nvidia-a100,
+                            nvidia-h100). Used to label GPU nodes; the actual
+                            GPU and count are determined by the VM size.
+                          minLength: 1
+                          maxLength: 63
+                    fabric:
+                      type: string
+                      default: None
+                      description: >-
+                        High-performance node-to-node fabric for multi-node
+                        engines. None uses standard VNet networking (TCP).
+                        InfiniBand relies on the pool's VM Scale Set placement
+                        group landing all nodes on one physical InfiniBand
+                        fabric. It requires the AKSInfinibandSupport feature
+                        flag on the subscription and an InfiniBand-capable VM
+                        size (e.g. Standard_ND96isr_H100_v5), and needs the
+                        NVIDIA network operator on the cluster to expose RDMA
+                        devices to pods, which Modelplane installs when any
+                        pool sets InfiniBand.
+                      enum:
+                      - None
+                      - InfiniBand
+            type: object
+          status:
+            description: AKSClusterStatus defines the observed state of AKSCluster.
+            properties:
+              secrets:
+                type: array
+                description: >-
+                  Secrets produced by this cluster. Consumers use these to
+                  authenticate to the cluster. All secrets are in the same
+                  namespace as this AKSCluster.
+                items:
+                  type: object
+                  required:
+                  - type
+                  - name
+                  - key
+                  properties:
+                    type:
+                      type: string
+                      description: >-
+                        The type of credential this secret contains.
+                        Kubeconfig contains a kubeconfig file with the
+                        cluster endpoint, CA certificate, and a client
+                        certificate for a cluster-admin local account.
+                      enum:
+                      - Kubeconfig
+                    name:
+                      type: string
+                      description: Name of the Secret.
+                      maxLength: 253
+                    key:
+                      type: string
+                      description: >-
+                        Key within the Secret that holds the credential data.
+                      maxLength: 253
+              cache:
+                type: object
+                description: >-
+                  Observed ModelCache RWX storage state.
+                properties:
+                  storageClassName:
+                    type: string
+                    description: >-
+                      Name of the Modelplane-managed ReadWriteMany StorageClass
+                      composed on this cluster for ModelCache PVCs. ModelCache
+                      reads this to target the cache PVC.
+                    maxLength: 253
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
