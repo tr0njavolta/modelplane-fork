@@ -11,13 +11,13 @@ across two regions.
 ```mermaid
 graph LR
     subgraph fleet ["Fleet"]
-        IC1["us-east\nL4"]
-        IC2["us-west\nlarger GPU"]
+        IC1["region-a\nL4"]
+        IC2["region-b\nlarger GPU"]
     end
 
     subgraph ml ["ML team"]
         MD1["ModelDeployment\nqwen-demo"]
-        MD2["ModelDeployment\nqwen-west\nclusterSelector: us-west"]
+        MD2["ModelDeployment\nqwen-west\nclusterSelector: region-b"]
         MS["ModelService qwen\n/ml-team/qwen/v1/..."]
     end
 
