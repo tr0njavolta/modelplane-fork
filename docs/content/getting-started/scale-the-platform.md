@@ -13,7 +13,7 @@ Provisioning two more clusters takes about 10 to 15 minutes.
 
 {{< tabs >}}
 {{< tab "EKS" >}}
-Register two more clusters with a bigger hardware class: `L40S` (`48 Gi`) in
+Register two more clusters with a bigger hardware class: `L40S` (`48 GB`) in
 `us-west` and `eu-central`:
 
 {{< manifests "getting-started/eks/platform-scale.yaml" >}}
@@ -25,7 +25,7 @@ up]({{< ref "getting-started/clean-up.md" >}})).
 {{< /hint >}}
 {{< /tab >}}
 {{< tab "GKE" >}}
-Register two more clusters with a bigger hardware class: `A100` (`40 Gi`) in
+Register two more clusters with a bigger hardware class: `A100` (`40 GB`) in
 `us-west` and `us-east`. Apply the manifest, setting each cluster's `project` to
 your GCP project:
 
