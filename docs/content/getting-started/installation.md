@@ -48,7 +48,7 @@ helm install crossplane crossplane-stable/crossplane \
 ```
 
 Apply the bootstrap resources. They grant Crossplane the permissions it needs to
-manage your cluster, and activate the managed resources Modelplane composes:
+manage your cluster:
 
 ```shell
 kubectl apply -f {{< manifest-url "getting-started/prerequisites.yaml" >}}
