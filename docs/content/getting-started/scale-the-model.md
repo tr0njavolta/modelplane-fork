@@ -30,7 +30,7 @@ graph LR
 ## Add a second deployment
 
 The new deployment targets a larger-GPU cluster you added in the last step. On
-EKS, GKE, and AKS it pins to a second region with a `clusterSelector`; on Nebius,
+EKS, GKE, and AKS it pins to a second region with a `clusterSelector`. On Nebius,
 which runs one region per project, the capacity selector alone routes it to the
 `H100` tier:
 
