@@ -19,7 +19,7 @@ illustration.
 
 **Make sure your container engine is configured to allow higher resource allocations.**
 
-Update your Docker memory limit to **10 GB**. For more information, review
+Update your Docker memory limit to **8 GB**. For more information, review
 the [Docker documentation](https://docs.docker.com/desktop/settings-and-maintenance/settings/#advanced).
 
 {{< /hint >}}
@@ -43,6 +43,7 @@ helm repo update crossplane-stable
 helm install crossplane crossplane-stable/crossplane \
   --namespace crossplane-system --create-namespace \
   --set "args={--enable-dependency-version-upgrades}" \
+  --set-json 'provider.defaultActivations=[]' \
   --wait
 ```
 
