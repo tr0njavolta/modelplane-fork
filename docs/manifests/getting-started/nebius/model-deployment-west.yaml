@@ -1,0 +1,33 @@
+# A second ModelDeployment fronted alongside qwen-demo from one endpoint.
+# Nebius runs one region per project, so instead of pinning to another region
+# this deployment selects the larger GPU (H100) you added in "Scale the fleet".
+# The VRAM selector alone routes it to the H100 cluster - no clusterSelector.
+apiVersion: modelplane.ai/v1alpha1
+kind: ModelDeployment
+metadata:
+  name: qwen-west
+  namespace: ml-team
+spec:
+  replicas: 1
+  template:
+    spec:
+      engines:
+      - name: qwen
+        members:
+        - role: Standalone
+          nodeSelector:
+            devices:
+            - name: gpu
+              count: 1
+              selectors:
+          # H100 (81559Mi) qualifies; L40S (46068Mi) does not.
+              - cel: |
+                  device.capacity["gpu.nvidia.com"].memory.compareTo(quantity("60Gi")) >= 0
+          template:
+            spec:
+              containers:
+              - name: engine
+                image: vllm/vllm-openai:v0.23.0
+                args:
+                - --model=Qwen/Qwen2.5-0.5B-Instruct
+                - --dtype=half
