@@ -27,6 +27,12 @@ The device selector matches against the capacity declared in the
 {{< tab "GKE" >}}
 {{< manifests "getting-started/gke/model-deployment.yaml" >}}
 {{< /tab >}}
+{{< tab "AKS" >}}
+{{< manifests "getting-started/aks/model-deployment.yaml" >}}
+{{< /tab >}}
+{{< tab "Nebius" >}}
+{{< manifests "getting-started/nebius/model-deployment.yaml" >}}
+{{< /tab >}}
 {{< /tabs >}}
 
 Wait until `REPLICAS` shows `1`:

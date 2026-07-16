@@ -4,10 +4,10 @@ weight: 40
 description: Grow from one cluster to a multi-region fleet.
 ---
 
-You have one L4 cluster with a running model. In this guide, you'll add two
-larger-GPU clusters in different regions to grow the fleet available to the ML team.
+You have one small-GPU cluster with a running model. In this guide, you'll grow
+the fleet with larger-GPU capacity so the ML team has more to schedule against.
 
-Provisioning two more clusters takes about 10 to 15 minutes.
+Provisioning takes about 10 to 15 minutes.
 
 ## Register more clusters
 
@@ -45,9 +45,32 @@ is a few dollars for this tour. Clean up when you're done (see [Clean
 up]({{< ref "getting-started/clean-up.md" >}})).
 {{< /hint >}}
 {{< /tab >}}
+{{< tab "AKS" >}}
+Register two more clusters with a bigger hardware class: `A100` (`80 GB`) in
+`eastus` and `southcentralus`:
+
+{{< manifests "getting-started/aks/platform-scale.yaml" >}}
+
+{{< hint "note" >}}
+`Standard_NC24ads_A100_v4` runs ~$3.70/hr on demand. Two of them plus the `A10`
+from earlier is a few dollars for this tour. Clean up when you're done (see [Clean
+up]({{< ref "getting-started/clean-up.md" >}})).
+{{< /hint >}}
+{{< /tab >}}
+{{< tab "Nebius" >}}
+Nebius projects are bound to one region, so you grow the fleet by GPU tier rather
+than geography. Register a bigger `H100` (`80 GB`) cluster in the same region:
+
+{{< manifests "getting-started/nebius/platform-scale.yaml" >}}
+
+{{< hint "note" >}}
+The `H100` cluster costs more per hour than the `L40S` from earlier. Clean up
+when you're done (see [Clean up]({{< ref "getting-started/clean-up.md" >}})).
+{{< /hint >}}
+{{< /tab >}}
 {{< /tabs >}}
 
-Modelplane provisions both clusters in parallel:
+Modelplane provisions the new clusters in parallel:
 
 ```bash
 kubectl wait --for=condition=Ready ic --all --timeout=20m
@@ -62,4 +85,4 @@ its deployment changes in a way that no longer fits where it runs.
 
 ## Next step
 
-The fleet now spans three clusters across three regions. The ML team is next. [Scale the model]({{< ref "getting-started/scale-the-model.md" >}}) to serve it from two regions behind a single endpoint.
+The fleet has grown with larger-GPU capacity. The ML team is next. [Scale the model]({{< ref "getting-started/scale-the-model.md" >}}) to serve it across the fleet behind a single endpoint.

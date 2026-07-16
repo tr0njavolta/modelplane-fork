@@ -1,16 +1,18 @@
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceClass
 metadata:
-  name: a100-1x
+  name: a10-1x
 spec:
-  description: "AKS Standard_NC24ads_A100_v4, 1x NVIDIA A100 80GB"
+  description: "AKS Standard_NV36ads_A10_v5, 1x NVIDIA A10 24GB"
   provisioning:
     provider: AKS
     aks:
-      vmSize: Standard_NC24ads_A100_v4
-      diskSizeGb: 200
+      # verify: Azure has no L4 SKU; NVadsA10v5 is the small-GPU option (>=20Gi).
+      # Confirm it runs the DRA / GPU-operator path in your subscription.
+      vmSize: Standard_NV36ads_A10_v5
+      diskSizeGb: 100
       accelerator:
-        type: nvidia-a100
+        type: nvidia-a10
         count: 1
   devices:
   - name: gpu
@@ -20,9 +22,9 @@ spec:
     count: 1
     attributes:
       architecture: { string: Ampere }
-      cudaComputeCapability: { version: "8.0.0" }
+      cudaComputeCapability: { version: "8.6.0" }
     capacity:
-      memory: { value: "81920Mi" }
+      memory: { value: "24564Mi" }   # verify: A10 reported VRAM (~24GB)
 ---
 apiVersion: modelplane.ai/v1alpha1
 kind: InferenceCluster
@@ -36,8 +38,8 @@ spec:
     aks:
       location: westeurope
   nodePools:
-  - name: gpua100
-    className: a100-1x
+  - name: gpua10
+    className: a10-1x
     nodeCount: 1
     minNodeCount: 1
     maxNodeCount: 1

@@ -11,13 +11,13 @@ across two regions.
 ```mermaid
 graph LR
     subgraph fleet ["Fleet"]
-        IC1["region-a\nL4"]
-        IC2["region-b\nlarger GPU"]
+        IC1["cluster-a\nsmall GPU"]
+        IC2["cluster-b\nlarger GPU"]
     end
 
     subgraph ml ["ML team"]
         MD1["ModelDeployment\nqwen-demo"]
-        MD2["ModelDeployment\nqwen-west\nclusterSelector: region-b"]
+        MD2["ModelDeployment\nqwen-west\ntargets cluster-b"]
         MS["ModelService qwen\n/ml-team/qwen/v1/..."]
     end
 
@@ -27,10 +27,12 @@ graph LR
     MD2 --> MS
 ```
 
-## Deploy to a second region
+## Add a second deployment
 
-The new deployment uses a `clusterSelector` to pin its replica to the `us-west`
-cluster you added in the last step, and selects the larger GPU there:
+The new deployment targets a larger-GPU cluster you added in the last step. On
+EKS, GKE, and AKS it pins to a second region with a `clusterSelector`. On Nebius,
+which runs one region per project, the capacity selector alone routes it to the
+`H100` tier:
 
 {{< tabs >}}
 {{< tab "EKS" >}}
@@ -38,6 +40,12 @@ cluster you added in the last step, and selects the larger GPU there:
 {{< /tab >}}
 {{< tab "GKE" >}}
 {{< manifests "getting-started/gke/model-deployment-west.yaml" >}}
+{{< /tab >}}
+{{< tab "AKS" >}}
+{{< manifests "getting-started/aks/model-deployment-west.yaml" >}}
+{{< /tab >}}
+{{< tab "Nebius" >}}
+{{< manifests "getting-started/nebius/model-deployment-scale.yaml" >}}
 {{< /tab >}}
 {{< /tabs >}}
 

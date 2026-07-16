@@ -22,6 +22,14 @@ against this capacity without knowing which cluster it runs on.
 - A GCP account with permissions to create GKE clusters, VPCs, and IAM roles
 - A GCP service account JSON key
 {{< /tab >}}
+{{< tab "AKS" >}}
+- An Azure account with permissions to create AKS clusters and managed identities
+- An Azure service principal JSON with `clientId`, `clientSecret`, `subscriptionId`, and `tenantId`
+{{< /tab >}}
+{{< tab "Nebius" >}}
+- A Nebius account with permissions to create clusters
+- A Nebius service account JSON key and your project ID
+{{< /tab >}}
 {{< /tabs >}}
 
 ## Set up the InferenceGateway
@@ -99,6 +107,46 @@ curl -fsSL {{< manifest-url "getting-started/clusterproviderconfig-gke.yaml" >}}
 ```
 {{< /editCode >}}
 {{< /tab >}}
+
+{{< tab "AKS" >}}
+Create a Kubernetes secret from your service principal JSON:
+
+{{< editCode >}}
+```bash
+kubectl create secret generic azure-credentials \
+  --from-file=credentials.json=$@</path/to/azure-sp>$@.json \
+  -n crossplane-system
+```
+{{< /editCode >}}
+
+Apply the `ClusterProviderConfig` referencing your secret:
+
+{{< manifests "getting-started/clusterproviderconfig-azure.yaml" >}}
+{{< /tab >}}
+
+{{< tab "Nebius" >}}
+Create a Kubernetes secret from your service account JSON:
+
+{{< editCode >}}
+```bash
+kubectl create secret generic nebius-credentials \
+  --from-file=credentials.json=$@</path/to/nebius-sa>$@.json \
+  -n crossplane-system
+```
+{{< /editCode >}}
+
+Apply the `ClusterProviderConfig`, setting `projectID` to your Nebius project:
+
+{{< manifests path="getting-started/clusterproviderconfig-nebius.yaml" apply="false" >}}
+
+{{< editCode >}}
+```bash
+curl -fsSL {{< manifest-url "getting-started/clusterproviderconfig-nebius.yaml" >}} \
+  | sed 's/project-e00example/$@<your-nebius-project>$@/' \
+  | kubectl apply -f -
+```
+{{< /editCode >}}
+{{< /tab >}}
 {{</tabs>}}
 
 ## Publish hardware and register the cluster
@@ -136,13 +184,33 @@ Modelplane provisions the cluster. This takes about 15 minutes:
 kubectl wait --for=condition=Ready ic/starter --timeout=20m
 ```
 {{< /tab >}}
+
+{{< tab "AKS" >}}
+{{< manifests "getting-started/aks/platform.yaml" >}}
+
+Modelplane provisions the cluster. This takes about 15 minutes:
+
+```bash
+kubectl wait --for=condition=Ready ic/aks-westeurope --timeout=20m
+```
+{{< /tab >}}
+
+{{< tab "Nebius" >}}
+{{< manifests "getting-started/nebius/platform.yaml" >}}
+
+Modelplane provisions the cluster. This takes about 15 minutes:
+
+```bash
+kubectl wait --for=condition=Ready ic/nebius-eu-north --timeout=20m
+```
+{{< /tab >}}
 {{< /tabs >}}
 
 {{< hint "note" >}}
 Modelplane is reconciling the infrastructure against the source of truth, the
 manifest you just applied.
 
-While you wait, Modelplane is creating the EKS or GKE cluster and its GPU node
+While you wait, Modelplane is creating the cloud cluster and its GPU node
 pool, then installing the inference stack with LeaderWorkerSet for multi-node
 serving, llm-d for inference-aware routing, Envoy Gateway for traffic
 management, and the storage class for model weights. This is the same reconciliation loop Crossplane uses to configure other 

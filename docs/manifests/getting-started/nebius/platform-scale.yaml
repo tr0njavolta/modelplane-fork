@@ -1,0 +1,48 @@
+apiVersion: modelplane.ai/v1alpha1
+kind: InferenceClass
+metadata:
+  name: h100-1x
+spec:
+  description: "Nebius gpu-h100-sxm, 1x NVIDIA H100 80GB"
+  provisioning:
+    provider: Nebius
+    nebius:
+      platform: gpu-h100-sxm
+      preset: 1gpu-16vcpu-200gb
+      diskSizeGb: 100
+      driversPreset: cuda13.0
+      accelerator:
+        type: nvidia-h100
+        count: 1
+  devices:
+  - name: gpu
+    claim: DRA
+    driver: gpu.nvidia.com
+    deviceClassName: gpu.nvidia.com
+    count: 1
+    attributes:
+      architecture: { string: Hopper }
+      cudaComputeCapability: { version: "9.0.0" }
+    capacity:
+      memory: { value: "81559Mi" }   # H100's real reported VRAM (not the nominal 80GB)
+---
+# Nebius projects are bound to one region, so this cluster runs in the same
+# region as the base cluster. The fleet scales by GPU tier (L40S -> H100), not
+# geography. To add a region, create another project + ClusterProviderConfig.
+apiVersion: modelplane.ai/v1alpha1
+kind: InferenceCluster
+metadata:
+  name: nebius-eu-north-h100
+  labels:
+    modelplane.ai/region: eu-north
+    modelplane.ai/tier: h100
+spec:
+  cluster:
+    source: Nebius
+    nebius: {}
+  nodePools:
+  - name: gpu-h100
+    className: h100-1x
+    nodeCount: 1
+    minNodeCount: 1
+    maxNodeCount: 1
