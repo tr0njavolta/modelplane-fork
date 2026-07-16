@@ -45,7 +45,7 @@ which runs one region per project, the capacity selector alone routes it to the
 {{< manifests "getting-started/aks/model-deployment-west.yaml" >}}
 {{< /tab >}}
 {{< tab "Nebius" >}}
-{{< manifests "getting-started/nebius/model-deployment-west.yaml" >}}
+{{< manifests "getting-started/nebius/model-deployment-scale.yaml" >}}
 {{< /tab >}}
 {{< /tabs >}}
 
