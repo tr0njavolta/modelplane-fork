@@ -20,9 +20,9 @@ declare a model and get back a unified, OpenAI-compatible endpoint. Neither team
 has to know the details of the other's job.
 
 > [!WARNING]
-> Modelplane is an early v0.1 release under active development. Its APIs and
-> behavior can change between releases. We are building it in the open,
-> collaborating with the AI inference community on integrations and capabilities.
+> Modelplane is an early release under active development. Its APIs and behavior
+> can change between releases. We are building it in the open, collaborating
+> with the AI inference community on integrations and capabilities.
 
 ## Deploy a model
 
