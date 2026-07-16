@@ -8,7 +8,7 @@ spec:
     provider: AKS
     aks:
       vmSize: Standard_NC24ads_A100_v4
-      diskSizeGb: 200
+      diskSizeGb: 100
       accelerator:
         type: nvidia-a100
         count: 1

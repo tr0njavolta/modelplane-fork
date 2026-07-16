@@ -9,7 +9,7 @@ spec:
     nebius:
       platform: gpu-h100-sxm
       preset: 1gpu-16vcpu-200gb
-      diskSizeGb: 200
+      diskSizeGb: 100
       driversPreset: cuda13.0
       accelerator:
         type: nvidia-h100
